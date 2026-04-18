@@ -24,7 +24,11 @@
       "Bash(node -e \"console.log\\(require\\('./node_modules/next/package.json'\\).version\\)\")",
       "Bash(git commit -m 'Upgrade Next.js to 16.2.4 to fix security vulnerability *)",
       "Bash(git commit -m 'Add auth confirm route and reset password page *)",
-      "Bash(git commit -m 'Fix password recovery flow — detect session from hash on reset page *)"
+      "Bash(git commit -m 'Fix password recovery flow — detect session from hash on reset page *)",
+      "Bash(git commit -m 'Add project status tracker *)",
+      "Bash(git commit -m 'Fix CSS import order — @import must precede Tailwind directives *)",
+      "Bash(git commit -m 'Fix font loading — use next/font instead of CSS @import for Turbopack *)",
+      "Bash(git commit -m 'Fix async cookies\\(\\) for Next.js 16 — await createClient\\(\\) across all server files *)"
     ]
   }
 }

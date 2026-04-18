@@ -3,7 +3,7 @@ import { formatDateTime } from '@/lib/utils'
 import type { AIActionLog } from '@/types'
 
 async function getStats() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const today = new Date().toISOString().split('T')[0]
 
   const [contacts, members, callsToday, emailsToday, recentActivity] = await Promise.all([

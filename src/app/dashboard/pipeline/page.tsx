@@ -12,7 +12,7 @@ const STAGES = [
 ] as const
 
 export default async function PipelinePage() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data } = await supabase
     .from('opportunities')

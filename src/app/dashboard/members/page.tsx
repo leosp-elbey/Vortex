@@ -3,7 +3,7 @@ import { formatDate, formatDateTime } from '@/lib/utils'
 import type { Contact } from '@/types'
 
 export default async function MembersPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data } = await supabase
     .from('contacts')

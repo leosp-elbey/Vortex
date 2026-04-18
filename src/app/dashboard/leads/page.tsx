@@ -3,7 +3,7 @@ import { formatDateTime, getStatusColor } from '@/lib/utils'
 import type { Contact } from '@/types'
 
 export default async function LeadsPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: contacts } = await supabase
     .from('contacts')

@@ -3,7 +3,7 @@ import { formatDate, getStatusColor } from '@/lib/utils'
 import type { ContentCalendarItem } from '@/types'
 
 export default async function ContentPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data } = await supabase
     .from('content_calendar')

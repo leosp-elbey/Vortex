@@ -3,7 +3,7 @@ import { formatDateTime } from '@/lib/utils'
 import type { AIActionLog } from '@/types'
 
 export default async function CallsPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data } = await supabase
     .from('ai_actions_log')
