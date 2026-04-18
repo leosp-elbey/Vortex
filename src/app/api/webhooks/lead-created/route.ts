@@ -23,27 +23,28 @@ export async function POST(request: NextRequest) {
       if (contactError.code === '23505') {
         return NextResponse.json({ error: 'Email already registered' }, { status: 409 })
       }
-      throw contactError
+      return NextResponse.json({ error: contactError.message || 'Database error saving contact' }, { status: 500 })
     }
 
-    await supabase.from('opportunities').insert({
+    const { error: oppError } = await supabase.from('opportunities').insert({
       contact_id: contact.id,
       name: `${first_name} — Main Pipeline`,
       pipeline: 'main',
       stage: 'new-lead',
     })
 
+    if (oppError) {
+      console.error('Opportunity insert error:', oppError.message)
+    }
+
     try {
       await triggerCall(phone, first_name, email)
-
       await supabase
         .from('contacts')
-        .update({
-          tags: ['bland-call-sent'],
-          last_ai_action: 'Intro call triggered',
-        })
+        .update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' })
         .eq('id', contact.id)
     } catch (callError) {
+      console.error('Bland call error:', callError)
       await supabase
         .from('contacts')
         .update({ tags: ['call-failed'] })
@@ -52,7 +53,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, contactId: contact.id })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Internal error'
+    const message = error instanceof Error ? error.message : JSON.stringify(error)
+    console.error('lead-created error:', message)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
