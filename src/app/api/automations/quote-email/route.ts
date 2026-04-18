@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateCompletion } from '@/lib/openai'
-import { sendEmail } from '@/lib/mailgun'
+import { sendEmail } from '@/lib/resend'
 import type { QuoteFormData } from '@/types'
 
 export async function POST(request: NextRequest) {
@@ -69,7 +69,7 @@ Include estimated savings based on their budget range. End with a CTA button lin
     await supabase.from('ai_actions_log').insert({
       contact_id: contact?.id,
       action_type: 'quote-email',
-      service: 'mailgun',
+      service: 'resend',
       status: 'success',
     })
 

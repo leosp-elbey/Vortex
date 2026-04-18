@@ -5,7 +5,7 @@ CREATE TABLE ai_actions_log (
     'voice-call', 'quote-email', 'onboarding-email',
     'content-generation', 'admin-notification'
   )),
-  service TEXT NOT NULL CHECK (service IN ('bland', 'openai', 'mailgun')),
+  service TEXT NOT NULL CHECK (service IN ('bland', 'openai', 'resend')),
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed')),
   request_payload JSONB,
   response_payload JSONB,

@@ -14,7 +14,10 @@
       "Bash(git branch *)",
       "Bash(git push *)",
       "Bash(npm uninstall *)",
-      "Bash(git commit -m 'Remove Stripe integration — payment handled manually for now *)"
+      "Bash(git commit -m 'Remove Stripe integration — payment handled manually for now *)",
+      "Bash(git commit -m 'Fix TypeScript error in Supabase server client cookiesToSet type *)",
+      "Bash(npm install *)",
+      "Bash(git commit -m 'Replace Mailgun with Resend for email delivery *)"
     ]
   }
 }
