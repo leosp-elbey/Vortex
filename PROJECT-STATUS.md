@@ -1,49 +1,50 @@
 # VortexTrips — Project Status
 
+Last updated: April 18, 2026
+
 ## Infrastructure
 | Service | Status | Details |
 |---|---|---|
 | GitHub | ✅ Live | https://github.com/leosp-elbey/Vortex |
-| Vercel | ✅ Live | https://www.vortextrips.com |
+| Vercel | ✅ Deployed | https://www.vortextrips.com |
 | Supabase | ✅ Connected | Project: mufpiphjddpacbxlbpqi |
-| Bland.ai | ✅ Key added | API key in .env.local + Vercel |
-| OpenAI | ✅ Key added | API key in .env.local + Vercel |
-| Resend | ✅ Key added | Replaced Mailgun |
+| Bland.ai | ✅ Key set | In Vercel + .env.local |
+| OpenAI | ✅ Key set | In Vercel + .env.local |
+| Resend | ✅ Key set | Replaced Mailgun |
 | Stripe | ❌ Removed | Manual enrollment for now — add back later |
 
 ## Build Phases
 
 ### ✅ Phase 1 — Foundation
-- Next.js 16 project with TypeScript + Tailwind CSS
+- Next.js 16 + TypeScript + Tailwind CSS scaffolded
 - .gitignore, .env.example, .env.local configured
-- Supabase project connected
-- All 5 SQL migrations run (contacts, opportunities, ai_actions_log, content_calendar, admin_users)
-- RLS policies applied including public insert on contacts
+- Supabase connected, all 5 SQL migrations run
+- RLS policies applied + public insert policy on contacts
 
 ### ✅ Phase 2 — API Wrappers
-- `src/lib/supabase/` — client, server, admin clients
+- `src/lib/supabase/` — client, server (async), admin clients
 - `src/lib/bland.ts` — voice call trigger
 - `src/lib/openai.ts` — GPT-4o completions
-- `src/lib/resend.ts` — email delivery (replaced Mailgun)
+- `src/lib/resend.ts` — email delivery
 - `src/lib/utils.ts` — shared helpers
 
 ### ✅ Phase 3 — Automations
-- `POST /api/webhooks/lead-created` — saves contact, creates opportunity, triggers Bland.ai call
-- `POST /api/webhooks/bland` — call completion callback, updates pipeline stage
-- `POST /api/automations/quote-email` — OpenAI quote generation + Resend delivery
-- `GET /api/cron/weekly-content` — Monday 8AM content generation (Vercel cron)
+- `POST /api/webhooks/lead-created` — saves contact, creates opportunity, triggers Bland.ai
+- `POST /api/webhooks/bland` — call completion callback
+- `POST /api/automations/quote-email` — AI quote + Resend email
+- `GET /api/cron/weekly-content` — Monday 8AM content generation
 - `GET/PATCH /api/contacts` — contact CRUD
 - `GET/PATCH /api/pipeline` — pipeline stage management
 
 ### ✅ Phase 4 — Public Pages
-- `/` — Landing page with lead capture form (fixed typing bug)
+- `/` — Landing page with lead capture form (typing bug fixed)
 - `/thank-you` — Post-signup confirmation
 - `/quote` — Trip quote request form
-- `/join` — Membership page (manual enrollment, Stripe removed)
+- `/join` — Membership page (manual enrollment)
 
-### ✅ Phase 5 — Admin Dashboard
-- `/login` — Supabase Auth login
-- `/reset-password` — Password reset page
+### ✅ Phase 5 — Admin Dashboard (built, login pending)
+- `/login` — Supabase Auth login page
+- `/reset-password` — Password reset page (handles hash token)
 - `/auth/confirm` — Auth callback route
 - `/dashboard` — KPI overview + activity feed
 - `/dashboard/leads` — Contacts table
@@ -54,43 +55,54 @@
 - `/dashboard/settings` — API key status + config
 
 ### ✅ Phase 6 — Deployment
-- Pushed to GitHub (private repo)
-- Deployed to Vercel
-- Custom domain: vortextrips.com connected
-- All env vars added to Vercel dashboard
+- Vercel deployed + custom domain vortextrips.com connected
+- All env vars added to Vercel
+- Install command set to `npm install --legacy-peer-deps`
+- Next.js upgraded to 16.2.4 (security fix)
 
 ---
 
-## ❌ Pending / In Progress
+## ❌ Blocker — Admin Login Not Working
 
-### 🔴 Blocker — Admin Login
-- Password reset email flow works but redirect goes to wrong Supabase project URL
-- Two Supabase project URLs detected (mufpiphjddpacbxlbpqi vs omtkaljjkmlknudiabfw) — needs investigation
-- SQL password update attempted but login still failing
-- **Next step:** Confirm which Supabase project Vercel is pointing to, try SQL password reset again
+### What's been tried
+- Created admin user in Supabase Auth ✅
+- Ran INSERT into admin_users table ✅
+- SQL password update attempted
+- Password recovery email flow set up
+- Supabase email template updated to redirect to `/reset-password`
 
-### 🟡 Needs Testing
+### Likely cause
+The login hits `/dashboard` which calls `createClient()` server-side and checks `admin_users` table via RLS. Something in the auth session or RLS check is failing silently.
+
+### Next session — try these in order
+1. Open browser devtools → Network tab → try logging in → find the failing request and check the exact error response
+2. In Supabase → Authentication → Users → confirm `leoelbey@gmail.com` shows **Confirmed**
+3. In Supabase SQL Editor run:
+   ```sql
+   SELECT * FROM admin_users;
+   ```
+   Confirm the row exists with correct UUID matching auth.users
+4. Check Vercel → Functions logs for any server error on `/dashboard`
+5. Try logging in at `/login` and check what URL it redirects to and what error shows
+
+---
+
+## 🟡 Needs Testing (after login fixed)
 - [ ] Lead form submission → contact saved in DB
 - [ ] Bland.ai voice call triggered on new lead
 - [ ] Quote email flow (OpenAI + Resend)
-- [ ] Dashboard loads real data after login
+- [ ] Dashboard loads real data
 - [ ] Weekly content generation cron
 
-### 🟡 Resend Setup
+## 🟡 Resend Setup
 - [ ] Verify vortextrips.com domain in Resend dashboard
-- [ ] Add DNS records in Cloudflare for Resend
+- [ ] Add DNS records in Cloudflare for Resend domain verification
 - [ ] Test email delivery end-to-end
 
-### 🟡 Supabase Auth Config
-- [ ] Set Site URL to https://www.vortextrips.com in Supabase Auth settings
-- [ ] Add https://www.vortextrips.com/reset-password to Redirect URLs
-- [ ] Reset password email template updated (done) — confirm it works
-
-### ⚪ Not Started
+## ⚪ Not Started
 - [ ] Phase 7 — React Native mobile app (Expo)
-- [ ] Stripe re-integration when ready
-- [ ] Supabase Realtime on dashboard activity feed
-- [ ] Push notifications (mobile)
+- [ ] Stripe re-integration
+- [ ] Supabase Realtime on dashboard
 - [ ] End-to-end flow test: lead → call → email → member
 
 ---
@@ -103,10 +115,11 @@
 | `src/lib/bland.ts` | Bland.ai voice call |
 | `src/lib/resend.ts` | Email sending |
 | `src/lib/openai.ts` | AI content generation |
+| `src/lib/supabase/server.ts` | Async server Supabase client |
 | `supabase/migrations/` | All 5 DB migration files |
 | `.env.local` | Local API keys (never committed) |
 
-## Env Vars Checklist (Vercel)
+## Vercel Env Vars
 - [x] NEXT_PUBLIC_SUPABASE_URL
 - [x] NEXT_PUBLIC_SUPABASE_ANON_KEY
 - [x] SUPABASE_SERVICE_ROLE_KEY
