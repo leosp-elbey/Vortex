@@ -22,7 +22,8 @@
       "Bash(git commit -m 'Improve error messages in lead-created webhook *)",
       "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
       "Bash(node -e \"console.log\\(require\\('./node_modules/next/package.json'\\).version\\)\")",
-      "Bash(git commit -m 'Upgrade Next.js to 16.2.4 to fix security vulnerability *)"
+      "Bash(git commit -m 'Upgrade Next.js to 16.2.4 to fix security vulnerability *)",
+      "Bash(git commit -m 'Add auth confirm route and reset password page *)"
     ]
   }
 }
