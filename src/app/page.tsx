@@ -3,11 +3,64 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+interface LeadFormProps {
+  id: string
+  form: { first_name: string; email: string; phone: string }
+  loading: boolean
+  error: string
+  onChange: (field: string, value: string) => void
+  onSubmit: (e: React.FormEvent) => void
+}
+
+function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProps) {
+  return (
+    <form onSubmit={onSubmit} id={id} className="space-y-4">
+      <input
+        type="text"
+        placeholder="First Name"
+        required
+        value={form.first_name}
+        onChange={e => onChange('first_name', e.target.value)}
+        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+      />
+      <input
+        type="email"
+        placeholder="Email Address"
+        required
+        value={form.email}
+        onChange={e => onChange('email', e.target.value)}
+        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+      />
+      <input
+        type="tel"
+        placeholder="Phone Number"
+        required
+        value={form.phone}
+        onChange={e => onChange('phone', e.target.value)}
+        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+      />
+      {error && <p className="text-red-500 text-sm">{error}</p>}
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 px-6 rounded-lg text-lg transition-all duration-200 disabled:opacity-60 shadow-lg hover:shadow-xl"
+      >
+        {loading ? 'Getting you in...' : 'Unlock Your Travel Savings →'}
+      </button>
+      <p className="text-xs text-center text-gray-500">No credit card required. Free to join. Cancel anytime.</p>
+    </form>
+  )
+}
+
 export default function LandingPage() {
   const router = useRouter()
   const [form, setForm] = useState({ first_name: '', email: '', phone: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const handleChange = (field: string, value: string) => {
+    setForm(f => ({ ...f, [field]: value }))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,44 +86,6 @@ export default function LandingPage() {
       setLoading(false)
     }
   }
-
-  const LeadForm = ({ id }: { id: string }) => (
-    <form onSubmit={handleSubmit} id={id} className="space-y-4">
-      <input
-        type="text"
-        placeholder="First Name"
-        required
-        value={form.first_name}
-        onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      <input
-        type="email"
-        placeholder="Email Address"
-        required
-        value={form.email}
-        onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      <input
-        type="tel"
-        placeholder="Phone Number"
-        required
-        value={form.phone}
-        onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 px-6 rounded-lg text-lg transition-all duration-200 disabled:opacity-60 shadow-lg hover:shadow-xl"
-      >
-        {loading ? 'Getting you in...' : 'Unlock Your Travel Savings →'}
-      </button>
-      <p className="text-xs text-center text-gray-500">No credit card required. Free to join. Cancel anytime.</p>
-    </form>
-  )
 
   return (
     <div className="min-h-screen">
@@ -110,7 +125,14 @@ export default function LandingPage() {
           <div className="bg-white rounded-2xl p-8 shadow-2xl">
             <h2 className="text-2xl font-bold text-[#1A1A2E] mb-2">Get Your Free Savings Quote</h2>
             <p className="text-gray-500 mb-6 text-sm">Our team will call you within 60 seconds with your personalized savings breakdown.</p>
-            <LeadForm id="hero-form" />
+            <LeadForm
+              id="hero-form"
+              form={form}
+              loading={loading}
+              error={error}
+              onChange={handleChange}
+              onSubmit={handleSubmit}
+            />
           </div>
         </div>
       </section>
@@ -219,7 +241,14 @@ export default function LandingPage() {
             Join free today. Our team calls you within 60 seconds with your personalized savings breakdown.
           </p>
           <div className="bg-white rounded-2xl p-8">
-            <LeadForm id="cta-form" />
+            <LeadForm
+              id="cta-form"
+              form={form}
+              loading={loading}
+              error={error}
+              onChange={handleChange}
+              onSubmit={handleSubmit}
+            />
           </div>
         </div>
       </section>
