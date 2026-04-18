@@ -17,7 +17,12 @@
       "Bash(git commit -m 'Remove Stripe integration — payment handled manually for now *)",
       "Bash(git commit -m 'Fix TypeScript error in Supabase server client cookiesToSet type *)",
       "Bash(npm install *)",
-      "Bash(git commit -m 'Replace Mailgun with Resend for email delivery *)"
+      "Bash(git commit -m 'Replace Mailgun with Resend for email delivery *)",
+      "Bash(git commit -m 'Fix input focus bug — move LeadForm outside parent component *)",
+      "Bash(git commit -m 'Improve error messages in lead-created webhook *)",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/next/package.json'\\).version\\)\")",
+      "Bash(git commit -m 'Upgrade Next.js to 16.2.4 to fix security vulnerability *)"
     ]
   }
 }
