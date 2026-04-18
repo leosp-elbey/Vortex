@@ -4,30 +4,11 @@ import { useState } from 'react'
 
 export default function JoinPage() {
   const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [submitted, setSubmitted] = useState(false)
 
-  const handleCheckout = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setError('')
-
-    try {
-      const res = await fetch('/api/automations/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) throw new Error(data.error || 'Checkout failed')
-      if (data.url) window.location.href = data.url
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
-    } finally {
-      setLoading(false)
-    }
+    setSubmitted(true)
   }
 
   return (
@@ -75,22 +56,30 @@ export default function JoinPage() {
               ))}
             </div>
 
-            <form onSubmit={handleCheckout} className="px-6 pb-6">
-              <input
-                type="email" required placeholder="Your email address"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 mb-3 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-              />
-              {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
-              <button
-                type="submit" disabled={loading}
-                className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 rounded-lg text-lg transition-all disabled:opacity-60"
-              >
-                {loading ? 'Redirecting...' : 'Join Now — Start Saving Today →'}
-              </button>
-              <p className="text-xs text-center text-gray-400 mt-2">Secure checkout via Stripe. 30-day money-back guarantee.</p>
-            </form>
+            <div className="px-6 pb-6">
+              {submitted ? (
+                <div className="bg-[#16C79A]/10 border border-[#16C79A] rounded-lg p-4 text-center">
+                  <p className="text-[#16C79A] font-bold">You&apos;re on the list!</p>
+                  <p className="text-sm text-gray-600 mt-1">We&apos;ll reach out to complete your membership setup.</p>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit}>
+                  <input
+                    type="email" required placeholder="Your email address"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 mb-3 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 rounded-lg text-lg transition-all"
+                  >
+                    Reserve My Spot →
+                  </button>
+                  <p className="text-xs text-center text-gray-400 mt-2">Our team will contact you to complete enrollment.</p>
+                </form>
+              )}
+            </div>
           </div>
 
           {/* Value calculator */}
