@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      await triggerCall(phone, first_name, email)
+      await triggerCall(phone, first_name, email, undefined, contact.id)
       await supabase
         .from('contacts')
         .update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' })

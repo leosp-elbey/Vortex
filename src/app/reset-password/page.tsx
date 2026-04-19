@@ -76,6 +76,7 @@ export default function ResetPasswordPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">New Password</label>
               <input
                 type="password" required minLength={8}
+                autoComplete="new-password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Min. 8 characters"
@@ -86,6 +87,7 @@ export default function ResetPasswordPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password</label>
               <input
                 type="password" required
+                autoComplete="new-password"
                 value={confirm}
                 onChange={e => setConfirm(e.target.value)}
                 placeholder="Repeat password"

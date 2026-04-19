@@ -1,6 +1,6 @@
 # VortexTrips — Project Status
 
-Last updated: April 18, 2026
+Last updated: April 19, 2026
 
 ## Infrastructure
 | Service | Status | Details |
@@ -8,10 +8,12 @@ Last updated: April 18, 2026
 | GitHub | ✅ Live | https://github.com/leosp-elbey/Vortex |
 | Vercel | ✅ Deployed | https://www.vortextrips.com |
 | Supabase | ✅ Connected | Project: mufpiphjddpacbxlbpqi |
-| Bland.ai | ✅ Key set | In Vercel + .env.local |
-| OpenAI | ✅ Key set | In Vercel + .env.local |
-| Resend | ✅ Key set | Replaced Mailgun |
+| Bland.ai | ✅ Working | Calls firing, voicemail message added |
+| OpenAI | ✅ Working | Quote emails generating correctly |
+| Resend | ✅ Verified | Domain vortextrips.com verified via Cloudflare auto |
 | Stripe | ❌ Removed | Manual enrollment for now — add back later |
+
+---
 
 ## Build Phases
 
@@ -23,7 +25,7 @@ Last updated: April 18, 2026
 
 ### ✅ Phase 2 — API Wrappers
 - `src/lib/supabase/` — client, server (async), admin clients
-- `src/lib/bland.ts` — voice call trigger
+- `src/lib/bland.ts` — voice call trigger + voicemail message
 - `src/lib/openai.ts` — GPT-4o completions
 - `src/lib/resend.ts` — email delivery
 - `src/lib/utils.ts` — shared helpers
@@ -31,79 +33,82 @@ Last updated: April 18, 2026
 ### ✅ Phase 3 — Automations
 - `POST /api/webhooks/lead-created` — saves contact, creates opportunity, triggers Bland.ai
 - `POST /api/webhooks/bland` — call completion callback
-- `POST /api/automations/quote-email` — AI quote + Resend email
+- `POST /api/automations/quote-email` — AI quote + Resend email (markdown stripping fixed)
 - `GET /api/cron/weekly-content` — Monday 8AM content generation
 - `GET/PATCH /api/contacts` — contact CRUD
 - `GET/PATCH /api/pipeline` — pipeline stage management
 
 ### ✅ Phase 4 — Public Pages
-- `/` — Landing page with lead capture form (typing bug fixed)
+- `/` — Landing page with lead capture form (autofill added)
 - `/thank-you` — Post-signup confirmation
-- `/quote` — Trip quote request form
-- `/join` — Membership page (manual enrollment)
+- `/quote` — Trip quote request form (autofill added)
+- `/join` — Membership page (manual enrollment, autofill added)
 
-### ✅ Phase 5 — Admin Dashboard (built, login pending)
-- `/login` — Supabase Auth login page
-- `/reset-password` — Password reset page (handles hash token)
-- `/auth/confirm` — Auth callback route
+### ✅ Phase 5 — Admin Dashboard
+- `/login` — Supabase Auth login page (autofill added)
+- `/reset-password` — Password reset page (token flow fixed)
+- `/auth/confirm` — Auth callback route (token_hash flow)
 - `/dashboard` — KPI overview + activity feed
 - `/dashboard/leads` — Contacts table
 - `/dashboard/members` — Active members table
 - `/dashboard/pipeline` — Kanban board
 - `/dashboard/calls` — Bland.ai call logs
 - `/dashboard/content` — AI content calendar
-- `/dashboard/settings` — API key status + config
+- `/dashboard/settings` — Updated to Resend config (needs push)
 
 ### ✅ Phase 6 — Deployment
-- Vercel deployed + custom domain vortextrips.com connected
-- All env vars added to Vercel
-- Install command set to `npm install --legacy-peer-deps`
-- Next.js upgraded to 16.2.4 (security fix)
+- Vercel deployed + custom domain vortextrips.com
+- All env vars in Vercel
+- Install command: `npm install --legacy-peer-deps`
+- Next.js 16.2.4
 
 ---
 
-## ❌ Blocker — Admin Login Not Working
-
-### What's been tried
-- Created admin user in Supabase Auth ✅
-- Ran INSERT into admin_users table ✅
-- SQL password update attempted
-- Password recovery email flow set up
-- Supabase email template updated to redirect to `/reset-password`
-
-### Likely cause
-The login hits `/dashboard` which calls `createClient()` server-side and checks `admin_users` table via RLS. Something in the auth session or RLS check is failing silently.
-
-### Next session — try these in order
-1. Open browser devtools → Network tab → try logging in → find the failing request and check the exact error response
-2. In Supabase → Authentication → Users → confirm `leoelbey@gmail.com` shows **Confirmed**
-3. In Supabase SQL Editor run:
-   ```sql
-   SELECT * FROM admin_users;
-   ```
-   Confirm the row exists with correct UUID matching auth.users
-4. Check Vercel → Functions logs for any server error on `/dashboard`
-5. Try logging in at `/login` and check what URL it redirects to and what error shows
+## ✅ Fixes Applied This Session
+- Supabase correct project identified (mufpiphjddpacbxlbpqi)
+- RLS circular dependency on admin_users fixed
+- Admin user inserted with correct UUID
+- Password reset email template updated to use token_hash flow → `/reset-password`
+- Supabase Site URL + Redirect URLs set to vortextrips.com
+- Resend domain verified (auto via Cloudflare)
+- Quote email markdown stripping fixed (OpenAI was wrapping HTML in ```html blocks)
+- Bland.ai voicemail message added (`wait_for_greeting: true`)
+- Autofill added to all 5 forms
+- Settings page updated from Mailgun/Stripe → Resend
+- README.md created with full backend documentation
 
 ---
 
-## 🟡 Needs Testing (after login fixed)
-- [ ] Lead form submission → contact saved in DB
-- [ ] Bland.ai voice call triggered on new lead
-- [ ] Quote email flow (OpenAI + Resend)
-- [ ] Dashboard loads real data
-- [ ] Weekly content generation cron
+## 🟡 Pending — Must Push to Vercel
+These changes are saved locally but NOT yet deployed:
 
-## 🟡 Resend Setup
-- [ ] Verify vortextrips.com domain in Resend dashboard
-- [ ] Add DNS records in Cloudflare for Resend domain verification
-- [ ] Test email delivery end-to-end
+- [ ] Settings page Resend update (`src/app/dashboard/settings/page.tsx`)
+- [ ] Autofill on all forms (`page.tsx`, `login`, `reset-password`, `join`, `quote`)
+- [ ] Voicemail message in Bland.ai (`src/lib/bland.ts`)
+- [ ] Quote email markdown fix (`src/app/api/automations/quote-email/route.ts`)
+- [ ] README.md
+
+**Run to deploy:**
+```bash
+git add -A && git commit -m "Fix quote email, add voicemail, autofill forms, update settings" && git push
+```
+
+---
+
+## 🟡 Needs Testing (after push)
+- [ ] Submit test lead → confirm contact in DB + Bland.ai call fires + voicemail left
+- [ ] Submit quote form → confirm AI email arrives with no ```html prefix
+- [ ] Settings page shows Resend (not Mailgun)
+- [ ] Dashboard shows real data (leads count, activity log)
+
+---
 
 ## ⚪ Not Started
 - [ ] Phase 7 — React Native mobile app (Expo)
 - [ ] Stripe re-integration
-- [ ] Supabase Realtime on dashboard
-- [ ] End-to-end flow test: lead → call → email → member
+- [ ] Supabase Realtime on dashboard (live updates)
+- [ ] Weekly content cron — verify Vercel cron job is scheduled
+- [ ] End-to-end flow test: lead → call → quote email → member conversion
 
 ---
 
@@ -112,12 +117,15 @@ The login hits `/dashboard` which calls `createClient()` server-side and checks 
 |---|---|
 | `src/app/page.tsx` | Landing page + lead form |
 | `src/app/api/webhooks/lead-created/route.ts` | Main lead intake |
-| `src/lib/bland.ts` | Bland.ai voice call |
+| `src/app/api/automations/quote-email/route.ts` | AI quote email |
+| `src/lib/bland.ts` | Bland.ai voice call + voicemail |
 | `src/lib/resend.ts` | Email sending |
 | `src/lib/openai.ts` | AI content generation |
 | `src/lib/supabase/server.ts` | Async server Supabase client |
+| `src/app/dashboard/settings/page.tsx` | API key status + config |
 | `supabase/migrations/` | All 5 DB migration files |
 | `.env.local` | Local API keys (never committed) |
+| `README.md` | Full backend documentation |
 
 ## Vercel Env Vars
 - [x] NEXT_PUBLIC_SUPABASE_URL

@@ -9,7 +9,8 @@ export async function triggerCall(
   phone: string,
   firstName: string,
   email: string,
-  task?: string
+  task?: string,
+  contactId?: string
 ): Promise<BlandCallResult> {
   const supabase = createAdminClient()
   const startTime = Date.now()
@@ -24,11 +25,14 @@ export async function triggerCall(
     max_duration: 2,
     webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/bland`,
     metadata: { email, firstName },
+    voicemail_message: `Hey ${firstName}, this is Maya from VortexTrips! I'm calling because you just signed up to learn about our exclusive travel savings — members save 40 to 60 percent on hotels, flights, and vacation packages. I'll be sending your personalized savings quote to your email shortly. Feel free to call us back anytime, and welcome to the VortexTrips family! Talk soon.`,
+    wait_for_greeting: true,
   }
 
   const logEntry = await supabase
     .from('ai_actions_log')
     .insert({
+      contact_id: contactId || null,
       action_type: 'voice-call',
       service: 'bland',
       status: 'pending',

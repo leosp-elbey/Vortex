@@ -63,6 +63,7 @@ export default function QuotePage() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">First Name</label>
                 <input
                   type="text" required placeholder="Jane"
+                  autoComplete="given-name"
                   value={form.first_name}
                   onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
@@ -72,6 +73,7 @@ export default function QuotePage() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Email</label>
                 <input
                   type="email" required placeholder="jane@example.com"
+                  autoComplete="email"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"

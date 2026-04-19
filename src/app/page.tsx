@@ -19,6 +19,7 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
         type="text"
         placeholder="First Name"
         required
+        autoComplete="given-name"
         value={form.first_name}
         onChange={e => onChange('first_name', e.target.value)}
         className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
@@ -27,6 +28,7 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
         type="email"
         placeholder="Email Address"
         required
+        autoComplete="email"
         value={form.email}
         onChange={e => onChange('email', e.target.value)}
         className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
@@ -35,6 +37,7 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
         type="tel"
         placeholder="Phone Number"
         required
+        autoComplete="tel"
         value={form.phone}
         onChange={e => onChange('phone', e.target.value)}
         className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"

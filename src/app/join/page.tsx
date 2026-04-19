@@ -66,6 +66,7 @@ export default function JoinPage() {
                 <form onSubmit={handleSubmit}>
                   <input
                     type="email" required placeholder="Your email address"
+                    autoComplete="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 mb-3 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"

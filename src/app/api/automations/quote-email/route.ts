@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single()
 
-    const { content: emailBody } = await generateCompletion({
+    const { content: rawEmailBody } = await generateCompletion({
       systemPrompt: `You are an expert travel savings email copywriter for VortexTrips (also known as Travel Team Perks).
 Write compelling, personalized HTML email body content that shows the traveler exactly how much they can save with our membership.
 Include specific savings percentages (40-60%), mention exclusive member rates, and end with a strong CTA to join.
@@ -43,6 +43,8 @@ Include estimated savings based on their budget range. End with a CTA button lin
       temperature: 0.7,
       maxTokens: 800,
     })
+
+    const emailBody = rawEmailBody.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim()
 
     await supabase.from('ai_actions_log').insert({
       contact_id: contact?.id,
