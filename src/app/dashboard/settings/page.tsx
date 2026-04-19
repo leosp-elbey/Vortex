@@ -5,11 +5,8 @@ export default function SettingsPage() {
     { label: 'Supabase URL', key: process.env.NEXT_PUBLIC_SUPABASE_URL, public: true },
     { label: 'Supabase Anon Key', key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, public: true },
     { label: 'Bland.ai API Key', key: process.env.BLAND_API_KEY },
-    { label: 'Mailgun API Key', key: process.env.MAILGUN_API_KEY },
-    { label: 'Mailgun Domain', key: process.env.MAILGUN_DOMAIN, public: true },
     { label: 'OpenAI API Key', key: process.env.OPENAI_API_KEY },
-    { label: 'Stripe Secret Key', key: process.env.STRIPE_SECRET_KEY },
-    { label: 'Stripe Publishable Key', key: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, public: true },
+    { label: 'Resend API Key', key: process.env.RESEND_API_KEY },
   ]
 
   return (
@@ -58,8 +55,8 @@ export default function SettingsPage() {
           <h2 className="text-lg font-bold text-[#1A1A2E]">Email Configuration</h2>
         </div>
         <div className="p-6 space-y-3 text-sm text-gray-600">
-          <div className="flex justify-between"><span className="font-medium">Provider</span><span>Mailgun</span></div>
-          <div className="flex justify-between"><span className="font-medium">From Address</span><span>bookings@mg.vortextrips.com</span></div>
+          <div className="flex justify-between"><span className="font-medium">Provider</span><span>Resend</span></div>
+          <div className="flex justify-between"><span className="font-medium">From Address</span><span>bookings@vortextrips.com</span></div>
           <div className="flex justify-between"><span className="font-medium">Admin Notifications</span><span>{process.env.ADMIN_NOTIFICATION_EMAIL || 'Not set'}</span></div>
         </div>
       </div>
