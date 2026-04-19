@@ -10,17 +10,25 @@ export default function ResetPasswordPage() {
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [ready, setReady] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
-    supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setReady(true)
+
+    // Handle hash fragment — Supabase puts access_token in the URL hash
+    // The client SDK picks it up automatically via onAuthStateChange
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
+        setSessionReady(true)
+      }
     })
-    // Also handle if session already set from hash
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setReady(true)
+
+    // Also check if a session already exists (e.g. page reload)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setSessionReady(true)
     })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,35 +65,42 @@ export default function ResetPasswordPage() {
           <p className="text-gray-500 mt-2">Set your new password</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">New Password</label>
-            <input
-              type="password" required minLength={8}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Min. 8 characters"
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-            />
+        {!sessionReady ? (
+          <div className="text-center py-8">
+            <div className="w-8 h-8 border-4 border-[#FF6B35] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-gray-500 text-sm">Verifying your reset link...</p>
           </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password</label>
-            <input
-              type="password" required
-              value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-              placeholder="Repeat password"
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-            />
-          </div>
-          {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit" disabled={loading}
-            className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-3 rounded-lg transition-all disabled:opacity-60"
-          >
-            {loading ? 'Saving...' : 'Set New Password'}
-          </button>
-        </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">New Password</label>
+              <input
+                type="password" required minLength={8}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Min. 8 characters"
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password</label>
+              <input
+                type="password" required
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                placeholder="Repeat password"
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+              />
+            </div>
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+            <button
+              type="submit" disabled={loading}
+              className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-3 rounded-lg transition-all disabled:opacity-60"
+            >
+              {loading ? 'Saving...' : 'Set New Password'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )
