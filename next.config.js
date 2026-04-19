@@ -1,5 +1,24 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  async redirects() {
+    return [
+      {
+        source: '/join',
+        destination: 'https://signup.surge365.com/signup',
+        permanent: false,
+      },
+      {
+        source: '/booking',
+        destination: 'https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate=TM1705228',
+        permanent: false,
+      },
+      {
+        source: '/free',
+        destination: 'https://myvortex365.com/leosp',
+        permanent: false,
+      },
+    ]
+  },
   images: {
     remotePatterns: [
       {

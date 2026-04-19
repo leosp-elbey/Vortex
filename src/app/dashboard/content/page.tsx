@@ -1,16 +1,32 @@
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { formatDate, getStatusColor } from '@/lib/utils'
 import type { ContentCalendarItem } from '@/types'
+import { createClient } from '@/lib/supabase/client'
+import { useEffect } from 'react'
 
-export default async function ContentPage() {
-  const supabase = await createClient()
+export default function ContentPage() {
+  const router = useRouter()
+  const [content, setContent] = useState<ContentCalendarItem[]>([])
+  const [generating, setGenerating] = useState(false)
 
-  const { data } = await supabase
-    .from('content_calendar')
-    .select('*')
-    .order('created_at', { ascending: false })
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
+      .then(({ data }) => setContent((data || []) as ContentCalendarItem[]))
+  }, [])
 
-  const content = (data || []) as ContentCalendarItem[]
+  const handleGenerate = async () => {
+    setGenerating(true)
+    await fetch('/api/dashboard/generate-content', { method: 'POST' })
+    const supabase = createClient()
+    const { data } = await supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
+    setContent((data || []) as ContentCalendarItem[])
+    setGenerating(false)
+    router.refresh()
+  }
 
   const platformEmoji: Record<string, string> = {
     instagram: '📸',
@@ -26,14 +42,13 @@ export default async function ContentPage() {
           <h1 className="text-3xl font-black text-[#1A1A2E]">Content Calendar</h1>
           <p className="text-gray-500">{content.length} posts total</p>
         </div>
-        <form action="/api/cron/weekly-content" method="POST">
-          <button
-            type="submit"
-            className="bg-[#FF6B35] text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-[#e55a25] transition-colors"
-          >
-            ✨ Generate This Week
-          </button>
-        </form>
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          className="bg-[#FF6B35] text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-[#e55a25] transition-colors disabled:opacity-60"
+        >
+          {generating ? 'Generating...' : '✨ Generate This Week'}
+        </button>
       </div>
 
       <div className="grid gap-4">
