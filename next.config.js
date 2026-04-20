@@ -8,11 +8,6 @@ const nextConfig = {
         permanent: false,
       },
       {
-        source: '/booking',
-        destination: 'https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate=TM1705228',
-        permanent: false,
-      },
-      {
         source: '/free',
         destination: 'https://myvortex365.com/leosp',
         permanent: false,
