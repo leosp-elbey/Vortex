@@ -1,16 +1,15 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { formatDate, getStatusColor } from '@/lib/utils'
 import type { ContentCalendarItem } from '@/types'
 import { createClient } from '@/lib/supabase/client'
-import { useEffect } from 'react'
+import { useToast, Toaster } from '@/components/ui/toast'
 
 export default function ContentPage() {
-  const router = useRouter()
   const [content, setContent] = useState<ContentCalendarItem[]>([])
   const [generating, setGenerating] = useState(false)
+  const { toasts, show } = useToast()
 
   useEffect(() => {
     const supabase = createClient()
@@ -20,12 +19,29 @@ export default function ContentPage() {
 
   const handleGenerate = async () => {
     setGenerating(true)
-    await fetch('/api/dashboard/generate-content', { method: 'POST' })
-    const supabase = createClient()
-    const { data } = await supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
-    setContent((data || []) as ContentCalendarItem[])
-    setGenerating(false)
-    router.refresh()
+    try {
+      const res = await fetch('/api/dashboard/generate-content', { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to generate')
+      const supabase = createClient()
+      const { data } = await supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
+      setContent((data || []) as ContentCalendarItem[])
+      show('Content generated successfully')
+    } catch {
+      show('Failed to generate content', 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const updateStatus = async (id: string, status: string) => {
+    const res = await fetch('/api/content', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status }),
+    })
+    if (!res.ok) { show('Failed to update status', 'error'); return }
+    setContent(prev => prev.map(item => item.id === id ? { ...item, status: status as ContentCalendarItem['status'] } : item))
+    show(`Post ${status}`)
   }
 
   const platformEmoji: Record<string, string> = {
@@ -85,18 +101,46 @@ export default function ContentPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
-                  <button className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-lg hover:bg-green-200 transition-colors font-medium">
-                    Approve
-                  </button>
-                  <button className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-lg hover:bg-red-200 transition-colors font-medium">
-                    Reject
-                  </button>
+                  {item.status === 'draft' && (
+                    <>
+                      <button
+                        onClick={() => updateStatus(item.id, 'approved')}
+                        className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-lg hover:bg-green-200 transition-colors font-medium"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => updateStatus(item.id, 'rejected')}
+                        className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-lg hover:bg-red-200 transition-colors font-medium"
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                  {item.status === 'approved' && (
+                    <button
+                      onClick={() => updateStatus(item.id, 'posted')}
+                      className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors font-medium"
+                    >
+                      Mark Posted
+                    </button>
+                  )}
+                  {(item.status === 'rejected' || item.status === 'posted') && (
+                    <button
+                      onClick={() => updateStatus(item.id, 'draft')}
+                      className="text-xs bg-gray-100 text-gray-600 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                    >
+                      Reset
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           ))
         )}
       </div>
+
+      <Toaster toasts={toasts} />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 # VortexTrips — Project Status
 
-Last updated: April 19, 2026
+Last updated: April 20, 2026
 
 ## Infrastructure
 | Service | Status | Details |
@@ -35,26 +35,31 @@ Last updated: April 19, 2026
 - `POST /api/webhooks/bland` — call completion callback
 - `POST /api/automations/quote-email` — AI quote + Resend email (markdown stripping fixed)
 - `GET /api/cron/weekly-content` — Monday 8AM content generation
+- `POST /api/dashboard/generate-content` — manual "Generate This Week" (session-auth)
 - `GET/PATCH /api/contacts` — contact CRUD
 - `GET/PATCH /api/pipeline` — pipeline stage management
+- `PATCH /api/content` — content status update (approve/reject/post)
+- `GET/POST/DELETE /api/admin-users` — team admin management
 
 ### ✅ Phase 4 — Public Pages
 - `/` — Landing page with lead capture form (autofill added)
 - `/thank-you` — Post-signup confirmation
 - `/quote` — Trip quote request form (autofill added)
-- `/join` — Membership page (manual enrollment, autofill added)
+- `/join` → redirect to https://signup.surge365.com/signup
+- `/booking` → redirect to https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate
+- `/free` → redirect to https://myvortex365.com/leosp
 
 ### ✅ Phase 5 — Admin Dashboard
 - `/login` — Supabase Auth login page (autofill added)
 - `/reset-password` — Password reset page (token flow fixed)
 - `/auth/confirm` — Auth callback route (token_hash flow)
 - `/dashboard` — KPI overview + activity feed
-- `/dashboard/leads` — Contacts table
-- `/dashboard/members` — Active members table
-- `/dashboard/pipeline` — Kanban board
+- `/dashboard/leads` — Searchable/filterable table, bulk status + tag actions, slide-out contact detail with AI history
+- `/dashboard/members` — Searchable table, slide-out member detail with AI history
+- `/dashboard/pipeline` — Kanban board with drag-and-drop stage changes
 - `/dashboard/calls` — Bland.ai call logs
-- `/dashboard/content` — AI content calendar
-- `/dashboard/settings` — Updated to Resend config (needs push)
+- `/dashboard/content` — AI content calendar, Approve/Reject/Mark Posted/Reset buttons wired up
+- `/dashboard/settings` — API key status, Bland/Email config, admin user management (invite + remove)
 
 ### ✅ Phase 6 — Deployment
 - Vercel deployed + custom domain vortextrips.com
@@ -79,36 +84,17 @@ Last updated: April 19, 2026
 
 ---
 
-## 🟡 Pending — Must Push to Vercel
-These changes are saved locally but NOT yet deployed:
-
-- [ ] Settings page Resend update (`src/app/dashboard/settings/page.tsx`)
-- [ ] Autofill on all forms (`page.tsx`, `login`, `reset-password`, `join`, `quote`)
-- [ ] Voicemail message in Bland.ai (`src/lib/bland.ts`)
-- [ ] Quote email markdown fix (`src/app/api/automations/quote-email/route.ts`)
-- [ ] README.md
-
-**Run to deploy:**
-```bash
-git add -A && git commit -m "Fix quote email, add voicemail, autofill forms, update settings" && git push
-```
+## ✅ New UI Components
+- `src/components/ui/toast.tsx` — Toast notifications (useToast hook + Toaster, auto-dismiss 3s)
+- `src/components/ui/slide-panel.tsx` — Slide-out detail panel (ESC to close, backdrop click to close)
 
 ---
 
-## 🟡 Needs Testing (after push)
-- [ ] Submit test lead → confirm contact in DB + Bland.ai call fires + voicemail left
-- [ ] Submit quote form → confirm AI email arrives with no ```html prefix
-- [ ] Settings page shows Resend (not Mailgun)
-- [ ] Dashboard shows real data (leads count, activity log)
-
----
-
-## ⚪ Not Started
-- [ ] Phase 7 — React Native mobile app (Expo)
-- [ ] Stripe re-integration
-- [ ] Supabase Realtime on dashboard (live updates)
-- [ ] Weekly content cron — verify Vercel cron job is scheduled
-- [ ] End-to-end flow test: lead → call → quote email → member conversion
+## ⚪ Not Started (On Hold)
+- [ ] **Phase 7 — React Native mobile app** (Expo) — login, home, trips, savings, membership card screens
+- [ ] **Stripe integration** — payment checkout + webhook + onboarding automation
+- [ ] Supabase Realtime on dashboard (live auto-refresh activity feed + pipeline)
+- [ ] Email template HTML preview in Settings page
 
 ---
 
