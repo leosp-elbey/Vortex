@@ -117,7 +117,7 @@ Include estimated savings based on their budget range. End with a CTA button lin
     await supabase.from('ai_actions_log').insert({
       contact_id: contactId,
       action_type: 'quote-email',
-      service: 'resend' as 'mailgun',
+      service: 'mailgun' as const,
       status: 'success',
     })
 

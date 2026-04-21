@@ -51,7 +51,7 @@ export default function LeadsPage() {
   }
 
   const applyBulkStatus = async () => {
-    const ids = [...selected]
+    const ids = Array.from(selected)
     await Promise.all(ids.map(id =>
       fetch('/api/contacts', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: bulkStatus }) })
     ))
@@ -63,16 +63,16 @@ export default function LeadsPage() {
   const applyBulkTag = async () => {
     if (!bulkTag.trim()) return
     const tag = bulkTag.trim().toLowerCase().replace(/\s+/g, '-')
-    const ids = [...selected]
+    const ids = Array.from(selected)
     const targets = leads.filter(l => selected.has(l.id))
     await Promise.all(targets.map(l =>
       fetch('/api/contacts', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: l.id, tags: [...new Set([...(l.tags || []), tag])] })
+        body: JSON.stringify({ id: l.id, tags: Array.from(new Set([...(l.tags || []), tag])) })
       })
     ))
     setLeads(prev => prev.map(l =>
-      selected.has(l.id) ? { ...l, tags: [...new Set([...(l.tags || []), tag])] } : l
+      selected.has(l.id) ? { ...l, tags: Array.from(new Set([...(l.tags || []), tag])) } : l
     ))
     setSelected(new Set())
     setBulkTag('')
@@ -213,7 +213,7 @@ export default function LeadsPage() {
                     key={lead.id}
                     className="hover:bg-gray-50 transition-colors cursor-pointer"
                     onClick={(e) => {
-                      if ((e.target as HTMLElement).type === 'checkbox') return
+                      if ((e.target as HTMLInputElement).type === 'checkbox') return
                       openContact(lead)
                     }}
                   >
