@@ -13,7 +13,7 @@ export async function sendEmail({
   to,
   subject,
   html,
-  from = 'VortexTrips Travel Team <info@vortextrips.com>',
+  from = 'VortexTrips Travel Team <bookings@vortextrips.com>',
 }: SendEmailParams) {
   const { data, error } = await resend.emails.send({ from, to, subject, html })
 
