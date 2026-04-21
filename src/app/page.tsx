@@ -235,15 +235,17 @@ export default function LandingPage() {
                   <img
                     src={photo}
                     alt={name}
-                    className="w-14 h-14 rounded-full object-cover object-top flex-shrink-0"
+                    className="w-12 h-12 rounded-full object-cover object-top flex-shrink-0"
                   />
-                  <div>
-                    <p className="font-bold text-[#1A1A2E]">{name}</p>
-                    <p className="text-xs text-gray-500">{location}</p>
-                  </div>
-                  <div className="ml-auto text-right">
-                    <p className="text-[#16C79A] font-black text-lg">Saved {saved}</p>
-                    <p className="text-xs text-gray-400">{trip}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-[#1A1A2E] whitespace-nowrap">{name}</p>
+                      <p className="text-[#16C79A] font-black text-base whitespace-nowrap">Saved {saved}</p>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className="text-xs text-gray-500">{location}</p>
+                      <p className="text-xs text-gray-400">{trip}</p>
+                    </div>
                   </div>
                 </div>
                 <p className="text-gray-600 text-sm italic">"{quote}"</p>
