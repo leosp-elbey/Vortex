@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { triggerCall } from '@/lib/bland'
+import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 
 function scheduledAt(minutesFromNow: number): string {
   const d = new Date(Date.now() + minutesFromNow * 60 * 1000)
@@ -46,9 +47,20 @@ export async function POST(request: NextRequest) {
       console.error('Opportunity insert error:', oppError.message)
     }
 
-    // Queue lead nurture SMS sequence
+    // Send Day 0 SMS immediately, queue the rest for daily cron
+    if (phone) {
+      try {
+        await sendSMS(phone, SMS_TEMPLATES.leadDay0(first_name))
+        await supabase.from('sequence_queue').insert({
+          contact_id: contact.id, sequence_name: 'lead-nurture', step: 1, channel: 'sms', template_key: 'leadDay0',
+          scheduled_at: new Date().toISOString(), status: 'sent', sent_at: new Date().toISOString(),
+        })
+      } catch (smsErr) {
+        console.error('Day 0 SMS error:', smsErr)
+      }
+    }
+
     await supabase.from('sequence_queue').insert([
-      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 1, channel: 'sms', template_key: 'leadDay0', scheduled_at: scheduledAt(5) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 2, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
