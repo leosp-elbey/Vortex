@@ -12,6 +12,11 @@ const nextConfig = {
         destination: 'https://myvortex365.com/leosp',
         permanent: false,
       },
+      {
+        source: '/book',
+        destination: 'https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate',
+        permanent: false,
+      },
     ]
   },
   images: {
