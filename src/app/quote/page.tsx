@@ -11,6 +11,7 @@ export default function QuotePage() {
   const [form, setForm] = useState<QuoteFormData>({
     first_name: '',
     email: '',
+    phone: '',
     destination: '',
     travel_dates_start: '',
     travel_dates_end: '',
@@ -36,7 +37,7 @@ export default function QuotePage() {
         throw new Error(data.error || 'Something went wrong')
       }
 
-      router.push('/thank-you')
+      router.push('/thank-you?from=quote')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -53,7 +54,7 @@ export default function QuotePage() {
       <div className="max-w-2xl mx-auto px-6 py-16">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-[#1A1A2E] mb-3">Get Your Savings Quote</h1>
-          <p className="text-gray-500 text-lg">Tell us about your trip and we&apos;ll show you exactly how much you can save as a member.</p>
+          <p className="text-gray-500 text-lg">Tell us about your trip and we&apos;ll email you exactly how much you can save as a member — usually within 2 minutes.</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-8">
@@ -79,6 +80,19 @@ export default function QuotePage() {
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Phone Number <span className="text-gray-400 font-normal">(optional — we&apos;ll call with savings tips)</span>
+              </label>
+              <input
+                type="tel" placeholder="555-867-5309"
+                autoComplete="tel"
+                value={form.phone}
+                onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
+              />
             </div>
 
             <div>
@@ -114,7 +128,7 @@ export default function QuotePage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Travelers</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Number of Travelers</label>
                 <input
                   type="number" required min={1} max={20}
                   value={form.travelers}
@@ -141,9 +155,9 @@ export default function QuotePage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Additional Notes (optional)</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Additional Notes <span className="text-gray-400 font-normal">(optional)</span></label>
               <textarea
-                rows={3} placeholder="Any special requests, preferences, or questions..."
+                rows={3} placeholder="Special requests, travel preferences, anniversary trip, honeymoon..."
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35] resize-none"
@@ -160,7 +174,7 @@ export default function QuotePage() {
             </button>
 
             <p className="text-xs text-center text-gray-400">
-              Your personalized AI-written savings quote will be emailed within 2 minutes.
+              Your personalized AI-written savings quote arrives by email within 2 minutes. No spam, ever.
             </p>
           </form>
         </div>

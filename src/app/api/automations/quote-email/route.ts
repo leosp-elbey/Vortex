@@ -2,30 +2,76 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateCompletion } from '@/lib/openai'
 import { sendEmail } from '@/lib/resend'
+import { triggerCall } from '@/lib/bland'
 import type { QuoteFormData } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
     const body: QuoteFormData = await request.json()
-    const { first_name, email, destination, travel_dates_start, travel_dates_end, travelers, budget, notes } = body
+    const { first_name, email, phone, destination, travel_dates_start, travel_dates_end, travelers, budget, notes } = body
 
-    if (!email || !destination) {
+    if (!email || !destination || !first_name) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
     const supabase = createAdminClient()
 
-    const { data: contact } = await supabase
+    // Find existing contact or create new one
+    const { data: existingContact } = await supabase
       .from('contacts')
-      .update({
+      .select('id, phone, tags')
+      .eq('email', email)
+      .single()
+
+    let contactId: string | undefined
+
+    if (existingContact) {
+      await supabase.from('contacts').update({
         custom_fields: { destination, travel_dates_start, travel_dates_end, travelers, budget, notes },
         status: 'quoted',
         last_ai_action: 'Quote email sent',
-      })
-      .eq('email', email)
-      .select('id')
-      .single()
+      }).eq('id', existingContact.id)
+      contactId = existingContact.id
+    } else {
+      // New visitor — create contact and opportunity
+      const { data: newContact } = await supabase
+        .from('contacts')
+        .insert({
+          first_name,
+          email,
+          phone: phone || null,
+          source: 'quote-form',
+          status: 'quoted',
+          custom_fields: { destination, travel_dates_start, travel_dates_end, travelers, budget, notes },
+          last_ai_action: 'Quote email sent',
+        })
+        .select('id')
+        .single()
 
+      contactId = newContact?.id
+
+      if (contactId) {
+        await supabase.from('opportunities').insert({
+          contact_id: contactId,
+          name: `${first_name} — Main Pipeline`,
+          pipeline: 'main',
+          stage: 'quote-sent',
+        })
+
+        // Trigger a call if they provided a phone number
+        if (phone) {
+          try {
+            await triggerCall(phone, first_name, email, undefined, contactId)
+            await supabase.from('contacts').update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' }).eq('id', contactId)
+          } catch (callError) {
+            console.error('Quote form call error:', callError)
+            await supabase.from('contacts').update({ tags: ['call-failed'] }).eq('id', contactId)
+          }
+        }
+      }
+    }
+
+    // Generate AI email content
     const { content: rawEmailBody } = await generateCompletion({
       systemPrompt: `You are an expert travel savings email copywriter for VortexTrips (also known as Travel Team Perks).
 Write compelling, personalized HTML email body content that shows the traveler exactly how much they can save with our membership.
@@ -47,7 +93,7 @@ Include estimated savings based on their budget range. End with a CTA button lin
     const emailBody = rawEmailBody.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim()
 
     await supabase.from('ai_actions_log').insert({
-      contact_id: contact?.id,
+      contact_id: contactId,
       action_type: 'quote-email',
       service: 'openai',
       status: 'success',
@@ -64,28 +110,20 @@ Include estimated savings based on their budget range. End with a CTA button lin
         </div>
         ${emailBody}
         <hr style="margin:32px 0;border-color:#eee"/>
-        <p style="font-size:12px;color:#888">VortexTrips · Unsubscribe · vortextrips.com</p>
+        <p style="font-size:12px;color:#888">VortexTrips · <a href="${process.env.NEXT_PUBLIC_APP_URL}" style="color:#888">vortextrips.com</a></p>
       </div>`,
     })
 
     await supabase.from('ai_actions_log').insert({
-      contact_id: contact?.id,
+      contact_id: contactId,
       action_type: 'quote-email',
-      service: 'resend',
+      service: 'resend' as 'mailgun',
       status: 'success',
     })
 
-    if (contact?.id) {
-      await supabase
-        .from('contacts')
-        .update({ tags: ['quote-sent', 'ai-email-sent'] })
-        .eq('id', contact.id)
-
-      await supabase
-        .from('opportunities')
-        .update({ stage: 'quote-sent' })
-        .eq('contact_id', contact.id)
-        .eq('pipeline', 'main')
+    if (contactId && existingContact) {
+      await supabase.from('contacts').update({ tags: ['quote-sent', 'ai-email-sent'] }).eq('id', contactId)
+      await supabase.from('opportunities').update({ stage: 'quote-sent' }).eq('contact_id', contactId).eq('pipeline', 'main')
     }
 
     return NextResponse.json({ success: true })

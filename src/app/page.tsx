@@ -35,7 +35,7 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
       />
       <input
         type="tel"
-        placeholder="Phone Number"
+        placeholder="Phone Number (e.g. 555-867-5309)"
         required
         autoComplete="tel"
         value={form.phone}
@@ -79,10 +79,13 @@ export default function LandingPage() {
 
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || 'Something went wrong')
+        const msg = data.error === 'Email already registered'
+          ? "You're already in our system! Check your inbox or call us at support@vortextrips.com."
+          : data.error || 'Something went wrong'
+        throw new Error(msg)
       }
 
-      router.push('/thank-you')
+      router.push('/thank-you?from=lead')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -98,13 +101,13 @@ export default function LandingPage() {
           <span className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></span>
           <span className="text-xs text-gray-400 ml-1">by Travel Team Perks</span>
         </div>
-        <a href="#join" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
+        <a href="#hero-form" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
           Get Access
         </a>
       </nav>
 
       {/* Hero */}
-      <section className="hero-gradient text-white py-20 px-6">
+      <section id="hero-form" className="hero-gradient text-white py-20 px-6">
         <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-block bg-[#16C79A]/20 text-[#16C79A] text-sm font-semibold px-3 py-1 rounded-full mb-6">
@@ -260,12 +263,14 @@ export default function LandingPage() {
       <footer className="bg-[#0d0d1a] text-gray-500 py-10 px-6 text-center text-sm">
         <div className="max-w-5xl mx-auto">
           <p className="text-white font-bold text-lg mb-2">VortexTrips <span className="text-[#FF6B35]">/ Travel Team Perks</span></p>
-          <div className="flex justify-center gap-6 mb-4">
+          <div className="flex justify-center gap-6 mb-4 flex-wrap">
             <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
             <a href="/join" className="hover:text-white transition-colors">Join Now</a>
             <a href="mailto:support@vortextrips.com" className="hover:text-white transition-colors">Contact</a>
+            <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
           </div>
-          <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} VortexTrips / Travel Team Perks. All rights reserved.</p>
+          <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
         </div>
       </footer>
     </div>

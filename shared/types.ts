@@ -87,6 +87,7 @@ export interface AdminUser {
 export interface QuoteFormData {
   first_name: string
   email: string
+  phone?: string
   destination: string
   travel_dates_start: string
   travel_dates_end: string
