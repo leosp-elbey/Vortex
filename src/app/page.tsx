@@ -122,8 +122,13 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section id="hero-form" className="hero-gradient text-white py-20 px-6">
-        <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+      <section
+        id="hero-form"
+        className="relative text-white py-20 px-6"
+        style={{ backgroundImage: 'url(/hero-background.jpg)', backgroundSize: 'cover', backgroundPosition: 'center' }}
+      >
+        <div className="absolute inset-0 bg-[#1A1A2E]/70" />
+        <div className="relative z-10 max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-block bg-[#16C79A]/20 text-[#16C79A] text-sm font-semibold px-3 py-1 rounded-full mb-6">
               ✈️ Members save $1,200+ per trip on average
