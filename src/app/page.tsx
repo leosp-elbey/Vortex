@@ -226,15 +226,17 @@ export default function LandingPage() {
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {[
-              { name: 'Jessica T.', location: 'Austin, TX', saved: '$1,847', trip: 'Cancún family trip', quote: 'I was skeptical at first, but we saved almost $2,000 on our family vacation compared to Expedia. The hotel alone was 52% cheaper. This membership paid for itself 10x over.', avatar: 'JT' },
-              { name: 'Marcus R.', location: 'Atlanta, GA', saved: '$3,200', trip: 'Europe honeymoon', quote: 'VortexTrips found us a 5-star hotel in Paris for the price of a 3-star. Our entire honeymoon cost less than what most people spend on flights alone. Cannot recommend enough.', avatar: 'MR' },
-              { name: 'Sandra L.', location: 'Chicago, IL', saved: '$940', trip: 'Vegas weekend', quote: 'Called by Maya within a minute of signing up. She walked me through everything and got us a suite for $189/night that was listed at $389 everywhere else. Incredible service.', avatar: 'SL' },
-            ].map(({ name, location, saved, trip, quote, avatar }) => (
+              { name: 'Jessica T.', location: 'Austin, TX', saved: '$1,847', trip: 'Cancún family trip', quote: 'I was skeptical at first, but we saved almost $2,000 on our family vacation compared to Expedia. The hotel alone was 52% cheaper. This membership paid for itself 10x over.', photo: '/testimonials/testimonial-jessica.jpg' },
+              { name: 'Michelle R.', location: 'Atlanta, GA', saved: '$3,200', trip: 'Europe honeymoon', quote: 'VortexTrips found us a 5-star hotel in Paris for the price of a 3-star. Our entire honeymoon cost less than what most people spend on flights alone. Cannot recommend enough.', photo: '/testimonials/testimonial-michelle.jpg' },
+              { name: 'Scott L.', location: 'Chicago, IL', saved: '$940', trip: 'Vegas weekend', quote: 'Called by Maya within a minute of signing up. She walked me through everything and got us a suite for $189/night that was listed at $389 everywhere else. Incredible service.', photo: '/testimonials/testimonial-scott.jpg' },
+            ].map(({ name, location, saved, trip, quote, photo }) => (
               <div key={name} className="p-6 bg-gray-50 rounded-2xl">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 rounded-full bg-[#FF6B35] flex items-center justify-center text-white font-bold">
-                    {avatar}
-                  </div>
+                  <img
+                    src={photo}
+                    alt={name}
+                    className="w-14 h-14 rounded-full object-cover object-top flex-shrink-0"
+                  />
                   <div>
                     <p className="font-bold text-[#1A1A2E]">{name}</p>
                     <p className="text-xs text-gray-500">{location}</p>
