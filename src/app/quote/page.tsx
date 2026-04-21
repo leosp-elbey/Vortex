@@ -8,6 +8,7 @@ export default function QuotePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [smsConsent, setSmsConsent] = useState(false)
   const [form, setForm] = useState<QuoteFormData>({
     first_name: '',
     email: '',
@@ -93,6 +94,25 @@ export default function QuotePage() {
                 onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
               />
+              {form.phone && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-gray-400">Msg &amp; data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies.</p>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      required={!!form.phone}
+                      checked={smsConsent}
+                      onChange={e => setSmsConsent(e.target.checked)}
+                      className="mt-0.5 flex-shrink-0 accent-[#FF6B35]"
+                    />
+                    <span className="text-xs text-gray-500">
+                      By checking this box, I consent to receive SMS messages from VortexTrips. View our{' '}
+                      <a href="/privacy" className="text-[#FF6B35] underline">Privacy Policy</a> and{' '}
+                      <a href="/terms" className="text-[#FF6B35] underline">Terms</a>.
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
 
             <div>

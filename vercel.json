@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/weekly-content",
       "schedule": "0 13 * * 1"
+    },
+    {
+      "path": "/api/cron/send-sequences",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

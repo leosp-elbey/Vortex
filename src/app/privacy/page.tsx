@@ -37,7 +37,8 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">4. Data Sharing</h2>
-            <p>We do not sell your personal information. We share data only with service providers necessary to operate our platform (AI call services, email delivery). These providers are bound by confidentiality agreements.</p>
+            <p className="mb-3">We do not sell your personal information. We share data only with service providers necessary to operate our platform (AI call services, email delivery, SMS delivery). These providers are bound by confidentiality agreements.</p>
+            <p className="font-semibold text-gray-800">No mobile information or SMS opt-in data will be shared with third parties or affiliates for marketing or promotional purposes. SMS consent and phone numbers collected for SMS purposes will not be shared with third parties.</p>
           </section>
 
           <section>

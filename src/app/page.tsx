@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation'
 
 interface LeadFormProps {
   id: string
-  form: { first_name: string; email: string; phone: string }
+  form: { first_name: string; email: string; phone: string; smsConsent: boolean }
   loading: boolean
   error: string
-  onChange: (field: string, value: string) => void
+  onChange: (field: string, value: string | boolean) => void
   onSubmit: (e: React.FormEvent) => void
 }
 
@@ -42,6 +42,21 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
         onChange={e => onChange('phone', e.target.value)}
         className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
       />
+      <p className="text-xs text-gray-400 -mt-2">Msg &amp; data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies.</p>
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          required
+          checked={form.smsConsent}
+          onChange={e => onChange('smsConsent', e.target.checked)}
+          className="mt-0.5 flex-shrink-0 accent-[#FF6B35]"
+        />
+        <span className="text-xs text-gray-500">
+          By checking this box, I consent to receive SMS messages from VortexTrips about my travel savings inquiry. View our{' '}
+          <a href="/privacy" className="text-[#FF6B35] underline">Privacy Policy</a> and{' '}
+          <a href="/terms" className="text-[#FF6B35] underline">Terms</a>.
+        </span>
+      </label>
       {error && <p className="text-red-500 text-sm">{error}</p>}
       <button
         type="submit"
@@ -57,11 +72,11 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
 
 export default function LandingPage() {
   const router = useRouter()
-  const [form, setForm] = useState({ first_name: '', email: '', phone: '' })
+  const [form, setForm] = useState({ first_name: '', email: '', phone: '', smsConsent: false })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: string | boolean) => {
     setForm(f => ({ ...f, [field]: value }))
   }
 
@@ -268,6 +283,7 @@ export default function LandingPage() {
             <a href="/join" className="hover:text-white transition-colors">Join Now</a>
             <a href="mailto:support@vortextrips.com" className="hover:text-white transition-colors">Contact</a>
             <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+            <a href="/terms" className="hover:text-white transition-colors">Terms</a>
           </div>
           <p>© {new Date().getFullYear()} VortexTrips / Travel Team Perks. All rights reserved.</p>
           <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
