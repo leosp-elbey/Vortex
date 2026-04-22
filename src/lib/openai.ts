@@ -14,6 +14,27 @@ interface CompletionResult {
   }
 }
 
+export async function generateImage(prompt: string): Promise<string> {
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'dall-e-3',
+      prompt: `Travel photography style, vibrant and aspirational. ${prompt}. No text overlays. Professional composition.`,
+      n: 1,
+      size: '1024x1024',
+      quality: 'standard',
+      response_format: 'url',
+    }),
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || 'DALL-E request failed')
+  return data.data[0].url as string
+}
+
 export async function generateCompletion({
   systemPrompt,
   userPrompt,

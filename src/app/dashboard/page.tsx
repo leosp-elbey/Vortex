@@ -1,70 +1,114 @@
 import { createClient } from '@/lib/supabase/server'
 import { formatDateTime } from '@/lib/utils'
 import type { AIActionLog } from '@/types'
+import Link from 'next/link'
 
 async function getStats() {
   const supabase = await createClient()
   const today = new Date().toISOString().split('T')[0]
 
-  const [contacts, members, callsToday, emailsToday, recentActivity] = await Promise.all([
+  const [
+    contacts,
+    members,
+    hotLeads,
+    callsToday,
+    emailsToday,
+    smsToday,
+    contentThisWeek,
+    recentActivity,
+  ] = await Promise.all([
     supabase.from('contacts').select('id', { count: 'exact', head: true }),
-    supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('membership_status', 'active'),
+    supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'member'),
+    supabase.from('contacts').select('id', { count: 'exact', head: true }).contains('tags', ['intent:hot']),
     supabase.from('ai_actions_log').select('id', { count: 'exact', head: true }).eq('action_type', 'voice-call').gte('created_at', today),
     supabase.from('ai_actions_log').select('id', { count: 'exact', head: true }).eq('action_type', 'quote-email').gte('created_at', today),
+    supabase.from('ai_actions_log').select('id', { count: 'exact', head: true }).eq('service', 'twilio').gte('created_at', today),
+    supabase.from('content_calendar').select('id', { count: 'exact', head: true }).eq('status', 'posted').gte('created_at', today.slice(0, 7) + '-01'),
     supabase.from('ai_actions_log').select('*, contact:contacts(first_name, last_name, email)').order('created_at', { ascending: false }).limit(20),
   ])
 
   return {
-    totalLeads: contacts.count || 0,
-    totalMembers: members.count || 0,
-    callsToday: callsToday.count || 0,
-    emailsToday: emailsToday.count || 0,
-    conversionRate: contacts.count ? ((members.count || 0) / contacts.count * 100).toFixed(1) : '0',
-    recentActivity: (recentActivity.data || []) as AIActionLog[],
+    totalLeads: contacts.count ?? 0,
+    totalMembers: members.count ?? 0,
+    hotLeads: hotLeads.count ?? 0,
+    callsToday: callsToday.count ?? 0,
+    emailsToday: emailsToday.count ?? 0,
+    smsToday: smsToday.count ?? 0,
+    contentPosted: contentThisWeek.count ?? 0,
+    conversionRate: contacts.count ? ((members.count ?? 0) / contacts.count * 100).toFixed(1) : '0',
+    recentActivity: (recentActivity.data ?? []) as AIActionLog[],
   }
+}
+
+const actionLabels: Record<string, string> = {
+  'voice-call': '📞 Voice Call',
+  'quote-email': '📧 Quote Email',
+  'onboarding-email': '✉️ Onboarding Email',
+  'content-generation': '✍️ Content Generated',
+  'admin-notification': '🔔 Admin Notified',
+  'sms': '💬 SMS Sent',
+  'sequence-email': '📬 Sequence Email',
+  'sequence-sms': '💬 Sequence SMS',
 }
 
 export default async function DashboardPage() {
   const stats = await getStats()
 
   const statCards = [
-    { label: 'Total Leads', value: stats.totalLeads, icon: '👥', color: 'bg-blue-500' },
-    { label: 'Active Members', value: stats.totalMembers, icon: '⭐', color: 'bg-green-500' },
-    { label: 'Calls Today', value: stats.callsToday, icon: '📞', color: 'bg-[#FF6B35]' },
-    { label: 'Emails Today', value: stats.emailsToday, icon: '📧', color: 'bg-purple-500' },
-    { label: 'Conversion Rate', value: `${stats.conversionRate}%`, icon: '📈', color: 'bg-[#16C79A]' },
+    { label: 'Total Leads', value: stats.totalLeads, icon: '👥', color: 'bg-blue-500', href: '/dashboard/leads' },
+    { label: 'Active Members', value: stats.totalMembers, icon: '⭐', color: 'bg-green-500', href: '/dashboard/members' },
+    { label: 'Hot Leads', value: stats.hotLeads, icon: '🔥', color: 'bg-red-500', href: '/dashboard/leads' },
+    { label: 'Conversion Rate', value: `${stats.conversionRate}%`, icon: '📈', color: 'bg-[#16C79A]', href: '/dashboard/pipeline' },
+    { label: 'Calls Today', value: stats.callsToday, icon: '📞', color: 'bg-[#FF6B35]', href: '/dashboard/calls' },
+    { label: 'Emails Today', value: stats.emailsToday, icon: '📧', color: 'bg-purple-500', href: '/dashboard/leads' },
+    { label: 'SMS Today', value: stats.smsToday, icon: '💬', color: 'bg-indigo-500', href: '/dashboard/leads' },
+    { label: 'Posts This Month', value: stats.contentPosted, icon: '📱', color: 'bg-pink-500', href: '/dashboard/content' },
   ]
-
-  const actionLabels: Record<string, string> = {
-    'voice-call': 'Voice Call',
-    'quote-email': 'Quote Email',
-    'onboarding-email': 'Onboarding Email',
-    'content-generation': 'Content Generated',
-    'admin-notification': 'Admin Notified',
-  }
 
   return (
     <div>
-      <h1 className="text-3xl font-black text-[#1A1A2E] mb-2">Dashboard Overview</h1>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-3xl font-black text-[#1A1A2E]">Dashboard</h1>
+        <span className="text-sm text-gray-400">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+      </div>
       <p className="text-gray-500 mb-8">Real-time view of your VortexTrips pipeline</p>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        {statCards.map(({ label, value, icon, color }) => (
-          <div key={label} className="bg-white rounded-xl shadow-sm p-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {statCards.map(({ label, value, icon, color, href }) => (
+          <Link key={label} href={href} className="bg-white rounded-xl shadow-sm p-5 hover:shadow-md transition-shadow">
             <div className={`w-10 h-10 ${color} rounded-lg flex items-center justify-center text-xl mb-3`}>
               {icon}
             </div>
             <p className="text-2xl font-black text-[#1A1A2E]">{value}</p>
             <p className="text-xs text-gray-500 mt-1">{label}</p>
-          </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Quick actions */}
+      <div className="grid md:grid-cols-4 gap-3 mb-8">
+        {[
+          { label: 'Generate Content', href: '/dashboard/content', icon: '✨', desc: 'Create this week\'s posts' },
+          { label: 'View Pipeline', href: '/dashboard/pipeline', icon: '🔄', desc: 'Drag & drop deals' },
+          { label: 'Attribution', href: '/dashboard/attribution', icon: '📡', desc: 'Source analytics' },
+          { label: 'Settings', href: '/dashboard/settings', icon: '⚙️', desc: 'Configure automations' },
+        ].map(({ label, href, icon, desc }) => (
+          <Link key={label} href={href} className="bg-white rounded-xl p-4 shadow-sm hover:shadow-md hover:border-[#FF6B35] border-2 border-transparent transition-all flex items-center gap-3">
+            <span className="text-2xl">{icon}</span>
+            <div>
+              <p className="font-bold text-[#1A1A2E] text-sm">{label}</p>
+              <p className="text-xs text-gray-400">{desc}</p>
+            </div>
+          </Link>
         ))}
       </div>
 
       {/* Activity feed */}
       <div className="bg-white rounded-xl shadow-sm">
-        <div className="p-6 border-b border-gray-100">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#1A1A2E]">Recent AI Activity</h2>
+          <span className="text-xs text-gray-400">Last 20 actions</span>
         </div>
         <div className="divide-y divide-gray-100">
           {stats.recentActivity.length === 0 ? (

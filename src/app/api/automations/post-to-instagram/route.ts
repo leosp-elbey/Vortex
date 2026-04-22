@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     const hashtags = post.hashtags?.map((h: string) => `#${h}`).join(' ') ?? ''
     const caption = `${post.caption}\n\n${hashtags}`.trim()
 
-    const containerId = await createMediaContainer(caption)
+    const containerId = await createMediaContainer(caption, post.image_url ?? undefined)
     const igPostId = await publishContainer(containerId)
 
     await admin.from('content_calendar').update({
