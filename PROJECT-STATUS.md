@@ -1,234 +1,229 @@
-# VortexTrips — Project Status
-**Last updated: April 21, 2026**
+# VortexTrips — Full System Status
+**Last updated:** April 22, 2026  
+**Branch:** main | **Deployed:** Vercel (Hobby)  
+**Stack:** Next.js 14 App Router · TypeScript · Supabase · Resend · Twilio · Bland.ai · OpenAI
 
 ---
 
-## LIVE SITE
-- **URL:** https://www.vortextrips.com
-- **Repo:** https://github.com/leosp-elbey/Vortex (public)
-- **Deployment:** Vercel (Hobby plan, auto-deploy from `main` branch)
-- **Latest commit:** `d316bff` — Hero background photo
+## ✅ LIVE & WORKING — Full Feature List
 
----
-
-## TECH STACK
-
-| Layer | Technology |
-|---|---|
-| Framework | Next.js (App Router, TypeScript) |
-| Styling | Tailwind CSS |
-| Database + Auth | Supabase (PostgreSQL + RLS) |
-| Email | Resend — FROM: bookings@vortextrips.com |
-| AI Voice Calls | Bland.ai |
-| AI Content / Emails | OpenAI GPT-4o |
-| SMS | Twilio |
-| Deployment | Vercel (Hobby plan) |
-
----
-
-## EMAIL ADDRESSES (all forward to leoelbey@gmail.com)
-
-| Address | Purpose |
-|---|---|
-| bookings@vortextrips.com | Outbound email FROM address (Resend) |
-| leo@vortextrips.com | Personal |
-| info@vortextrips.com | General inquiries |
-| support@vortextrips.com | Customer support |
-
----
-
-## ENVIRONMENT VARIABLES (set in Vercel)
-
-| Variable | Notes |
-|---|---|
-| NEXT_PUBLIC_SUPABASE_URL | Supabase project URL |
-| NEXT_PUBLIC_SUPABASE_ANON_KEY | Supabase anon key |
-| SUPABASE_SERVICE_ROLE_KEY | Admin client (server-side only) |
-| OPENAI_API_KEY | GPT-4o |
-| RESEND_API_KEY | Email delivery |
-| BLAND_API_KEY | AI voice calls |
-| TWILIO_ACCOUNT_SID | Set in Vercel (sensitive) |
-| TWILIO_AUTH_TOKEN | Set in Vercel (sensitive) |
-| TWILIO_PHONE_NUMBER | Twilio outbound SMS number |
-| NEXT_PUBLIC_APP_URL | https://www.vortextrips.com |
-| CRON_SECRET | Set in Vercel — authenticates cron job requests |
-
----
-
-## PAGES BUILT
-
-| Route | Description |
-|---|---|
-| `/` | Landing page — lead capture form, hero bg photo, testimonials, benefits |
-| `/quote` | Quote request form — AI email + optional phone for call |
-| `/thank-you` | Context-aware: `?from=lead` shows call messaging, `?from=quote` shows email messaging |
-| `/privacy` | Privacy policy — includes A2P-compliant SMS data clause |
-| `/terms` | Terms & Conditions — full TCR-required SMS disclosures |
-| `/join` | Redirect → https://signup.surge365.com/signup |
-| `/free` | Redirect → https://myvortex365.com/leosp |
-| `/book` | Redirect → https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate |
-| `/og` | Dynamic OG image (1200×630) — edge runtime, used for social sharing |
-| `/dashboard` | Admin dashboard (auth required) |
-| `/dashboard/leads` | Lead management — search, filter, bulk actions, slide panel |
-| `/dashboard/members` | Member management — search, slide panel |
-| `/dashboard/pipeline` | Kanban pipeline — drag-and-drop stage updates |
-| `/dashboard/content` | Content calendar — approve/reject/post AI-generated social content |
-| `/dashboard/settings` | Admin user management, API key status, cron info |
-
----
-
-## API ROUTES BUILT
-
-| Route | Method | Purpose |
+### Public Site
+| Page | URL | Status |
 |---|---|---|
-| `/api/webhooks/lead-created` | POST | Create contact + opportunity, trigger Bland call, send Day 0 SMS, queue nurture sequence |
-| `/api/automations/quote-email` | POST | Generate AI quote email via OpenAI, send via Resend, upsert contact |
-| `/api/automations/trigger-sba` | POST | Enroll SBA into onboarding sequence (Steps 1 + 2 SMS) |
-| `/api/pipeline` | PATCH | Update opportunity stage (drag-and-drop) |
-| `/api/content` | PATCH | Update content_calendar status (approve/reject/posted) |
-| `/api/admin-users` | GET/POST/DELETE | List/invite/remove admin users |
-| `/api/cron/weekly-content` | GET | Generate 5 AI social posts, insert to content_calendar (Mondays 1pm UTC) |
-| `/api/cron/send-sequences` | GET | Process sequence_queue — send pending SMS (daily 10am UTC) |
+| Landing page | `/` | ✅ Hero with background photo, lead form, destinations grid, quiz CTA, testimonials |
+| Quote form | `/quote` | ✅ Full trip details form, AI-generated email within 2 min |
+| Travel quiz | `/quiz` | ✅ 5-question quiz → personalized destination routing |
+| Destination — Cancún | `/destinations/cancun` | ✅ Deals table, lead form, SMS consent |
+| Destination — Paris | `/destinations/paris` | ✅ |
+| Destination — Las Vegas | `/destinations/vegas` | ✅ |
+| Destination — Caribbean | `/destinations/caribbean` | ✅ |
+| Destination — Orlando | `/destinations/orlando` | ✅ |
+| Reviews wall | `/reviews` | ✅ Public social proof + submit form (pending approval flow) |
+| Join page | `/join` | ✅ Pricing $399/yr, savings calculator, money-back guarantee |
+| Thank-you page | `/thank-you` | ✅ Variants: lead / quote / sba |
+| Privacy policy | `/privacy` | ✅ A2P-compliant SMS clause |
+| Terms of service | `/terms` | ✅ TCR-compliant SMS program terms |
 
----
-
-## LIBRARIES BUILT
-
-| File | Purpose |
-|---|---|
-| `src/lib/supabase/server.ts` | Supabase client (server components) |
-| `src/lib/supabase/admin.ts` | Supabase admin client (service role) |
-| `src/lib/openai.ts` | OpenAI completions wrapper |
-| `src/lib/resend.ts` | Resend email wrapper — FROM: bookings@vortextrips.com |
-| `src/lib/bland.ts` | Bland.ai voice call trigger |
-| `src/lib/twilio.ts` | Twilio SMS wrapper + 6 sequence templates |
-| `src/lib/utils.ts` | Utilities |
-
----
-
-## UI COMPONENTS BUILT
-
-| Component | Purpose |
-|---|---|
-| `src/components/ui/slide-panel.tsx` | Full-height right slide panel (ESC + backdrop to close) |
-| `src/components/ui/toast.tsx` | Toast notification hook + Toaster component |
-
----
-
-## SMS SEQUENCE SYSTEM
-
-### How it works
-1. Lead submits form → `lead-created` webhook fires
-2. Day 0 SMS sent **immediately** via Twilio
-3. Steps 2–4 inserted into `sequence_queue` table with future `scheduled_at` dates
-4. Daily cron at 10am UTC processes pending rows and sends SMS
-
-### Lead Nurture Sequence (Sequence 1)
-| Step | Timing | Template Key |
+### Lead Capture & CRM
+| Feature | Status | Notes |
 |---|---|---|
-| 1 | Immediately on signup | `leadDay0` |
-| 2 | Day 2 | `leadDay2` |
-| 3 | Day 7 | `leadDay7` |
-| 4 | Day 12 | `leadDay12` |
+| Lead form submission | ✅ | Phone optional, SMS consent checkbox, UTM capture |
+| Contact created in Supabase | ✅ | With lead_score: 20, source, UTM fields |
+| Opportunity auto-created | ✅ | Stage: new-lead, pipeline: main |
+| Bland.ai voice call | ✅ | Fires within 60s if phone provided; Maya persona |
+| Day 0 SMS | ✅ | Fires immediately on lead creation |
+| Duplicate email detection | ✅ | Returns 409, shows friendly error on form |
+| SMS opt-out handling | ✅ | sms-optout tag skips SMS in sequences |
 
-### SBA Onboarding Sequence (Sequence 2)
-| Step | Timing | Template Key |
+### Multi-Channel Drip Sequences (14-day)
+| Step | Day | Channel | Template |
+|---|---|---|---|
+| 0 | Immediate | SMS | leadDay0 — Welcome |
+| 1 | Day 1 | Email | leadDay1 — What you get |
+| 2 | Day 2 | SMS | leadDay2 — Follow-up |
+| 3 | Day 3 | Email | leadDay3 — Social proof |
+| 4 | Day 5 | Email | leadDay5 — Savings table |
+| 5 | Day 7 | SMS | leadDay7 — Urgency |
+| 6 | Day 7+4h | Email | leadDay7 — Rate change warning |
+| 7 | Day 10 | Email | leadDay10 — FAQ/objections |
+| 8 | Day 12 | SMS | leadDay12 — Last chance |
+| 9 | Day 14 | Email | leadDay14 — Breakup email |
+
+Cron: `0 10 * * *` (daily 10am UTC via Vercel)
+
+### Lead Scoring & Behavioral Branching
+| Feature | Status |
+|---|---|
+| Base score on signup | ✅ +20 pts |
+| Event scoring via /api/webhooks/track-event | ✅ 12 event types mapped |
+| Intent tags: browsing / warm / hot | ✅ Auto-updated on score change |
+| Hot lead detection (score >= 80) | ✅ Runs daily in send-sequences cron |
+| Hot lead direct outreach | ✅ Cancels nurture, sends personal SMS + email |
+| hot-lead-contacted tag prevents repeat | ✅ |
+
+### SBA (Smart Business Affiliate) Onboarding
+| Step | Trigger | Status |
 |---|---|---|
-| 1 | Immediately on enrollment | `sbaDay0` |
-| 2 | Day 7 | `sbaDay7` |
+| Day 0 SMS | Immediate on SBA signup | ✅ |
+| Day 1 Email | Welcome + affiliate links | ✅ |
+| Day 3 Email | First commission tips | ✅ |
+| Day 7 SMS | Week 1 check-in | ✅ |
+| Day 7+2h Email | Performance coaching | ✅ |
+| Opportunity stage → member | Auto-set | ✅ |
+| Lead score → 100 | Auto-set | ✅ |
 
-Trigger SBA onboarding: POST `/api/automations/trigger-sba` with `{ contact_id }` from dashboard.
+### Post-Trip Review Automation
+| Feature | Status |
+|---|---|
+| Trip logging via /api/trips | ✅ |
+| Review SMS queued 2 days after return_date | ✅ |
+| Review email queued 2 days after return_date | ✅ |
+| Review submission form at /reviews | ✅ |
+| Admin approval flow (PATCH /api/reviews) | ✅ |
+| Reviews feed publicly visible when approved | ✅ |
+
+### Content Calendar & Social Media
+| Feature | Status | Notes |
+|---|---|---|
+| GPT-4o content generation | ✅ | 5 posts/week across 4 platforms |
+| DALL-E 3 image generation | ✅ | Auto-generates for Instagram + Facebook posts |
+| TikTok video scripts | ✅ | 30-45s script with [VISUAL] stage directions |
+| Instagram auto-post | ✅ | Graph API v19.0 — uses DALL-E image |
+| Facebook auto-post | ✅ | Graph API v19.0 — photo or text post |
+| TikTok — link to creator upload | ✅ | Manual upload with generated script |
+| Twitter — pre-filled tweet intent | ✅ | One-click post |
+| Weekly cron content generation | ✅ | Mondays 1pm UTC |
+| Content dashboard with image previews | ✅ | Approve/reject/post per-platform |
+
+### Analytics & Attribution
+| Feature | Status |
+|---|---|
+| Facebook Pixel | ✅ ID: 763101500966829 |
+| Google Analytics 4 | ✅ G-V6Q2E47C49 |
+| UTM param capture on lead create | ✅ Stored in custom_fields |
+| Attribution dashboard | ✅ Source stats + UTM breakdown + intent scores |
+| Contact events table | ✅ |
+
+### Partner Lead Distribution
+| Feature | Status |
+|---|---|
+| Partner directory (partners table) | ✅ |
+| Destination + budget match scoring | ✅ |
+| Partner email notification | ✅ |
+| Partner SMS notification | ✅ |
+| Routing log on contact | ✅ |
+
+### Admin Dashboard
+| Page | Status | Notes |
+|---|---|---|
+| Overview | ✅ | 8 stat cards, clickable nav, quick actions |
+| Leads | ✅ | Search, filter, bulk update, slide panel |
+| Members | ✅ | Active member list |
+| Pipeline | ✅ | Kanban drag-and-drop, 6 stages |
+| Calls | ✅ | Bland.ai call log |
+| Content | ✅ | Image previews, video scripts, per-platform post buttons |
+| Attribution | ✅ | Source breakdown, UTM table, intent leaderboard |
+| Settings | ✅ | |
 
 ---
 
-## SUPABASE TABLES
+## Supabase Tables
 
 | Table | Purpose |
 |---|---|
-| `contacts` | All leads and members |
-| `opportunities` | Pipeline stages per contact |
-| `ai_actions_log` | Log of all AI actions (calls, emails, SMS) |
-| `content_calendar` | AI-generated social content queue |
-| `admin_users` | Admin dashboard users |
-| `sequence_queue` | Scheduled SMS/email drip queue |
+| contacts | All leads and members |
+| opportunities | Pipeline deals per contact |
+| sequence_queue | Scheduled email/SMS steps |
+| ai_actions_log | Log of all AI actions (calls, emails, SMS) |
+| content_calendar | Social posts with image_url + video_script |
+| admin_users | Dashboard access control |
+| contact_events | Behavioral event log for scoring |
+| trips | Trip records triggering review requests |
+| reviews | Member reviews (pending → approved) |
+| partners | Partner directory for lead routing |
 
-### sequence_queue schema (run in Supabase SQL editor if not created)
-```sql
-CREATE TABLE IF NOT EXISTS sequence_queue (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  contact_id uuid REFERENCES contacts(id) ON DELETE CASCADE,
-  sequence_name text NOT NULL,
-  step integer NOT NULL,
-  channel text NOT NULL CHECK (channel IN ('sms', 'email')),
-  template_key text NOT NULL,
-  scheduled_at timestamptz NOT NULL,
-  sent_at timestamptz,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'skipped')),
-  created_at timestamptz DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_sequence_queue_status_scheduled ON sequence_queue(status, scheduled_at);
-```
+### contacts key columns
+id, first_name, last_name, email, phone, status, source, tags[], lead_score, custom_fields (jsonb), last_ai_action, created_at
 
-### ai_actions_log service constraint (run if not yet updated)
-```sql
-ALTER TABLE ai_actions_log DROP CONSTRAINT IF EXISTS ai_actions_log_service_check;
-ALTER TABLE ai_actions_log ADD CONSTRAINT ai_actions_log_service_check CHECK (service IN ('bland', 'openai', 'resend', 'twilio'));
-```
+### sequence_queue key columns
+id, contact_id, sequence_name, step, channel (email|sms), template_key, scheduled_at, status (pending|sent|skipped|failed), sent_at
+
+### content_calendar key columns
+id, week_of, platform, caption, hashtags[], image_prompt, image_url, video_script, status (draft|approved|rejected|posted), posted_at
 
 ---
 
-## A2P SMS COMPLIANCE (completed)
+## Environment Variables
 
-All 4 TCR blockers resolved:
-- [x] `/terms` page live with program name, HELP/STOP disclosures, message frequency
-- [x] `/privacy` updated with "No mobile information or SMS opt-in data will be shared with third parties"
-- [x] SMS consent checkbox on landing page lead form (required)
-- [x] SMS disclosure + consent checkbox on quote page (required when phone entered)
-
----
-
-## VERCEL CRON JOBS
-
-| Path | Schedule | Purpose |
+| Variable | Purpose | Status |
 |---|---|---|
-| `/api/cron/weekly-content` | Mondays 1pm UTC | Generate 5 AI social posts |
-| `/api/cron/send-sequences` | Daily 10am UTC | Process SMS sequence queue |
-
-Note: Hobby plan supports 2 cron jobs, minimum daily frequency.
+| NEXT_PUBLIC_APP_URL | Base URL for links in emails/SMS | Set |
+| NEXT_PUBLIC_SUPABASE_URL | Supabase client | Set |
+| NEXT_PUBLIC_SUPABASE_ANON_KEY | Supabase client | Set |
+| SUPABASE_SERVICE_ROLE_KEY | Supabase admin | Set |
+| OPENAI_API_KEY | GPT-4o + DALL-E 3 | Set |
+| RESEND_API_KEY | Transactional email | Set |
+| BLAND_API_KEY | AI voice calls | Set |
+| TWILIO_ACCOUNT_SID | SMS | Set |
+| TWILIO_AUTH_TOKEN | SMS | Set |
+| TWILIO_PHONE_NUMBER | SMS from number | Set |
+| INSTAGRAM_BUSINESS_ACCOUNT_ID | 17841425195442497 | Set |
+| INSTAGRAM_ACCESS_TOKEN | Long-lived IG token | Set |
+| FACEBOOK_PAGE_ID | 1081317148396178 | Set |
+| FACEBOOK_PAGE_ACCESS_TOKEN | Page posting token | NEEDS ADDING |
+| NEXT_PUBLIC_FB_PIXEL_ID | 763101500966829 | Set |
+| NEXT_PUBLIC_GA_MEASUREMENT_ID | G-V6Q2E47C49 | Set |
+| CRON_SECRET | Protects cron endpoints | Set |
 
 ---
 
-## PUBLIC ASSETS
+## Cron Jobs (Vercel — 2 max on Hobby plan)
 
-| File | Purpose |
+| Job | Schedule | Purpose |
+|---|---|---|
+| /api/cron/send-sequences | 0 10 * * * (daily 10am UTC) | Send pending email/SMS + hot-lead branching |
+| /api/cron/weekly-content | 0 13 * * 1 (Mon 1pm UTC) | Auto-generate 5 social posts |
+
+---
+
+## Redirect Links
+
+| Label | URL |
 |---|---|
-| `public/hero-background.jpg` | Hero section background (beach/sunset, 6.9MB) |
-| `public/testimonials/testimonial-jessica.jpg` | Jessica T. photo |
-| `public/testimonials/testimonial-michelle.jpg` | Michelle R. photo |
-| `public/testimonials/testimonial-scott.jpg` | Scott L. photo |
+| Free Access | vortextrips.com/free |
+| Booking Portal | vortextrips.com/book |
+| Join / Membership | vortextrips.com/join |
+| Travel Quiz | vortextrips.com/quiz |
+| Member Reviews | vortextrips.com/reviews |
 
 ---
 
-## REDIRECT LINKS (use in all email/SMS copy)
+## Bugs Fixed (April 22, 2026 Audit)
 
-| Short Link | Destination |
-|---|---|
-| vortextrips.com/join | surge365.com signup |
-| vortextrips.com/free | myvortex365.com/leosp |
-| vortextrips.com/book | travmanity.com booking page |
-
----
-
-## ON HOLD (user decision)
-
-- Stripe payment integration
-- React Native / Expo mobile app
+1. Phone optional — API now allows lead creation without phone; call only fires if phone provided
+2. Reviews GET filter — const query → let query so destination filter applies
+3. Reviews POST — contact_id no longer required; guests can submit reviews
+4. Contacts API — membership_status → status column name fixed
+5. SMS log label — voice-call → sms action_type for accurate dashboard metrics
+6. Dashboard member count — was querying membership_status, now queries status = member
+7. Quiz progress bar — was 0% on Q1, now correctly shows 20% to 100%
+8. Thank-you page — removed incorrect AI framing; accurate AI consultant copy
+9. Email templates — reviewRequestEmail was outside EMAIL_TEMPLATES object
+10. Partners route — TypeScript spread type loss fixed with Partner interface
 
 ---
 
-## KNOWN LIMITS / NOTES
+## PAUSED
 
-- Vercel Hobby plan: max 2 cron jobs, minimum daily frequency (no sub-daily intervals)
-- SMS Day 0 sent directly in the lead webhook to bypass cron limit
-- Days 2/7/12 processed by daily 10am UTC cron (±24hr delivery window)
-- TypeScript strict mode: always use `Array.from(set)` not `[...set]` for Set iteration
+- Stripe payment integration — membership purchase, auto-activation, SBA trigger on payment
+
+---
+
+## Suggested Next Steps
+
+1. Add FACEBOOK_PAGE_ACCESS_TOKEN to Vercel env vars and redeploy
+2. Seed approved reviews in Supabase so /reviews page shows content
+3. Generate first week of content from dashboard → approve → auto-post to IG + FB
+4. Add first partner to partners table to enable lead routing
+5. Test full lead flow end-to-end with a real phone number
+6. Enable Stripe when ready to accept membership payments
