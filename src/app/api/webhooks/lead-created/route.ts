@@ -3,19 +3,18 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { triggerCall } from '@/lib/bland'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 
-function scheduledAt(minutesFromNow: number): string {
-  const d = new Date(Date.now() + minutesFromNow * 60 * 1000)
-  return d.toISOString()
+function hoursFromNow(hours: number): string {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 }
 
 function daysFromNow(days: number): string {
-  return scheduledAt(days * 24 * 60)
+  return hoursFromNow(days * 24)
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { first_name, email, phone, source = 'landing-page' } = body
+    const { first_name, email, phone, source = 'landing-page', utm_source, utm_medium, utm_campaign } = body
 
     if (!first_name || !email || !phone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -25,7 +24,14 @@ export async function POST(request: NextRequest) {
 
     const { data: contact, error: contactError } = await supabase
       .from('contacts')
-      .insert({ first_name, email, phone, source })
+      .insert({
+        first_name,
+        email,
+        phone,
+        source,
+        lead_score: 20, // base score for signing up
+        custom_fields: { utm_source, utm_medium, utm_campaign },
+      })
       .select()
       .single()
 
@@ -36,23 +42,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: contactError.message || 'Database error saving contact' }, { status: 500 })
     }
 
-    const { error: oppError } = await supabase.from('opportunities').insert({
+    await supabase.from('opportunities').insert({
       contact_id: contact.id,
       name: `${first_name} — Main Pipeline`,
       pipeline: 'main',
       stage: 'new-lead',
     })
 
-    if (oppError) {
-      console.error('Opportunity insert error:', oppError.message)
-    }
-
-    // Send Day 0 SMS immediately, queue the rest for daily cron
+    // Day 0 — SMS immediately
     if (phone) {
       try {
         await sendSMS(phone, SMS_TEMPLATES.leadDay0(first_name))
         await supabase.from('sequence_queue').insert({
-          contact_id: contact.id, sequence_name: 'lead-nurture', step: 1, channel: 'sms', template_key: 'leadDay0',
+          contact_id: contact.id, sequence_name: 'lead-nurture', step: 1,
+          channel: 'sms', template_key: 'leadDay0',
           scheduled_at: new Date().toISOString(), status: 'sent', sent_at: new Date().toISOString(),
         })
       } catch (smsErr) {
@@ -60,24 +63,36 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Full multi-channel nurture sequence
     await supabase.from('sequence_queue').insert([
-      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 2, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
-      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
-      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
+      // Day 1 — email welcome
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 2, channel: 'email', template_key: 'leadDay1', scheduled_at: daysFromNow(1) },
+      // Day 2 — SMS follow-up
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
+      // Day 3 — email social proof
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
+      // Day 5 — email savings calculator
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
+      // Day 7 — SMS + email urgency
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
+      // Day 10 — email FAQ
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
+      // Day 12 — SMS last chance
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
+      // Day 14 — email breakup
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
     ])
 
+    // Bland.ai voice call
     try {
       await triggerCall(phone, first_name, email, undefined, contact.id)
-      await supabase
-        .from('contacts')
+      await supabase.from('contacts')
         .update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' })
         .eq('id', contact.id)
     } catch (callError) {
       console.error('Bland call error:', callError)
-      await supabase
-        .from('contacts')
-        .update({ tags: ['call-failed'] })
-        .eq('id', contact.id)
+      await supabase.from('contacts').update({ tags: ['call-failed'] }).eq('id', contact.id)
     }
 
     return NextResponse.json({ success: true, contactId: contact.id })

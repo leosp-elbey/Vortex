@@ -118,12 +118,35 @@ export default function ContentPage() {
                     </>
                   )}
                   {item.status === 'approved' && (
-                    <button
-                      onClick={() => updateStatus(item.id, 'posted')}
-                      className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors font-medium"
-                    >
-                      Mark Posted
-                    </button>
+                    <>
+                      {item.platform === 'instagram' && (
+                        <button
+                          onClick={async () => {
+                            const res = await fetch('/api/automations/post-to-instagram', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ content_id: item.id }),
+                            })
+                            if (res.ok) {
+                              setContent(prev => prev.map(c => c.id === item.id ? { ...c, status: 'posted' as ContentCalendarItem['status'] } : c))
+                              show('Posted to Instagram!')
+                            } else {
+                              const d = await res.json()
+                              show(d.error ?? 'Instagram post failed', 'error')
+                            }
+                          }}
+                          className="text-xs bg-pink-100 text-pink-700 px-3 py-1 rounded-lg hover:bg-pink-200 transition-colors font-medium"
+                        >
+                          📸 Post to IG
+                        </button>
+                      )}
+                      <button
+                        onClick={() => updateStatus(item.id, 'posted')}
+                        className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors font-medium"
+                      >
+                        Mark Posted
+                      </button>
+                    </>
                   )}
                   {(item.status === 'rejected' || item.status === 'posted') && (
                     <button

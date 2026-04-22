@@ -51,4 +51,7 @@ export const SMS_TEMPLATES = {
 
   sbaDay7: (firstName: string) =>
     `Hey ${firstName}! Quick check-in from VortexTrips. How are your first bookings going? Need help? Reply here or email support@vortextrips.com. Ready to level up? vortextrips.com/join`,
+
+  reviewRequestSms: (firstName: string, destination?: string) =>
+    `Hey ${firstName}! Hope your${destination ? ` ${destination}` : ''} trip was amazing! We'd love a quick review — it takes 60 seconds and helps other travelers. ${process.env.NEXT_PUBLIC_APP_URL}/reviews — Reply STOP to opt out.`,
 }
