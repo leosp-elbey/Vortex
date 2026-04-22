@@ -9,6 +9,17 @@ import { useToast, Toaster } from '@/components/ui/toast'
 
 const STATUS_OPTIONS: ContactStatus[] = ['lead', 'qualified', 'quoted', 'member', 'churned']
 
+const SOURCE_OPTIONS = [
+  'landing-page', 'quiz', 'referral', 'facebook', 'instagram',
+  'tiktok', 'google', 'sba', 'partner', 'manual', 'other',
+]
+
+const BLANK_FORM = {
+  first_name: '', last_name: '', email: '', phone: '',
+  source: 'manual', status: 'lead' as ContactStatus,
+  destination: '', notes: '', enroll_sequence: false,
+}
+
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
@@ -20,6 +31,9 @@ export default function LeadsPage() {
   const [activeContact, setActiveContact] = useState<Contact | null>(null)
   const [contactActions, setContactActions] = useState<AIActionLog[]>([])
   const [loadingActions, setLoadingActions] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [addForm, setAddForm] = useState(BLANK_FORM)
+  const [addLoading, setAddLoading] = useState(false)
   const { toasts, show } = useToast()
 
   useEffect(() => {
@@ -103,6 +117,28 @@ export default function LeadsPage() {
     show('Status updated')
   }
 
+  const handleAddLead = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddLoading(true)
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(addForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to add lead')
+      setLeads(prev => [data as Contact, ...prev])
+      setAddForm(BLANK_FORM)
+      setShowAddModal(false)
+      show(`${addForm.first_name} added successfully${addForm.enroll_sequence ? ' — enrolled in nurture sequence' : ''}`)
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Failed to add lead', 'error')
+    } finally {
+      setAddLoading(false)
+    }
+  }
+
   const actionLabel: Record<string, string> = {
     'voice-call': 'Voice Call',
     'quote-email': 'Quote Email',
@@ -118,6 +154,12 @@ export default function LeadsPage() {
           <h1 className="text-3xl font-black text-[#1A1A2E]">Leads</h1>
           <p className="text-gray-500">{leads.length} contacts total</p>
         </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="bg-[#FF6B35] text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-[#e55a25] transition-colors flex items-center gap-2"
+        >
+          + Add Lead
+        </button>
       </div>
 
       {/* Search + Filter */}
@@ -337,6 +379,148 @@ export default function LeadsPage() {
           </div>
         )}
       </SlidePanel>
+
+      {/* Add Lead Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-xl font-black text-[#1A1A2E]">Add Existing Lead</h2>
+              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <form onSubmit={handleAddLead} className="p-6 space-y-4">
+              {/* Name row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">First Name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text" required autoComplete="off"
+                    value={addForm.first_name}
+                    onChange={e => setAddForm(f => ({ ...f, first_name: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30"
+                    placeholder="Jane"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Last Name</label>
+                  <input
+                    type="text" autoComplete="off"
+                    value={addForm.last_name}
+                    onChange={e => setAddForm(f => ({ ...f, last_name: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30"
+                    placeholder="Smith"
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Email <span className="text-red-500">*</span></label>
+                <input
+                  type="email" required autoComplete="off"
+                  value={addForm.email}
+                  onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30"
+                  placeholder="jane@email.com"
+                />
+              </div>
+
+              {/* Phone */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Phone</label>
+                <input
+                  type="tel" autoComplete="off"
+                  value={addForm.phone}
+                  onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30"
+                  placeholder="+1 555 000 0000"
+                />
+              </div>
+
+              {/* Source + Status row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Source</label>
+                  <select
+                    value={addForm.source}
+                    onChange={e => setAddForm(f => ({ ...f, source: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30 bg-white"
+                  >
+                    {SOURCE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+                  <select
+                    value={addForm.status}
+                    onChange={e => setAddForm(f => ({ ...f, status: e.target.value as ContactStatus }))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30 bg-white"
+                  >
+                    {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Destination interest */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Destination Interest</label>
+                <input
+                  type="text" autoComplete="off"
+                  value={addForm.destination}
+                  onChange={e => setAddForm(f => ({ ...f, destination: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30"
+                  placeholder="Cancún, Paris, Vegas..."
+                />
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Notes</label>
+                <textarea
+                  rows={2}
+                  value={addForm.notes}
+                  onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35]/30 resize-none"
+                  placeholder="Any context about this lead..."
+                />
+              </div>
+
+              {/* Enroll in sequence */}
+              <label className="flex items-start gap-3 cursor-pointer bg-[#FF6B35]/5 border border-[#FF6B35]/20 rounded-xl p-4">
+                <input
+                  type="checkbox"
+                  checked={addForm.enroll_sequence}
+                  onChange={e => setAddForm(f => ({ ...f, enroll_sequence: e.target.checked }))}
+                  className="mt-0.5 accent-[#FF6B35]"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-[#1A1A2E]">Enroll in 14-day nurture sequence</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Schedules the full email + SMS drip starting tomorrow. Only check if the lead hasn&apos;t already been contacted.</p>
+                </div>
+              </label>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addLoading}
+                  className="flex-1 px-4 py-2.5 bg-[#FF6B35] text-white rounded-lg text-sm font-semibold hover:bg-[#e55a25] transition-colors disabled:opacity-60"
+                >
+                  {addLoading ? 'Adding...' : 'Add Lead'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <Toaster toasts={toasts} />
     </div>
