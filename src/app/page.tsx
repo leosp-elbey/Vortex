@@ -35,8 +35,7 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
       />
       <input
         type="tel"
-        placeholder="Phone Number (e.g. 555-867-5309)"
-        required
+        placeholder="Phone Number (optional — for 60-sec savings call)"
         autoComplete="tel"
         value={form.phone}
         onChange={e => onChange('phone', e.target.value)}
@@ -114,10 +113,15 @@ export default function LandingPage() {
       <nav className="bg-[#1A1A2E] px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></span>
-          <span className="text-xs text-gray-400 ml-1">by Travel Team Perks</span>
+        </div>
+        <div className="hidden md:flex items-center gap-6 text-sm text-gray-400">
+          <a href="/quiz" className="hover:text-white transition-colors">Travel Quiz</a>
+          <a href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</a>
+          <a href="/reviews" className="hover:text-white transition-colors">Reviews</a>
+          <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
         </div>
         <a href="#hero-form" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
-          Get Access
+          Join Free
         </a>
       </nav>
 
@@ -261,6 +265,51 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Destinations */}
+      <section className="py-20 px-6 bg-gray-50">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-black text-[#1A1A2E] mb-4">Popular Destinations</h2>
+            <p className="text-gray-500 text-lg">See exactly what members are saving on top trips</p>
+          </div>
+          <div className="grid md:grid-cols-5 gap-4">
+            {[
+              { slug: 'cancun', name: 'Cancún', emoji: '🌴', saved: 'Save up to 59%' },
+              { slug: 'paris', name: 'Paris', emoji: '🗼', saved: 'Save up to 50%' },
+              { slug: 'vegas', name: 'Las Vegas', emoji: '🎰', saved: 'Save up to 55%' },
+              { slug: 'caribbean', name: 'Caribbean', emoji: '🚢', saved: 'Save up to 52%' },
+              { slug: 'orlando', name: 'Orlando', emoji: '🎡', saved: 'Save up to 48%' },
+            ].map(({ slug, name, emoji, saved }) => (
+              <a
+                key={slug}
+                href={`/destinations/${slug}`}
+                className="bg-white rounded-xl p-5 text-center shadow-sm hover:shadow-md hover:border-[#FF6B35] border-2 border-transparent transition-all group"
+              >
+                <div className="text-4xl mb-3">{emoji}</div>
+                <p className="font-bold text-[#1A1A2E] group-hover:text-[#FF6B35] transition-colors">{name}</p>
+                <p className="text-xs text-[#16C79A] font-semibold mt-1">{saved}</p>
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Quiz CTA banner */}
+      <section className="py-14 px-6 bg-[#FF6B35]">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h2 className="text-3xl font-black text-white mb-2">Not Sure Where to Go?</h2>
+            <p className="text-white/80 text-lg">Take our 60-second travel quiz — we'll match you with the perfect destination and your best savings.</p>
+          </div>
+          <a
+            href="/quiz"
+            className="shrink-0 bg-white text-[#FF6B35] font-black px-8 py-4 rounded-xl text-lg hover:bg-gray-100 transition-colors whitespace-nowrap"
+          >
+            Take the Quiz →
+          </a>
+        </div>
+      </section>
+
       {/* Final CTA */}
       <section id="join" className="py-20 px-6 bg-[#1A1A2E]">
         <div className="max-w-2xl mx-auto text-center">
@@ -286,8 +335,11 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-[#0d0d1a] text-gray-500 py-10 px-6 text-center text-sm">
         <div className="max-w-5xl mx-auto">
-          <p className="text-white font-bold text-lg mb-2">VortexTrips <span className="text-[#FF6B35]">/ Travel Team Perks</span></p>
+          <p className="text-white font-bold text-lg mb-2">VortexTrips</p>
           <div className="flex justify-center gap-6 mb-4 flex-wrap">
+            <a href="/quiz" className="hover:text-white transition-colors">Travel Quiz</a>
+            <a href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</a>
+            <a href="/reviews" className="hover:text-white transition-colors">Member Reviews</a>
             <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
             <a href="/join" className="hover:text-white transition-colors">Join Now</a>
             <a href="mailto:support@vortextrips.com" className="hover:text-white transition-colors">Contact</a>
