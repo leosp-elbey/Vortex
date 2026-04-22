@@ -12,6 +12,7 @@ const navItems = [
   { href: '/dashboard/calls', label: 'Calls', icon: '📞' },
   { href: '/dashboard/content', label: 'Content', icon: '✍️' },
   { href: '/dashboard/attribution', label: 'Attribution', icon: '📡' },
+  { href: '/dashboard/import', label: 'Import Leads', icon: '📥' },
   { href: '/dashboard/settings', label: 'Settings', icon: '⚙️' },
 ]
 

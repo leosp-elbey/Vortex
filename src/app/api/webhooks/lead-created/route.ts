@@ -14,7 +14,11 @@ function daysFromNow(days: number): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { first_name, email, phone, source = 'landing-page', utm_source, utm_medium, utm_campaign } = body
+    const {
+      first_name, last_name, email, phone, source = 'landing-page',
+      utm_source, utm_medium, utm_campaign,
+      status = 'lead', sms_consent = false, enroll_sba = false,
+    } = body
 
     if (!first_name || !email) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -26,11 +30,16 @@ export async function POST(request: NextRequest) {
       .from('contacts')
       .insert({
         first_name,
+        last_name: last_name || null,
         email,
-        phone,
+        phone: phone || null,
         source,
-        lead_score: 20, // base score for signing up
-        custom_fields: { utm_source, utm_medium, utm_campaign },
+        status,
+        lead_score: 20,
+        custom_fields: {
+          utm_source, utm_medium, utm_campaign,
+          ...(sms_consent ? { sms_consent: 'true' } : {}),
+        },
       })
       .select()
       .single()
@@ -44,8 +53,8 @@ export async function POST(request: NextRequest) {
 
     await supabase.from('opportunities').insert({
       contact_id: contact.id,
-      name: `${first_name} — Main Pipeline`,
-      pipeline: 'main',
+      name: `${first_name} — ${enroll_sba ? 'SBA' : 'Main'} Pipeline`,
+      pipeline: enroll_sba ? 'sba' : 'main',
       stage: 'new-lead',
     })
 
@@ -83,6 +92,20 @@ export async function POST(request: NextRequest) {
       // Day 14 — email breakup
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
     ])
+
+    // SBA sequence — enroll in SBA drip instead of lead-nurture when coming from /sba page
+    if (enroll_sba) {
+      await supabase.from('sequence_queue').insert([
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 1, channel: 'email', template_key: 'sbaDay1', scheduled_at: hoursFromNow(0.25) },
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 2, channel: 'email', template_key: 'sbaDay3', scheduled_at: daysFromNow(3) },
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 3, channel: 'email', template_key: 'sbaDay7', scheduled_at: daysFromNow(7) },
+        ...(phone && sms_consent ? [
+          { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 4, channel: 'sms', template_key: 'sbaDay0', scheduled_at: new Date().toISOString() },
+          { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 5, channel: 'sms', template_key: 'sbaDay7', scheduled_at: daysFromNow(7) },
+        ] : []),
+      ])
+      await supabase.from('contacts').update({ last_ai_action: 'SBA application received' }).eq('id', contact.id)
+    }
 
     // Bland.ai voice call (only if phone provided)
     try {

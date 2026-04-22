@@ -266,6 +266,275 @@ export const EMAIL_TEMPLATES = {
     `),
   }),
 
+  // ─── MLM / NETWORK MARKETER OUTREACH SEQUENCE ────────────────────────────
+
+  // Day 0 — Pattern interrupt. Speak their language.
+  mlmDay0: (firstName: string) => ({
+    subject: `${firstName} — the travel product that sells itself`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — quick question.</h2>
+      <p>How many times have you pitched a product and had to explain why someone needs it?</p>
+      <p>Travel is different. Everyone already wants to travel. The only question is: <strong>how much are they paying?</strong></p>
+      <p>VortexTrips gives members access to hotel rates 40–60% below Expedia, Booking.com, and every other public platform. When you show someone a side-by-side price comparison — the same room, same dates — it closes itself.</p>
+      ${savingsBadge('No convincing required. The savings do the selling.')}
+      <p>Over the next two weeks I want to show you exactly how this works, what our affiliates earn, and why travel converts better than almost any other product in network marketing.</p>
+      <p>First — want to see a real price comparison? Here's a live look at member rates:</p>
+      ${ctaButton('See Member Rates →', `${BASE_URL}/destinations/cancun`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 2 — The product demo. Let the price gap do the work.
+  mlmDay2: (firstName: string) => ({
+    subject: `${firstName}, this is what your customers will see`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">This is what closes deals, ${firstName}.</h2>
+      <p>When you share VortexTrips with someone, here's what they see:</p>
+      <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:15px">
+        <thead>
+          <tr style="background:#1A1A2E;color:white">
+            <th style="padding:12px 16px;text-align:left">Same hotel. Same dates. Same room.</th>
+            <th style="padding:12px 16px;text-align:center">Expedia</th>
+            <th style="padding:12px 16px;text-align:center;color:#16C79A">VortexTrips</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#f9f9f9"><td style="padding:12px 16px">Cancún all-inclusive (4 nights)</td><td style="padding:12px 16px;text-align:center">$2,800</td><td style="padding:12px 16px;text-align:center;color:#16C79A;font-weight:700">$1,540</td></tr>
+          <tr><td style="padding:12px 16px">Paris 4-star (3 nights)</td><td style="padding:12px 16px;text-align:center">$1,960</td><td style="padding:12px 16px;text-align:center;color:#16C79A;font-weight:700">$980</td></tr>
+          <tr style="background:#f9f9f9"><td style="padding:12px 16px">Vegas luxury suite (2 nights)</td><td style="padding:12px 16px;text-align:center">$1,200</td><td style="padding:12px 16px;text-align:center;color:#16C79A;font-weight:700">$620</td></tr>
+        </tbody>
+      </table>
+      <p>That's the demo. Screenshot it. Post it. Send it. That's your content.</p>
+      <p>People don't need convincing — they need to see the number. Once they see $1,260 saved on a single trip, the membership cost is irrelevant.</p>
+      ${ctaButton('See Full Destination Pricing →', `${BASE_URL}/destinations/cancun`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 4 — SBA earnings. Show the money.
+  mlmDay4: (firstName: string) => ({
+    subject: `What VortexTrips affiliates actually earn, ${firstName}`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let's talk about the money, ${firstName}.</h2>
+      <p>You're in network marketing. You know how to evaluate an opportunity. So let me give you the straight numbers.</p>
+      <div style="background:#1A1A2E;border-radius:12px;padding:24px;margin:20px 0;color:white">
+        <p style="margin:0 0 16px;font-weight:700;color:#FF6B35;font-size:16px">Smart Business Affiliate (SBA) Program</p>
+        <div style="display:grid;gap:12px">
+          <div style="background:white/10;border-radius:8px;padding:12px 16px;background:rgba(255,255,255,0.08)">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">Membership Commissions</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Earn on every membership your referrals activate. Residual income on renewals.</p>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">No inventory. No shipping. No explaining.</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Digital product. Members access rates instantly. Nothing to fulfill.</p>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">The product sells itself</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Show the price comparison. Members save more than the annual cost on their first trip.</p>
+          </div>
+        </div>
+      </div>
+      <p>The best part? <strong>You're already talking to people who spend money on travel.</strong> Your existing network is your market.</p>
+      ${ctaButton('See the SBA Opportunity →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 6 — Objection handling. Answers to what they're thinking.
+  mlmDay6: (firstName: string) => ({
+    subject: `"I'm already in something" — I hear this a lot, ${firstName}`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">"I already have a company." — Let me address this directly.</h2>
+      <p>Most people I talk to are already in network marketing. Some are killing it. Some are grinding. Here's what I tell them:</p>
+      <div style="margin:20px 0">
+        <p style="font-weight:700;color:#FF6B35;margin-bottom:4px">VortexTrips doesn't compete with what you're doing.</p>
+        <p style="color:#444;margin-bottom:16px">Travel savings is a completely different conversation than health products, skincare, or financial services. Your same network, completely different market positioning.</p>
+        <p style="font-weight:700;color:#FF6B35;margin-bottom:4px">You can run it alongside your existing business.</p>
+        <p style="color:#444;margin-bottom:16px">Many of our top affiliates use it as a second income stream — or a conversation starter that leads people into their primary opportunity.</p>
+        <p style="font-weight:700;color:#FF6B35;margin-bottom:4px">The product creates fans, not just customers.</p>
+        <p style="color:#444;margin-bottom:0">When someone saves $1,400 on their vacation, they tell their friends. Organic referrals come naturally when the savings are real.</p>
+      </div>
+      ${savingsBadge('Your network already spends money on travel. Redirect that spend.')}
+      ${ctaButton('Learn How the SBA Program Works →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 9 — Social proof from SBAs
+  mlmDay9: (firstName: string) => ({
+    subject: `${firstName} — what network marketers are saying after 90 days`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Real results from people who were exactly where you are, ${firstName}.</h2>
+      <div style="background:#f9f9f9;border-left:4px solid #FF6B35;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
+        <p style="margin:0 0 8px;font-style:italic;color:#444">"I've been in 3 different MLMs. Travel is the easiest conversation I've ever had. I showed my cousin a hotel comparison and she signed up before I finished explaining. It literally sells itself."</p>
+        <p style="margin:0;font-size:13px;font-weight:700;color:#FF6B35">— Marcus D., Miami FL · SBA for 6 months</p>
+      </div>
+      <div style="background:#f9f9f9;border-left:4px solid #16C79A;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
+        <p style="margin:0 0 8px;font-style:italic;color:#444">"I post a price comparison screenshot once a week on Instagram. My DMs fill up. I don't have to pitch — people ask me how to get access."</p>
+        <p style="margin:0;font-size:13px;font-weight:700;color:#16C79A">— Tamika R., Houston TX · SBA for 4 months</p>
+      </div>
+      <div style="background:#f9f9f9;border-left:4px solid #FF6B35;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
+        <p style="margin:0 0 8px;font-style:italic;color:#444">"The training and support is better than any company I've been with. And the product? I used it myself first — saved over $2,000 on a family trip. That's my testimonial."</p>
+        <p style="margin:0;font-size:13px;font-weight:700;color:#FF6B35">— Jerome W., Atlanta GA · SBA for 3 months</p>
+      </div>
+      <p>${firstName}, the pattern here is the same: <strong>use it, save money, share the screenshot.</strong> That's the entire playbook.</p>
+      ${ctaButton('Start Your SBA Application →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 12 — The comparison close. Travel vs other MLMs.
+  mlmDay12: (firstName: string) => ({
+    subject: `${firstName}, why travel beats supplements in network marketing`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let me make a case for travel, ${firstName}.</h2>
+      <p>I've watched people struggle in network marketing for years trying to sell things people don't urgently want. Here's the honest comparison:</p>
+      <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:14px">
+        <thead>
+          <tr style="background:#1A1A2E;color:white">
+            <th style="padding:12px 16px;text-align:left">Factor</th>
+            <th style="padding:12px 16px;text-align:center">Supplements / Skincare</th>
+            <th style="padding:12px 16px;text-align:center;color:#16C79A">Travel (VortexTrips)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#f9f9f9"><td style="padding:10px 16px">Universal demand</td><td style="padding:10px 16px;text-align:center">Niche</td><td style="padding:10px 16px;text-align:center;color:#16C79A;font-weight:700">Everyone travels</td></tr>
+          <tr><td style="padding:10px 16px">Demo-able instantly</td><td style="padding:10px 16px;text-align:center">Takes weeks to show results</td><td style="padding:10px 16px;text-align:center;color:#16C79A;font-weight:700">Show price gap in 30 seconds</td></tr>
+          <tr style="background:#f9f9f9"><td style="padding:10px 16px">Emotional appeal</td><td style="padding:10px 16px;text-align:center">Medium</td><td style="padding:10px 16px;text-align:center;color:#16C79A;font-weight:700">High — vacations are dreams</td></tr>
+          <tr><td style="padding:10px 16px">Recurring spend</td><td style="padding:10px 16px;text-align:center">Monthly product order</td><td style="padding:10px 16px;text-align:center;color:#16C79A;font-weight:700">Annual membership renewal</td></tr>
+          <tr style="background:#f9f9f9"><td style="padding:10px 16px">Content creation</td><td style="padding:10px 16px;text-align:center">Hard to make interesting</td><td style="padding:10px 16px;text-align:center;color:#16C79A;font-weight:700">Travel photos = viral content</td></tr>
+        </tbody>
+      </table>
+      <p>The window to get in early on a product like this doesn't stay open forever. Our SBA program is growing fast.</p>
+      ${ctaButton('Reserve Your SBA Spot →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Day 15 — Hard close.
+  mlmDay15: (firstName: string) => ({
+    subject: `${firstName} — last note from me for a while`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">I'll keep this short, ${firstName}.</h2>
+      <p>I've shared the product. I've shown the earnings. I've given you the full picture.</p>
+      <p>If the timing isn't right, I completely respect that. But before I stop following up, I want to leave you with one question:</p>
+      ${savingsBadge('"What would it mean to have a business where the product sells itself?"')}
+      <p>That's what VortexTrips is for our best affiliates. Not hype. Not promises. Just a product with obvious, demonstrable, immediate value — in an industry (travel) that people already spend thousands on every year.</p>
+      <p>When you're ready — whether that's next week or next year — the SBA program will still be here.</p>
+      ${ctaButton('Join as an SBA →', `${BASE_URL}/sba`)}
+      <p>If you want to unsubscribe from these emails, just reply "unsubscribe" and I'll remove you immediately.</p>
+      <p style="color:#888;font-size:14px">Wishing you success wherever your business takes you.<br><br><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // ─── MLM LONG-TERM MONTHLY NURTURE ────────────────────────────────────────
+
+  // Month 1 (Day 30) — Soft re-engagement. New angle.
+  mlmMonth1: (firstName: string) => ({
+    subject: `${firstName} — one travel deal worth seeing this month`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — checking in with something real.</h2>
+      <p>I know you're busy. I'm not going to pitch you on the business today.</p>
+      <p>I just wanted to share what members are getting access to right now:</p>
+      <div style="background:#1A1A2E;border-radius:12px;padding:20px 24px;margin:20px 0;color:white">
+        <p style="margin:0 0 12px;font-weight:700;color:#FF6B35">🏖️ This month's member highlight</p>
+        <p style="margin:0 0 8px;font-size:15px">Cancún all-inclusive, 5 nights for 2 — <strong style="color:#16C79A">$1,380 member rate</strong> vs $2,950 on Expedia</p>
+        <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.7)">That's $1,570 saved on one trip.</p>
+      </div>
+      <p>If you travel at all — even once a year — the membership pays for itself in one night. And if you share it with two people who travel, your membership is free.</p>
+      ${ctaButton('See Member Rates →', `${BASE_URL}/destinations/cancun`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Month 2 (Day 60) — Results-focused. Real member win.
+  mlmMonth2: (firstName: string) => ({
+    subject: `${firstName} — a member just saved $3,200 on their honeymoon`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">This happened last week, ${firstName}.</h2>
+      <p>A VortexTrips member just booked their honeymoon in Paris. Here's what the numbers looked like:</p>
+      <div style="background:#f9f9f9;border-radius:12px;padding:20px;margin:20px 0">
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee"><span style="color:#666">Hotel (5 nights, 4-star)</span><span style="color:#16C79A;font-weight:700">Saved $1,980</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee"><span style="color:#666">Flights (consolidator rates)</span><span style="color:#16C79A;font-weight:700">Saved $840</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0"><span style="color:#666">Activities bundle</span><span style="color:#16C79A;font-weight:700">Saved $380</span></div>
+        <div style="display:flex;justify-content:space-between;padding:12px 0;margin-top:8px;border-top:2px solid #1A1A2E"><span style="font-weight:700;color:#1A1A2E">Total savings</span><span style="font-weight:900;color:#16C79A;font-size:18px">$3,200</span></div>
+      </div>
+      <p>That's someone's honeymoon that cost $3,200 less than it would have on Booking.com. Their membership paid for itself <strong>8 times over</strong> on one trip.</p>
+      <p>That's the story you tell your network, ${firstName}. You don't have to sell — you just share the receipt.</p>
+      ${ctaButton('Start Sharing + Earning →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Month 3 (Day 90) — Quarter check-in. FOMO angle.
+  mlmMonth3: (firstName: string) => ({
+    subject: `${firstName} — 3 months of savings you could have had`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">3 months. Here's what members saved, ${firstName}.</h2>
+      <p>Since we first connected, VortexTrips members have collectively saved over <strong>$800,000</strong> on travel.</p>
+      <p>I don't say that to make you feel like you missed out — I say it because the window is still open.</p>
+      ${savingsBadge('Every month you wait is another month of full retail prices.')}
+      <p>The SBA program is still growing. Our affiliates who started 3 months ago are seeing consistent results. The ones who waited are starting from zero.</p>
+      <p>I'm not going to oversell this. But I do want to make sure you have the full picture before you decide this isn't for you:</p>
+      <ul style="padding-left:20px;color:#444">
+        <li style="margin-bottom:8px">Product that sells itself (provable savings in 30 seconds)</li>
+        <li style="margin-bottom:8px">Residual income from annual membership renewals</li>
+        <li style="margin-bottom:8px">No inventory, no shipping, no explaining</li>
+        <li style="margin-bottom:8px">Travel content = the easiest social media in any niche</li>
+      </ul>
+      ${ctaButton('Get Started Today →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Month 4 (Day 120) — Seasonal/timely. Spring/summer travel push.
+  mlmMonth4: (firstName: string) => ({
+    subject: `${firstName} — summer travel season is coming. Are you ready?`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Summer is the biggest travel season of the year, ${firstName}.</h2>
+      <p>Every year, millions of families spend thousands more than they need to on summer vacations — because they don't know member rates exist.</p>
+      <p>That's your market. Those are your potential customers.</p>
+      <div style="background:#FF6B35/10;border:2px solid #FF6B35;border-radius:12px;padding:20px;margin:20px 0;background:rgba(255,107,53,0.08)">
+        <p style="margin:0 0 8px;font-weight:700;color:#FF6B35">The summer opportunity:</p>
+        <p style="margin:0;color:#444">When someone is actively planning a summer trip — they are <em>already motivated to buy</em>. You're not creating demand. You're just redirecting their existing spend to a better source.</p>
+      </div>
+      <p>The affiliates making the most right now are posting summer deal comparisons. Cancún. Caribbean. Orlando. Vegas. Every destination is a post. Every post is a potential signup.</p>
+      <p>Get set up now before peak season hits.</p>
+      ${ctaButton('Join as an SBA Before Summer →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Month 5 (Day 150) — Value re-anchor. New testimonial angle.
+  mlmMonth5: (firstName: string) => ({
+    subject: `${firstName} — this post got 47 DMs in 24 hours`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">One screenshot. 47 DMs. ${firstName}, this is the content strategy.</h2>
+      <p>One of our SBAs posted a side-by-side hotel comparison on Instagram last week. Same hotel. Same dates. $1,800 difference.</p>
+      <p>47 people DMed asking how to get access. She didn't pitch anyone. She just showed the math.</p>
+      <p><strong>That's it.</strong> That's the entire business model in one post.</p>
+      <p>People are already talking about travel. They're already planning trips. They're already spending the money. The only question is: are they spending it at retail or at member rates?</p>
+      <p>When you're an SBA, every time someone in your network books a trip — you have a reason to reach out. A value-add that costs you nothing.</p>
+      ${ctaButton('Become an SBA →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px">You've been on my list for a while now, ${firstName}. I respect your time. I'll keep sending you value — and when the timing is right, I'll be here.<br><br><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
+  // Month 6 (Day 180) — The final long-term touch. Respect + open door.
+  mlmMonth6: (firstName: string) => ({
+    subject: `6 months, ${firstName}. Still here when you're ready.`,
+    html: wrapper(`
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — 6 months. I want to say something real.</h2>
+      <p>You've been on my list for half a year. I respect that you're thoughtful about what you put your time and name behind.</p>
+      <p>I'm not going to pressure you. But I do want to leave you with this:</p>
+      ${savingsBadge('The best time to start was 6 months ago. The second best time is today.')}
+      <p>Our SBAs who started when you first heard from me? Some of them have built real residual income. The product is the same. The opportunity is the same. The only difference is they started.</p>
+      <p>If you ever want to have a real conversation about whether this makes sense for you — just reply to this email. No pitch. No pressure. Just a straight answer to whatever questions you have.</p>
+      ${ctaButton('See the SBA Program →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:14px">Whatever you decide, ${firstName} — thank you for your time and attention. I hope your travel plans and your business are both thriving.<br><br><strong>— Leo, VortexTrips</strong></p>
+    `),
+  }),
+
   // ─── POST-TRIP REVIEW REQUEST ─────────────────────────────────────────────
 
   reviewRequestEmail: (firstName: string, destination?: string) => ({
