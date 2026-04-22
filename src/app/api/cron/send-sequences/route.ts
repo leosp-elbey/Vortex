@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
         await sendSMS(contact.phone, templateFn(contact.first_name))
         await supabase.from('ai_actions_log').insert({
           contact_id: item.contact_id,
-          action_type: 'voice-call',
+          action_type: 'sms',
           service: 'twilio',
           status: 'success',
           request_payload: { template_key: item.template_key, sequence: item.sequence_name, step: item.step } as Record<string, unknown>,

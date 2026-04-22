@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   let query = supabase.from('contacts').select('*').order('created_at', { ascending: false })
 
   if (status) query = query.eq('status', status)
-  if (membership) query = query.eq('membership_status', membership)
+  if (membership) query = query.eq('status', membership)
   if (search) {
     query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`)
   }

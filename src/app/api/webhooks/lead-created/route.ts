@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { first_name, email, phone, source = 'landing-page', utm_source, utm_medium, utm_campaign } = body
 
-    if (!first_name || !email || !phone) {
+    if (!first_name || !email) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
@@ -84,8 +84,9 @@ export async function POST(request: NextRequest) {
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
     ])
 
-    // Bland.ai voice call
+    // Bland.ai voice call (only if phone provided)
     try {
+      if (!phone) throw new Error('No phone — skipping call')
       await triggerCall(phone, first_name, email, undefined, contact.id)
       await supabase.from('contacts')
         .update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' })
