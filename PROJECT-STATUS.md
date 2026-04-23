@@ -1,5 +1,5 @@
 # VortexTrips — Full System Status
-**Last updated:** April 22, 2026  
+**Last updated:** April 23, 2026  
 **Branch:** main | **Deployed:** Vercel (Hobby)  
 **Stack:** Next.js 14 App Router · TypeScript · Supabase · Resend · Twilio · Bland.ai · OpenAI
 
@@ -19,10 +19,36 @@
 | Destination — Caribbean | `/destinations/caribbean` | ✅ |
 | Destination — Orlando | `/destinations/orlando` | ✅ |
 | Reviews wall | `/reviews` | ✅ Public social proof + submit form (pending approval flow) |
+| SBA landing page | `/sba` | ✅ Affiliate pitch, earnings table, FAQ, opt-in form |
 | Join page | `/join` | ✅ Pricing $399/yr, savings calculator, money-back guarantee |
+| Booking bridge | `/traveler.html` | ✅ Shows leosp code, steps, then sends to travmanity.com |
 | Thank-you page | `/thank-you` | ✅ Variants: lead / quote / sba |
 | Privacy policy | `/privacy` | ✅ A2P-compliant SMS clause |
 | Terms of service | `/terms` | ✅ TCR-compliant SMS program terms |
+
+### Short Links (next.config.js redirects)
+| Shortlink | Destination | Purpose |
+|---|---|---|
+| `/go` | `/traveler.html` | Booking bridge — shows leosp code |
+| `/book` | `/traveler.html` | Booking bridge — shows leosp code |
+| `/free` | `https://myvortex365.com/leosp` | Free savings account signup |
+| `/join` | `https://signup.surge365.com/signup` | SBA affiliate enrollment |
+
+### Three Affiliate URLs (memorize these)
+| Purpose | URL |
+|---|---|
+| Free savings account | `https://myvortex365.com/leosp` |
+| Book a trip (needs code leosp) | `https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate` |
+| SBA / earn opportunity | `https://signup.surge365.com/signup` |
+
+### DNS & Hosting
+| Domain | Config | Status |
+|---|---|---|
+| `vortextrips.com` | A record → 76.76.21.21 (Vercel) — DNS only in Cloudflare | ✅ Valid |
+| `www.vortextrips.com` | CNAME → 0e96721237cabeff.vercel-d… — DNS only | ✅ Valid — Production |
+| `vortextrips.com` redirects | 307 → www.vortextrips.com (Vercel setting) | ✅ Active |
+
+---
 
 ### Lead Capture & CRM
 | Feature | Status | Notes |
@@ -35,7 +61,7 @@
 | Duplicate email detection | ✅ | Returns 409, shows friendly error on form |
 | SMS opt-out handling | ✅ | sms-optout tag skips SMS in sequences |
 
-### Multi-Channel Drip Sequences (14-day)
+### Multi-Channel Drip Sequences (14-day leads)
 | Step | Day | Channel | Template |
 |---|---|---|---|
 | 0 | Immediate | SMS | leadDay0 — Welcome |
@@ -50,6 +76,17 @@
 | 9 | Day 14 | Email | leadDay14 — Breakup email |
 
 Cron: `0 10 * * *` (daily 10am UTC via Vercel)
+
+### MLM Bulk Import & 13-Step Nurture
+| Feature | Status |
+|---|---|
+| CSV drag-and-drop importer | ✅ at `/dashboard/import` |
+| Flexible column parser (first_name, firstname, etc.) | ✅ |
+| Preview table with valid/invalid row highlighting | ✅ |
+| Batch insert (groups of 50, dedup by email) | ✅ |
+| 13-step MLM sequence auto-enrolled on import | ✅ |
+| Steps 1-7: Days 0/2/4/6/9/12/15 | ✅ |
+| Steps 8-13: Months 1/2/3/4/5/6 | ✅ |
 
 ### Lead Scoring & Behavioral Branching
 | Feature | Status |
@@ -123,6 +160,7 @@ Cron: `0 10 * * *` (daily 10am UTC via Vercel)
 | Calls | ✅ | Bland.ai call log |
 | Content | ✅ | Image previews, video scripts, per-platform post buttons |
 | Attribution | ✅ | Source breakdown, UTM table, intent leaderboard |
+| Import Leads | ✅ | CSV drag-and-drop at /dashboard/import |
 | Settings | ✅ | |
 
 ---
@@ -166,11 +204,11 @@ id, week_of, platform, caption, hashtags[], image_prompt, image_url, video_scrip
 | BLAND_API_KEY | AI voice calls | Set |
 | TWILIO_ACCOUNT_SID | SMS | Set |
 | TWILIO_AUTH_TOKEN | SMS | Set |
-| TWILIO_PHONE_NUMBER | SMS from number | Set |
+| TWILIO_PHONE_NUMBER | +13213217815 | Set |
 | INSTAGRAM_BUSINESS_ACCOUNT_ID | 17841425195442497 | Set |
 | INSTAGRAM_ACCESS_TOKEN | Long-lived IG token | Set |
 | FACEBOOK_PAGE_ID | 1081317148396178 | Set |
-| FACEBOOK_PAGE_ACCESS_TOKEN | Page posting token | NEEDS ADDING |
+| FACEBOOK_PAGE_ACCESS_TOKEN | Page posting token | ⚠️ NEEDS ADDING TO VERCEL |
 | NEXT_PUBLIC_FB_PIXEL_ID | 763101500966829 | Set |
 | NEXT_PUBLIC_GA_MEASUREMENT_ID | G-V6Q2E47C49 | Set |
 | CRON_SECRET | Protects cron endpoints | Set |
@@ -186,30 +224,16 @@ id, week_of, platform, caption, hashtags[], image_prompt, image_url, video_scrip
 
 ---
 
-## Redirect Links
+## Twilio SMS Status
 
-| Label | URL |
+| Item | Status |
 |---|---|
-| Free Access | vortextrips.com/free |
-| Booking Portal | vortextrips.com/book |
-| Join / Membership | vortextrips.com/join |
-| Travel Quiz | vortextrips.com/quiz |
-| Member Reviews | vortextrips.com/reviews |
-
----
-
-## Bugs Fixed (April 22, 2026 Audit)
-
-1. Phone optional — API now allows lead creation without phone; call only fires if phone provided
-2. Reviews GET filter — const query → let query so destination filter applies
-3. Reviews POST — contact_id no longer required; guests can submit reviews
-4. Contacts API — membership_status → status column name fixed
-5. SMS log label — voice-call → sms action_type for accurate dashboard metrics
-6. Dashboard member count — was querying membership_status, now queries status = member
-7. Quiz progress bar — was 0% on Q1, now correctly shows 20% to 100%
-8. Thank-you page — removed incorrect AI framing; accurate AI consultant copy
-9. Email templates — reviewRequestEmail was outside EMAIL_TEMPLATES object
-10. Partners route — TypeScript spread type loss fixed with Partner interface
+| Account | Active |
+| Phone number | +1 (321) 321-7815 |
+| A2P 10DLC campaign | ⚠️ Pending TCR approval (submitted ~April 21, 2026) |
+| Inbound webhook | Set — /api/webhooks/twilio-sms |
+| STOP/HELP handling | ✅ Coded and live |
+| SMS sending | Blocked until TCR approves A2P campaign |
 
 ---
 
@@ -219,11 +243,23 @@ id, week_of, platform, caption, hashtags[], image_prompt, image_url, video_scrip
 
 ---
 
-## Suggested Next Steps
+## Pending Tasks (pick up here)
 
-1. Add FACEBOOK_PAGE_ACCESS_TOKEN to Vercel env vars and redeploy
-2. Seed approved reviews in Supabase so /reviews page shows content
-3. Generate first week of content from dashboard → approve → auto-post to IG + FB
-4. Add first partner to partners table to enable lead routing
-5. Test full lead flow end-to-end with a real phone number
-6. Enable Stripe when ready to accept membership payments
+1. **Add FACEBOOK_PAGE_ACCESS_TOKEN** to Vercel env vars → redeploy (Facebook auto-posting blocked without it)
+2. **End-to-end email flow test** — submit lead form with real email, verify Day 1 email arrives in inbox
+3. **Seed approved reviews** — add 3-5 real reviews to Supabase reviews table so /reviews page has content
+4. **Add first partner** to partners table to enable lead routing
+5. **Stripe integration** — membership purchase → auto-activate contact + trigger SBA sequence (PAUSED)
+
+---
+
+## Recent Changes (April 23, 2026)
+
+- **DNS fixed** — Cloudflare A record updated to 76.76.21.21 (Vercel IP), root domain added to Vercel
+- **Booking bridge live** — `/traveler.html` shows leosp code before sending to travmanity.com
+- **Short links trimmed** — kept `/go`, `/book`, `/free`, `/join`; removed `/booking` and `/book-now`
+- **Stale pages deleted** — `src/app/booking/`, `src/app/book-now/`, `src/app/go/` removed
+- **Branding fixed** — "Travel Team Perks" removed from destination page footers
+- **SBA page** — `/sba` built and live with earnings table, FAQ, opt-in form
+- **MLM bulk import** — CSV uploader at `/dashboard/import` with 13-step nurture sequence
+- **Twilio webhook** — `/api/webhooks/twilio-sms` handles STOP/HELP/START inbound SMS
