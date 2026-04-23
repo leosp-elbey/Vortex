@@ -14,7 +14,12 @@ const nextConfig = {
       },
       {
         source: '/book',
-        destination: '/booking',
+        destination: '/book-now',
+        permanent: false,
+      },
+      {
+        source: '/booking',
+        destination: '/book-now',
         permanent: false,
       },
     ]
