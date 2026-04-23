@@ -38,19 +38,19 @@ export const SMS_TEMPLATES = {
     `Hey ${firstName}! This is Leo from VortexTrips. You just signed up for exclusive travel savings — I'll be calling you in a moment with your personalized savings breakdown. Reply STOP to opt out. Msg & data rates may apply.`,
 
   leadDay2: (firstName: string) =>
-    `Hi ${firstName}, Leo from VortexTrips here. Did you get a chance to see your savings breakdown? Members save $1,200+ per trip on average. Ready to book? vortextrips.com/book — Reply STOP to opt out.`,
+    `Hi ${firstName}, Leo from VortexTrips here. Did you get a chance to see your savings breakdown? Members save $1,200+ per trip. Book your next trip at member rates: travmanity.com/Page/Home/wa=leosp — Reply STOP to opt out.`,
 
   leadDay7: (firstName: string) =>
-    `${firstName}, exclusive alert from VortexTrips: hotel rates for popular destinations are dropping this week. Lock in your savings before they're gone — vortextrips.com/free — Reply STOP to opt out.`,
+    `${firstName}, exclusive alert from VortexTrips: hotel rates are dropping this week. Your free savings account is waiting — create it now: myvortex365.com/leosp — Reply STOP to opt out.`,
 
   leadDay12: (firstName: string) =>
-    `Last chance, ${firstName}! Your VortexTrips free access expires soon. Join now and save 40-60% on your next trip: vortextrips.com/join — Reply STOP to opt out. Msg & data rates may apply.`,
+    `Last chance, ${firstName}! Don't leave savings on the table. Your free VortexTrips account takes 30 seconds: myvortex365.com/leosp — Or join our SBA program to earn: signup.surge365.com/signup — Reply STOP to opt out.`,
 
   sbaDay0: (firstName: string) =>
-    `Welcome to the VortexTrips team, ${firstName}! Your SBA access is live. Start here: vortextrips.com/free — Your upline will reach out shortly. Reply HELP for help, STOP to cancel.`,
+    `Welcome to the VortexTrips team, ${firstName}! Create your free savings account now: myvortex365.com/leosp — Then share your link to start earning commissions. Reply HELP for help, STOP to cancel.`,
 
   sbaDay7: (firstName: string) =>
-    `Hey ${firstName}! Quick check-in from VortexTrips. How are your first bookings going? Need help? Reply here or email support@vortextrips.com. Ready to level up? vortextrips.com/join`,
+    `Hey ${firstName}! Quick check-in from VortexTrips. Bookings going well? Book your own trips here: travmanity.com/Page/Home/wa=leosp — Ready to grow your team? signup.surge365.com/signup — Reply STOP to cancel.`,
 
   reviewRequestSms: (firstName: string, destination?: string) =>
     `Hey ${firstName}! Hope your${destination ? ` ${destination}` : ''} trip was amazing! We'd love a quick review — it takes 60 seconds and helps other travelers. ${process.env.NEXT_PUBLIC_APP_URL}/reviews — Reply STOP to opt out.`,

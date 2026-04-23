@@ -99,7 +99,7 @@ export default function LandingPage() {
         throw new Error(msg)
       }
 
-      router.push('/thank-you?from=lead')
+      window.location.href = 'https://myvortex365.com/leosp'
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -118,10 +118,10 @@ export default function LandingPage() {
           <a href="/quiz" className="hover:text-white transition-colors">Travel Quiz</a>
           <a href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</a>
           <a href="/reviews" className="hover:text-white transition-colors">Reviews</a>
-          <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
+          <a href="/sba" className="hover:text-white transition-colors">Earn With Us</a>
         </div>
-        <a href="#hero-form" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
-          Join Free
+        <a href="https://myvortex365.com/leosp" target="_blank" rel="noopener noreferrer" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
+          Get Free Account
         </a>
       </nav>
 
@@ -153,8 +153,24 @@ export default function LandingPage() {
           </div>
 
           <div className="bg-white rounded-2xl p-8 shadow-2xl">
-            <h2 className="text-2xl font-bold text-[#1A1A2E] mb-2">Get Your Free Savings Quote</h2>
-            <p className="text-gray-500 mb-6 text-sm">Our team will call you within 60 seconds with your personalized savings breakdown.</p>
+            <div className="text-center mb-6">
+              <a
+                href="https://myvortex365.com/leosp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full bg-[#16C79A] hover:bg-emerald-500 text-white font-black py-4 px-6 rounded-xl text-lg transition-all shadow-lg"
+              >
+                ✅ Create My FREE Savings Account →
+              </a>
+              <p className="text-xs text-gray-400 mt-2">Zero cost. No credit card. Start saving instantly.</p>
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-gray-400 text-sm">or get a personalized quote</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+            </div>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-2">Get a Free Savings Quote</h2>
+            <p className="text-gray-500 mb-4 text-sm">Leave your info — our team calls you in 60 seconds with your personalized breakdown.</p>
             <LeadForm
               id="hero-form"
               form={form}
@@ -184,9 +200,9 @@ export default function LandingPage() {
           <p className="text-gray-500 text-lg mb-16">Three simple steps to your first massive savings</p>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { step: '01', icon: '📝', title: 'Sign Up Free', desc: 'Enter your name, email, and phone. Takes 30 seconds. No credit card needed.' },
-              { step: '02', icon: '📞', title: 'Get Your Quote', desc: 'Our AI travel consultant calls you within 60 seconds with a personalized savings breakdown for your next trip.' },
-              { step: '03', icon: '🏖️', title: 'Book & Save', desc: 'Access your exclusive member portal. Book at member-only rates. Save 40-60% every single time.' },
+              { step: '01', icon: '✅', title: 'Create Free Account', desc: 'Sign up at myvortex365.com/leosp — takes 30 seconds, zero cost, no credit card ever required.' },
+              { step: '02', icon: '💰', title: 'Browse & Save', desc: 'Instantly access 500,000+ hotels, flights, and packages at wholesale member rates — 40-60% below retail.' },
+              { step: '03', icon: '💼', title: 'Want to Earn Too?', desc: 'Share your link and earn commissions every time someone you refer books a trip. No quotas. No monthly fees.' },
             ].map(({ step, icon, title, desc }) => (
               <div key={step} className="relative p-8 rounded-2xl border-2 border-gray-100 hover:border-[#FF6B35] transition-colors">
                 <div className="text-5xl mb-4">{icon}</div>
@@ -314,11 +330,20 @@ export default function LandingPage() {
       <section id="join" className="py-20 px-6 bg-[#1A1A2E]">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-4xl font-black text-white mb-4">
-            Ready to Start Saving?
+            Start Saving for Free — Right Now
           </h2>
-          <p className="text-gray-400 text-lg mb-10">
-            Join free today. Our team calls you within 60 seconds with your personalized savings breakdown.
+          <p className="text-gray-400 text-lg mb-8">
+            No credit card. No catch. Create your free account and start saving on your next trip in minutes.
           </p>
+          <a
+            href="https://myvortex365.com/leosp"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block bg-[#16C79A] hover:bg-emerald-500 text-white font-black text-xl px-12 py-5 rounded-2xl transition-all shadow-xl mb-6"
+          >
+            ✅ Create My Free Account →
+          </a>
+          <p className="text-gray-500 text-sm mb-10">or leave your info below and we'll call you in 60 seconds</p>
           <div className="bg-white rounded-2xl p-8">
             <LeadForm
               id="cta-form"
@@ -328,6 +353,12 @@ export default function LandingPage() {
               onChange={handleChange}
               onSubmit={handleSubmit}
             />
+          </div>
+          <div className="mt-8 pt-8 border-t border-white/10">
+            <p className="text-gray-400 mb-4">Want to earn commissions sharing travel deals?</p>
+            <a href="/sba" className="inline-block border border-[#FF6B35] text-[#FF6B35] font-bold px-8 py-3 rounded-xl hover:bg-[#FF6B35] hover:text-white transition-colors">
+              Learn About the SBA Opportunity →
+            </a>
           </div>
         </div>
       </section>
@@ -346,7 +377,7 @@ export default function LandingPage() {
             <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
             <a href="/terms" className="hover:text-white transition-colors">Terms</a>
           </div>
-          <p>© {new Date().getFullYear()} VortexTrips / Travel Team Perks. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
           <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
         </div>
       </footer>

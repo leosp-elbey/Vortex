@@ -62,11 +62,24 @@ export default async function ThankYouPage({ searchParams }: Props) {
             <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] underline">support@vortextrips.com</a>
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="/destinations/cancun" className="bg-[#FF6B35] text-white font-bold px-6 py-3 rounded-lg hover:bg-[#e55a25] transition-colors">
-              Browse Member Deals →
+          <div className="flex flex-col gap-3 justify-center max-w-sm mx-auto">
+            <a
+              href="https://myvortex365.com/leosp"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#16C79A] text-white font-black px-6 py-4 rounded-xl hover:bg-emerald-500 transition-colors text-center text-lg"
+            >
+              ✅ Create My Free Savings Account →
             </a>
-            <a href="/" className="bg-white/10 text-white font-bold px-6 py-3 rounded-lg hover:bg-white/20 transition-colors">
+            <a
+              href="https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#FF6B35] text-white font-bold px-6 py-3 rounded-xl hover:bg-[#e55a25] transition-colors text-center"
+            >
+              Book a Trip Now →
+            </a>
+            <a href="/" className="bg-white/10 text-white font-bold px-6 py-3 rounded-xl hover:bg-white/20 transition-colors text-center">
               ← Back to Home
             </a>
           </div>

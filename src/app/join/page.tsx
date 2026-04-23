@@ -22,7 +22,7 @@ export default function JoinPage() {
           <div className="inline-block bg-[#16C79A]/10 text-[#16C79A] text-sm font-semibold px-3 py-1 rounded-full mb-4">
             Limited Memberships Available
           </div>
-          <h1 className="text-5xl font-black text-[#1A1A2E] mb-4">Join Travel Team Perks</h1>
+          <h1 className="text-5xl font-black text-[#1A1A2E] mb-4">Join VortexTrips & Start Earning</h1>
           <p className="text-gray-500 text-xl">One membership. Unlimited travel savings. Cancel anytime.</p>
         </div>
 
@@ -63,22 +63,30 @@ export default function JoinPage() {
                   <p className="text-sm text-gray-600 mt-1">We&apos;ll reach out to complete your membership setup.</p>
                 </div>
               ) : (
-                <form onSubmit={handleSubmit}>
-                  <input
-                    type="email" required placeholder="Your email address"
-                    autoComplete="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 mb-3 focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-                  />
-                  <button
-                    type="submit"
-                    className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 rounded-lg text-lg transition-all"
+                <div className="space-y-3">
+                  <a
+                    href="https://signup.surge365.com/signup"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 rounded-lg text-lg transition-all text-center"
                   >
-                    Reserve My Spot →
-                  </button>
-                  <p className="text-xs text-center text-gray-400 mt-2">Our team will contact you to complete enrollment.</p>
-                </form>
+                    Join the SBA Program →
+                  </a>
+                  <p className="text-xs text-center text-gray-400">You'll be taken to our secure enrollment page to complete signup.</p>
+                  <div className="flex items-center gap-3 my-2">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-gray-400 text-xs">not ready to earn yet?</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+                  <a
+                    href="https://myvortex365.com/leosp"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full border-2 border-[#16C79A] text-[#16C79A] hover:bg-[#16C79A] hover:text-white font-bold py-3 rounded-lg text-base transition-all text-center"
+                  >
+                    Start with a Free Account →
+                  </a>
+                </div>
               )}
             </div>
           </div>
