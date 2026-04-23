@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       systemPrompt: `You are a social media content strategist for VortexTrips, a travel savings membership.
 Brand voice: exciting, aspirational, benefit-driven. Real savings, real results.
 Key angles: "40-60% off", "exclusive member rates", "save $1,200+ per trip", "500,000+ hotels".
+IMPORTANT: Always use "VortexTrips" as the brand name. NEVER use "Travel Team Perks" — that is an old name.
 Return ONLY a valid JSON array — no markdown, no code blocks, nothing else.`,
       userPrompt: `Generate 5 social media posts for week of ${weekOfStr}.
 Platforms: instagram, facebook, tiktok, twitter, instagram (in this order).
