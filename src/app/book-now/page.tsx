@@ -1,89 +1,74 @@
-'use client'
-
-import { useState } from 'react'
-import Link from 'next/link'
-
-export default function BookingPage() {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText('leosp')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
+export default function BookNowPage() {
   return (
-    <div className="min-h-screen bg-[#1A1A2E] flex flex-col">
-      <nav className="px-6 py-4">
-        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
+    <div style={{ fontFamily: 'system-ui, sans-serif', minHeight: '100vh', background: '#1A1A2E', display: 'flex', flexDirection: 'column' }}>
+      <nav style={{ padding: '16px 24px' }}>
+        <a href="/" style={{ fontSize: '22px', fontWeight: 900, color: 'white', textDecoration: 'none' }}>
+          Vortex<span style={{ color: '#FF6B35' }}>Trips</span>
+        </a>
       </nav>
 
-      <div className="flex-1 flex items-center justify-center px-4 py-16">
-        <div className="max-w-lg w-full">
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 16px' }}>
+        <div style={{ maxWidth: '500px', width: '100%' }}>
 
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="text-5xl mb-4">✈️</div>
-            <h1 className="text-3xl font-black text-white mb-3">You're Almost at the Booking Portal</h1>
-            <p className="text-gray-300 text-lg">Before you go — read this. It takes 10 seconds and makes sure your discounts are applied.</p>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>✈️</div>
+            <h1 style={{ fontSize: '28px', fontWeight: 900, color: 'white', margin: '0 0 12px' }}>
+              You&apos;re Almost at the Booking Portal
+            </h1>
+            <p style={{ color: '#ccc', fontSize: '16px', margin: 0 }}>
+              Read this first — it takes 10 seconds and makes sure your discounts are applied.
+            </p>
           </div>
 
-          {/* The code box — most important thing on the page */}
-          <div className="bg-[#FF6B35] rounded-2xl p-6 mb-6 text-center shadow-xl">
-            <p className="text-white font-bold text-sm uppercase tracking-widest mb-3">⚠️ You MUST enter this referral code</p>
-            <div className="bg-white rounded-xl px-8 py-4 mb-4 inline-block">
-              <span className="text-5xl font-black text-[#1A1A2E] tracking-widest">leosp</span>
+          <div style={{ background: '#FF6B35', borderRadius: '16px', padding: '24px', textAlign: 'center', marginBottom: '24px' }}>
+            <p style={{ color: 'white', fontWeight: 700, fontSize: '13px', letterSpacing: '2px', textTransform: 'uppercase', margin: '0 0 12px' }}>
+              ⚠️ You MUST enter this referral code
+            </p>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '16px 32px', display: 'inline-block', marginBottom: '12px' }}>
+              <span style={{ fontSize: '48px', fontWeight: 900, color: '#1A1A2E', letterSpacing: '4px' }}>leosp</span>
             </div>
-            <p className="text-white/90 text-sm">Enter this code when you create your account or at checkout on the Travmanity site.</p>
-            <button
-              onClick={handleCopy}
-              className="mt-4 bg-white/20 hover:bg-white/30 text-white font-semibold px-6 py-2 rounded-lg transition-colors text-sm"
-            >
-              {copied ? '✓ Copied!' : 'Copy Code'}
-            </button>
+            <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px', margin: 0 }}>
+              Enter this code when creating your account or at checkout.
+            </p>
           </div>
 
-          {/* Why it matters */}
-          <div className="bg-white/10 rounded-2xl p-6 mb-6 space-y-4">
-            <h2 className="text-white font-bold text-lg">Why this code matters:</h2>
-            <div className="flex gap-3">
-              <span className="text-[#16C79A] text-xl flex-shrink-0">✓</span>
-              <p className="text-gray-300 text-sm"><strong className="text-white">Your member discount gets applied</strong> — without the code, you see standard public rates, not our exclusive wholesale pricing.</p>
+          <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: '16px', padding: '24px', marginBottom: '24px' }}>
+            <h2 style={{ color: 'white', fontWeight: 700, fontSize: '17px', margin: '0 0 16px' }}>Why this code matters:</h2>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+              <span>✅</span>
+              <p style={{ color: '#ccc', fontSize: '14px', margin: 0, lineHeight: 1.6 }}>Your member discount gets applied — without the code you see standard public rates, not our exclusive pricing.</p>
             </div>
-            <div className="flex gap-3">
-              <span className="text-[#16C79A] text-xl flex-shrink-0">✓</span>
-              <p className="text-gray-300 text-sm"><strong className="text-white">Your account is linked to VortexTrips</strong> — so our team can assist you with bookings and support.</p>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+              <span>✅</span>
+              <p style={{ color: '#ccc', fontSize: '14px', margin: 0, lineHeight: 1.6 }}>Your account links to VortexTrips so our team can support your bookings.</p>
             </div>
-            <div className="flex gap-3">
-              <span className="text-[#16C79A] text-xl flex-shrink-0">✓</span>
-              <p className="text-gray-300 text-sm"><strong className="text-white">Any purchase is tracked correctly</strong> — ensuring you get credit and your savings are verified.</p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <span>✅</span>
+              <p style={{ color: '#ccc', fontSize: '14px', margin: 0, lineHeight: 1.6 }}>Every purchase is tracked so you get the right savings and Leo gets credit.</p>
             </div>
           </div>
 
-          {/* Step-by-step */}
-          <div className="bg-white/5 rounded-2xl p-6 mb-8">
-            <h2 className="text-white font-bold mb-4">How to use the code on Travmanity:</h2>
-            <ol className="space-y-3 text-sm text-gray-300">
-              <li className="flex gap-3"><span className="bg-[#FF6B35] text-white w-6 h-6 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-xs">1</span>Click the button below to open the booking site</li>
-              <li className="flex gap-3"><span className="bg-[#FF6B35] text-white w-6 h-6 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-xs">2</span>When asked for a referral/affiliate code, enter: <strong className="text-white ml-1">leosp</strong></li>
-              <li className="flex gap-3"><span className="bg-[#FF6B35] text-white w-6 h-6 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-xs">3</span>Create your account and start browsing member-only rates</li>
-              <li className="flex gap-3"><span className="bg-[#FF6B35] text-white w-6 h-6 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-xs">4</span>Book your trip at up to 60% off retail prices</li>
-            </ol>
+          <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', marginBottom: '32px' }}>
+            <h2 style={{ color: 'white', fontWeight: 700, fontSize: '17px', margin: '0 0 16px' }}>Steps:</h2>
+            {['Click the button below to open the booking site', 'When asked for a referral or affiliate code, enter: leosp', 'Create your account and browse member-only rates', 'Book your trip at up to 60% off retail prices'].map((step, i) => (
+              <div key={i} style={{ display: 'flex', gap: '12px', marginBottom: i < 3 ? '12px' : 0 }}>
+                <span style={{ background: '#FF6B35', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '12px', flexShrink: 0 }}>{i + 1}</span>
+                <p style={{ color: '#ccc', fontSize: '14px', margin: 0, lineHeight: 1.6 }}>{step}</p>
+              </div>
+            ))}
           </div>
 
-          {/* CTA */}
           <a
             href="https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate"
             target="_blank"
             rel="noopener noreferrer"
-            className="block w-full bg-[#16C79A] hover:bg-emerald-500 text-white font-black text-xl py-5 rounded-2xl text-center transition-all shadow-xl mb-4"
+            style={{ display: 'block', width: '100%', background: '#16C79A', color: 'white', fontWeight: 900, fontSize: '18px', padding: '20px', borderRadius: '16px', textAlign: 'center', textDecoration: 'none', marginBottom: '16px', boxSizing: 'border-box' }}
           >
             Go to Booking Site — Code: leosp →
           </a>
 
-          <p className="text-center text-gray-500 text-xs">
-            You'll be taken to Travmanity.com — our trusted booking partner. Questions?{' '}
-            <a href="mailto:support@vortextrips.com" className="text-[#FF6B35]">support@vortextrips.com</a>
+          <p style={{ textAlign: 'center', color: '#666', fontSize: '13px' }}>
+            Questions? <a href="mailto:support@vortextrips.com" style={{ color: '#FF6B35' }}>support@vortextrips.com</a>
           </p>
         </div>
       </div>
