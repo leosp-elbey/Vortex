@@ -30,7 +30,20 @@
       "Bash(git commit -m 'Fix font loading — use next/font instead of CSS @import for Turbopack *)",
       "Bash(git commit -m 'Fix async cookies\\(\\) for Next.js 16 — await createClient\\(\\) across all server files *)",
       "Bash(git commit -m 'Update project status — deployed, login blocker documented *)",
-      "Bash(git commit -m 'Fix CSP headers and auth session handling on reset-password page *)"
+      "Bash(git commit -m 'Fix CSP headers and auth session handling on reset-password page *)",
+      "Bash(npx tsc *)",
+      "Bash(git commit *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://www.vortextrips.com/)",
+      "Bash(curl -s -X POST https://www.vortextrips.com/api/automations/quote-email -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s \"https://www.vortextrips.com/api/contacts\")",
+      "Bash(python3 -c ' *)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\);const data=JSON.parse\\(d\\);data.slice\\(0,3\\).forEach\\(c=>console.log\\(c.first_name,c.email,c.status,JSON.stringify\\(c.tags\\),c.last_ai_action\\)\\)\")",
+      "Bash(node -e \"const data=require\\('/tmp/contacts.json'\\);data.slice\\(0,3\\).forEach\\(c=>console.log\\(c.first_name+'|'+c.email+'|'+c.status+'|'+JSON.stringify\\(c.tags\\)+'|'+c.last_ai_action\\)\\)\")",
+      "Bash(node -e \"const data=require\\('C:/Users/palme.000/AppData/Local/Temp/contacts.json'\\);data.slice\\(0,3\\).forEach\\(c=>console.log\\(c.first_name+'|'+c.email+'|'+c.status+'|'+JSON.stringify\\(c.tags\\)+'|'+c.last_ai_action\\)\\)\")",
+      "Bash(node -e \"const data=JSON.parse\\(require\\('fs'\\).readFileSync\\('C:/Users/palme.000/AppData/Local/Temp/contacts.json','utf8'\\)\\);console.log\\(JSON.stringify\\(data.slice\\(0,3\\),null,2\\)\\)\")",
+      "WebFetch(domain:graph.facebook.com)",
+      "WebFetch(domain:www.vortextrips.com)",
+      "Bash(npm run *)"
     ]
   }
 }

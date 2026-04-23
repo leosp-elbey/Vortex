@@ -225,14 +225,14 @@ export default function DestinationPage() {
       </section>
 
       <footer className="bg-[#0d0d1a] text-gray-500 py-8 px-6 text-center text-sm">
-        <p className="text-white font-bold text-lg mb-2">VortexTrips <span className="text-[#FF6B35]">/ Travel Team Perks</span></p>
+        <p className="text-white font-bold text-lg mb-2">Vortex<span className="text-[#FF6B35]">Trips</span></p>
         <div className="flex justify-center gap-6 mb-4 flex-wrap">
           <a href="/" className="hover:text-white transition-colors">Home</a>
           <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
           <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
           <a href="/terms" className="hover:text-white transition-colors">Terms</a>
         </div>
-        <p>© {new Date().getFullYear()} VortexTrips / Travel Team Perks. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
       </footer>
     </div>
   )

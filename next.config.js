@@ -18,16 +18,6 @@ const nextConfig = {
         permanent: false,
       },
       {
-        source: '/booking',
-        destination: '/traveler.html',
-        permanent: false,
-      },
-      {
-        source: '/book-now',
-        destination: '/traveler.html',
-        permanent: false,
-      },
-      {
         source: '/go',
         destination: '/traveler.html',
         permanent: false,
