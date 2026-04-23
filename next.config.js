@@ -14,7 +14,7 @@ const nextConfig = {
       },
       {
         source: '/book',
-        destination: 'https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate',
+        destination: '/booking',
         permanent: false,
       },
     ]
