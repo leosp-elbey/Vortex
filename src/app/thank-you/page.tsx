@@ -72,7 +72,7 @@ export default async function ThankYouPage({ searchParams }: Props) {
               ✅ Create My Free Savings Account →
             </a>
             <a
-              href="/book-now"
+              href="/go"
               className="bg-[#FF6B35] text-white font-bold px-6 py-3 rounded-xl hover:bg-[#e55a25] transition-colors text-center"
             >
               Book a Trip Now →
