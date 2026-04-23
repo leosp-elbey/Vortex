@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Book Your Trip — VortexTrips</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #1A1A2E; margin: 0; min-height: 100vh; display: flex; flex-direction: column; }
+  nav { padding: 16px 24px; }
+  nav a { font-size: 22px; font-weight: 900; color: white; text-decoration: none; }
+  nav a span { color: #FF6B35; }
+  .container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 16px; }
+  .card { max-width: 500px; width: 100%; }
+  .header { text-align: center; margin-bottom: 32px; }
+  .header .emoji { font-size: 48px; margin-bottom: 16px; }
+  .header h1 { font-size: 28px; font-weight: 900; color: white; margin: 0 0 12px; }
+  .header p { color: #ccc; font-size: 16px; margin: 0; }
+  .code-box { background: #FF6B35; border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 24px; }
+  .code-box .label { color: white; font-weight: 700; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 12px; }
+  .code-box .code { background: white; border-radius: 12px; padding: 16px 32px; display: inline-block; margin-bottom: 12px; }
+  .code-box .code span { font-size: 48px; font-weight: 900; color: #1A1A2E; letter-spacing: 4px; }
+  .code-box .note { color: rgba(255,255,255,0.9); font-size: 14px; margin: 0; }
+  .why { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+  .why h2 { color: white; font-weight: 700; font-size: 17px; margin: 0 0 16px; }
+  .why .item { display: flex; gap: 12px; margin-bottom: 12px; }
+  .why .item:last-child { margin-bottom: 0; }
+  .why .item p { color: #ccc; font-size: 14px; margin: 0; line-height: 1.6; }
+  .steps { background: rgba(255,255,255,0.05); border-radius: 16px; padding: 24px; margin-bottom: 32px; }
+  .steps h2 { color: white; font-weight: 700; font-size: 17px; margin: 0 0 16px; }
+  .step { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+  .step:last-child { margin-bottom: 0; }
+  .step .num { background: #FF6B35; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
+  .step p { color: #ccc; font-size: 14px; margin: 0; line-height: 1.6; }
+  .cta { display: block; width: 100%; background: #16C79A; color: white; font-weight: 900; font-size: 18px; padding: 20px; border-radius: 16px; text-align: center; text-decoration: none; margin-bottom: 16px; box-sizing: border-box; }
+  .cta:hover { background: #13b589; }
+  .footer-note { text-align: center; color: #666; font-size: 13px; }
+  .footer-note a { color: #FF6B35; }
+</style>
+</head>
+<body>
+<nav><a href="/">Vortex<span>Trips</span></a></nav>
+<div class="container">
+  <div class="card">
+    <div class="header">
+      <div class="emoji">✈️</div>
+      <h1>You're Almost at the Booking Portal</h1>
+      <p>Read this first — it takes 10 seconds and makes sure your discounts are applied.</p>
+    </div>
+
+    <div class="code-box">
+      <p class="label">⚠️ You MUST enter this referral code</p>
+      <div class="code"><span>leosp</span></div>
+      <p class="note">Enter this code when creating your account or at checkout.</p>
+    </div>
+
+    <div class="why">
+      <h2>Why this code matters:</h2>
+      <div class="item"><span>✅</span><p>Your member discount gets applied — without the code you see standard public rates, not our exclusive pricing.</p></div>
+      <div class="item"><span>✅</span><p>Your account links to VortexTrips so our team can support your bookings.</p></div>
+      <div class="item"><span>✅</span><p>Every purchase is tracked so you get the right savings and Leo gets credit.</p></div>
+    </div>
+
+    <div class="steps">
+      <h2>Steps:</h2>
+      <div class="step"><div class="num">1</div><p>Click the button below to open the booking site</p></div>
+      <div class="step"><div class="num">2</div><p>When asked for a referral or affiliate code, enter: <strong style="color:white">leosp</strong></p></div>
+      <div class="step"><div class="num">3</div><p>Create your account and browse member-only rates</p></div>
+      <div class="step"><div class="num">4</div><p>Book your trip at up to 60% off retail prices</p></div>
+    </div>
+
+    <a class="cta" href="https://travmanity.com/Page/Home/wa=leosp?FpSubAffiliate" target="_blank" rel="noopener noreferrer">
+      Go to Booking Site — Code: leosp →
+    </a>
+
+    <p class="footer-note">Questions? <a href="mailto:support@vortextrips.com">support@vortextrips.com</a></p>
+  </div>
+</div>
+</body>
+</html>
