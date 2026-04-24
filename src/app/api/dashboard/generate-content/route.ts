@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { generateCompletion, generateImage } from '@/lib/openai'
+import { generateCompletion } from '@/lib/openai'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -60,23 +60,34 @@ Return this exact JSON structure:
 
     const admin = createAdminClient()
 
-    // Generate images for instagram/facebook posts and persist to Supabase Storage
+    // Fetch real photos from Pexels and persist to Supabase Storage
     const rows = await Promise.all(posts.map(async (post) => {
       let image_url: string | null = null
 
       if ((post.platform === 'instagram' || post.platform === 'facebook') && post.image_prompt) {
         try {
-          const dalleUrl = await generateImage(post.image_prompt)
-          // DALL-E URLs expire in 1hr — download and store permanently
-          const imgRes = await fetch(dalleUrl)
-          const imgBuffer = await imgRes.arrayBuffer()
-          const fileName = `content/${Date.now()}-${post.platform}.png`
-          const { error: uploadErr } = await admin.storage
-            .from('media')
-            .upload(fileName, imgBuffer, { contentType: 'image/png', upsert: false })
-          if (!uploadErr) {
-            const { data: pub } = admin.storage.from('media').getPublicUrl(fileName)
-            image_url = pub.publicUrl
+          // Extract search keywords from image_prompt (first 60 chars works well)
+          const query = encodeURIComponent(post.image_prompt.slice(0, 60))
+          const pexelsRes = await fetch(
+            `https://api.pexels.com/v1/search?query=${query}&per_page=1&orientation=landscape`,
+            { headers: { Authorization: process.env.PEXELS_API_KEY! } }
+          )
+          const pexelsData = await pexelsRes.json()
+          const srcUrl = pexelsData?.photos?.[0]?.src?.large2x
+
+          if (srcUrl) {
+            // Download and store permanently in Supabase Storage
+            const imgRes = await fetch(srcUrl)
+            const imgBuffer = await imgRes.arrayBuffer()
+            const ext = 'jpg'
+            const fileName = `content/${Date.now()}-${post.platform}.${ext}`
+            const { error: uploadErr } = await admin.storage
+              .from('media')
+              .upload(fileName, imgBuffer, { contentType: 'image/jpeg', upsert: false })
+            if (!uploadErr) {
+              const { data: pub } = admin.storage.from('media').getPublicUrl(fileName)
+              image_url = pub.publicUrl
+            }
           }
         } catch {
           // Non-fatal — post without image
