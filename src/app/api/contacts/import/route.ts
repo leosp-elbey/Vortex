@@ -79,13 +79,13 @@ export async function POST(request: NextRequest) {
       const hoursFromNow = (h: number) => new Date(Date.now() + h * 3600000).toISOString()
 
       await admin.from('sequence_queue').insert([
-        // Immediate 7-email sequence
+        // 7-email immediate sequence — days 0, 1, 3, 5, 7, 10, 15
         { contact_id: contact.id, sequence_name: sequence, step: 1, channel: 'email', template_key: 'mlmDay0', scheduled_at: hoursFromNow(0.5) },
-        { contact_id: contact.id, sequence_name: sequence, step: 2, channel: 'email', template_key: 'mlmDay2', scheduled_at: daysFromNow(2) },
-        { contact_id: contact.id, sequence_name: sequence, step: 3, channel: 'email', template_key: 'mlmDay4', scheduled_at: daysFromNow(4) },
-        { contact_id: contact.id, sequence_name: sequence, step: 4, channel: 'email', template_key: 'mlmDay6', scheduled_at: daysFromNow(6) },
-        { contact_id: contact.id, sequence_name: sequence, step: 5, channel: 'email', template_key: 'mlmDay9', scheduled_at: daysFromNow(9) },
-        { contact_id: contact.id, sequence_name: sequence, step: 6, channel: 'email', template_key: 'mlmDay12', scheduled_at: daysFromNow(12) },
+        { contact_id: contact.id, sequence_name: sequence, step: 2, channel: 'email', template_key: 'mlmDay2', scheduled_at: daysFromNow(1) },
+        { contact_id: contact.id, sequence_name: sequence, step: 3, channel: 'email', template_key: 'mlmDay4', scheduled_at: daysFromNow(3) },
+        { contact_id: contact.id, sequence_name: sequence, step: 4, channel: 'email', template_key: 'mlmDay6', scheduled_at: daysFromNow(5) },
+        { contact_id: contact.id, sequence_name: sequence, step: 5, channel: 'email', template_key: 'mlmDay9', scheduled_at: daysFromNow(7) },
+        { contact_id: contact.id, sequence_name: sequence, step: 6, channel: 'email', template_key: 'mlmDay12', scheduled_at: daysFromNow(10) },
         { contact_id: contact.id, sequence_name: sequence, step: 7, channel: 'email', template_key: 'mlmDay15', scheduled_at: daysFromNow(15) },
         // Long-term monthly nurture (months 1–6)
         { contact_id: contact.id, sequence_name: sequence, step: 8, channel: 'email', template_key: 'mlmMonth1', scheduled_at: daysFromNow(30) },
