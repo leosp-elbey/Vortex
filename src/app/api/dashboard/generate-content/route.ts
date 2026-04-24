@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
   if (!adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const admin = createAdminClient()
     const weekOf = new Date()
     weekOf.setDate(weekOf.getDate() - weekOf.getDay() + 1)
     const weekOfStr = weekOf.toISOString().split('T')[0]
