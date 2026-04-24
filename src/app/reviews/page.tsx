@@ -152,7 +152,7 @@ export default function ReviewsPage() {
       </div>
 
       <footer className="bg-[#0d0d1a] text-gray-500 py-8 px-6 text-center text-sm mt-16">
-        <p className="text-white font-bold mb-2">VortexTrips <span className="text-[#FF6B35]">/ Travel Team Perks</span></p>
+        <p className="text-white font-bold mb-2">VortexTrips</p>
         <div className="flex justify-center gap-6 mb-3 flex-wrap">
           <a href="/" className="hover:text-white">Home</a>
           <a href="/quote" className="hover:text-white">Get a Quote</a>
