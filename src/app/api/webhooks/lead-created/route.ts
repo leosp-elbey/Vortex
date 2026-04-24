@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { triggerCall } from '@/lib/bland'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
+import { sendEmail } from '@/lib/resend'
+import { EMAIL_TEMPLATES } from '@/lib/email-templates'
 
 function hoursFromNow(hours: number): string {
   return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
@@ -72,10 +74,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Full multi-channel nurture sequence
+    // Day 0 — send welcome email immediately (not via queue — cron runs once daily)
+    try {
+      const { subject, html } = EMAIL_TEMPLATES.leadDay1(first_name)
+      await sendEmail({ to: email, subject, html })
+      await supabase.from('sequence_queue').insert({
+        contact_id: contact.id, sequence_name: 'lead-nurture', step: 2,
+        channel: 'email', template_key: 'leadDay1',
+        scheduled_at: new Date().toISOString(), status: 'sent', sent_at: new Date().toISOString(),
+      })
+      await supabase.from('ai_actions_log').insert({
+        contact_id: contact.id, action_type: 'onboarding-email', service: 'resend',
+        status: 'success', request_payload: { template_key: 'leadDay1', sequence: 'lead-nurture', step: 2 } as Record<string, unknown>,
+      })
+    } catch (emailErr) {
+      console.error('Day 0 welcome email error:', emailErr)
+    }
+
+    // Remaining nurture sequence (Day 1 welcome email sent directly above)
     await supabase.from('sequence_queue').insert([
-      // Day 1 — email welcome
-      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 2, channel: 'email', template_key: 'leadDay1', scheduled_at: daysFromNow(1) },
       // Day 2 — SMS follow-up
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
       // Day 3 — email social proof
@@ -93,18 +110,29 @@ export async function POST(request: NextRequest) {
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
     ])
 
-    // SBA sequence — enroll in SBA drip instead of lead-nurture when coming from /sba page
+    // SBA sequence — send Day 1 welcome email immediately, queue the rest
     if (enroll_sba) {
+      try {
+        const { subject, html } = EMAIL_TEMPLATES.sbaDay1Email(first_name)
+        await sendEmail({ to: email, subject, html })
+        await supabase.from('ai_actions_log').insert({
+          contact_id: contact.id, action_type: 'onboarding-email', service: 'resend',
+          status: 'success', request_payload: { template_key: 'sbaDay1Email', sequence: 'sba-onboarding', step: 1 } as Record<string, unknown>,
+        })
+      } catch (sbaEmailErr) {
+        console.error('SBA Day 1 email error:', sbaEmailErr)
+      }
+
       await supabase.from('sequence_queue').insert([
-        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 1, channel: 'email', template_key: 'sbaDay1', scheduled_at: hoursFromNow(0.25) },
-        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 2, channel: 'email', template_key: 'sbaDay3', scheduled_at: daysFromNow(3) },
-        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 3, channel: 'email', template_key: 'sbaDay7', scheduled_at: daysFromNow(7) },
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 1, channel: 'email', template_key: 'sbaDay1Email', scheduled_at: new Date().toISOString(), status: 'sent', sent_at: new Date().toISOString() },
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 2, channel: 'email', template_key: 'sbaDay3Email', scheduled_at: daysFromNow(3) },
+        { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 3, channel: 'email', template_key: 'sbaDay7Email', scheduled_at: daysFromNow(7) },
         ...(phone && sms_consent ? [
           { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 4, channel: 'sms', template_key: 'sbaDay0', scheduled_at: new Date().toISOString() },
           { contact_id: contact.id, sequence_name: 'sba-onboarding', step: 5, channel: 'sms', template_key: 'sbaDay7', scheduled_at: daysFromNow(7) },
         ] : []),
       ])
-      await supabase.from('contacts').update({ last_ai_action: 'SBA application received' }).eq('id', contact.id)
+      await supabase.from('contacts').update({ last_ai_action: 'SBA application received — welcome email sent' }).eq('id', contact.id)
     }
 
     // Bland.ai voice call (only if phone provided)

@@ -5,13 +5,12 @@ function wrapper(content: string): string {
 <div style="font-family:sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
   <div style="background:#FF6B35;padding:20px 28px;display:flex;align-items:center">
     <span style="font-size:22px;font-weight:900;color:white;letter-spacing:-0.5px">Vortex<span style="color:#1A1A2E">Trips</span></span>
-    <span style="color:rgba(255,255,255,0.75);font-size:12px;margin-left:8px">/ Travel Team Perks</span>
   </div>
   <div style="padding:32px 28px;color:#1A1A2E;line-height:1.7">
     ${content}
   </div>
   <div style="background:#f9f9f9;padding:20px 28px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center">
-    <p style="margin:0 0 6px">VortexTrips / Travel Team Perks &nbsp;·&nbsp; <a href="${BASE_URL}" style="color:#FF6B35;text-decoration:none">vortextrips.com</a></p>
+    <p style="margin:0 0 6px">VortexTrips &nbsp;·&nbsp; <a href="${BASE_URL}" style="color:#FF6B35;text-decoration:none">vortextrips.com</a></p>
     <p style="margin:0">Questions? <a href="mailto:support@vortextrips.com" style="color:#999">support@vortextrips.com</a></p>
     <p style="margin:8px 0 0;font-size:11px;color:#bbb">You're receiving this because you requested a travel savings quote. <a href="${BASE_URL}/unsubscribe" style="color:#bbb">Unsubscribe</a></p>
   </div>
