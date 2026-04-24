@@ -229,11 +229,11 @@ export default function ImportPage() {
             <h3 className="font-semibold text-orange-600 mb-2">Immediate Sequence (Days 1–15)</h3>
             <ul className="space-y-1 text-gray-600">
               <li>📧 Day 0 — Pattern interrupt: the travel product</li>
-              <li>📧 Day 2 — Price comparison demo</li>
-              <li>📧 Day 4 — SBA earnings breakdown</li>
-              <li>📧 Day 6 — Objection handling</li>
-              <li>📧 Day 9 — Network marketer testimonials</li>
-              <li>📧 Day 12 — Travel vs supplements comparison</li>
+              <li>📧 Day 1 — Price comparison demo</li>
+              <li>📧 Day 3 — SBA earnings breakdown</li>
+              <li>📧 Day 5 — Objection handling</li>
+              <li>📧 Day 7 — Network marketer testimonials</li>
+              <li>📧 Day 10 — Travel vs supplements comparison</li>
               <li>📧 Day 15 — Hard close</li>
             </ul>
           </div>
