@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const IG_ACCOUNT_ID = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID
 const IG_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN
-const GRAPH_API = 'https://graph.facebook.com/v19.0'
+const GRAPH_API = 'https://graph.facebook.com/v25.0'
 
 async function createMediaContainer(caption: string, imageUrl?: string): Promise<string> {
   const params: Record<string, string> = {
@@ -12,14 +12,9 @@ async function createMediaContainer(caption: string, imageUrl?: string): Promise
     caption,
   }
 
-  if (imageUrl) {
-    params.image_url = imageUrl
-    params.media_type = 'IMAGE'
-  } else {
-    // Text-only not supported — use a branded default image
-    params.image_url = `${process.env.NEXT_PUBLIC_APP_URL}/og`
-    params.media_type = 'IMAGE'
-  }
+  if (!imageUrl) throw new Error('Instagram requires an image — no image_url found on this post')
+  params.image_url = imageUrl
+  params.media_type = 'IMAGE'
 
   const res = await fetch(`${GRAPH_API}/${IG_ACCOUNT_ID}/media`, {
     method: 'POST',

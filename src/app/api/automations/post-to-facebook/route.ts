@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID
 const PAGE_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
-const GRAPH_API = 'https://graph.facebook.com/v19.0'
+const GRAPH_API = 'https://graph.facebook.com/v25.0'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -36,15 +36,26 @@ export async function POST(request: NextRequest) {
     let fbPostId: string
 
     if (post.image_url) {
-      // Photo post
-      const res = await fetch(`${GRAPH_API}/${PAGE_ID}/photos`, {
+      // Try photo post; fall back to text-only if image URL is inaccessible
+      const photoRes = await fetch(`${GRAPH_API}/${PAGE_ID}/photos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: post.image_url, caption: message, access_token: PAGE_TOKEN }),
       })
-      const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error?.message ?? 'Facebook photo post failed')
-      fbPostId = data.id
+      const photoData = await photoRes.json()
+      if (!photoRes.ok || photoData.error) {
+        // Fall back to text-only
+        const feedRes = await fetch(`${GRAPH_API}/${PAGE_ID}/feed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, access_token: PAGE_TOKEN }),
+        })
+        const feedData = await feedRes.json()
+        if (!feedRes.ok || feedData.error) throw new Error(feedData.error?.message ?? 'Facebook feed post failed')
+        fbPostId = feedData.id
+      } else {
+        fbPostId = photoData.id
+      }
     } else {
       // Text-only post
       const res = await fetch(`${GRAPH_API}/${PAGE_ID}/feed`, {

@@ -58,13 +58,26 @@ Return this exact JSON structure:
       posts = JSON.parse(jsonMatch[0])
     }
 
-    // Generate images for instagram posts in parallel
+    const admin = createAdminClient()
+
+    // Generate images for instagram/facebook posts and persist to Supabase Storage
     const rows = await Promise.all(posts.map(async (post) => {
       let image_url: string | null = null
 
       if ((post.platform === 'instagram' || post.platform === 'facebook') && post.image_prompt) {
         try {
-          image_url = await generateImage(post.image_prompt)
+          const dalleUrl = await generateImage(post.image_prompt)
+          // DALL-E URLs expire in 1hr — download and store permanently
+          const imgRes = await fetch(dalleUrl)
+          const imgBuffer = await imgRes.arrayBuffer()
+          const fileName = `content/${Date.now()}-${post.platform}.png`
+          const { error: uploadErr } = await admin.storage
+            .from('media')
+            .upload(fileName, imgBuffer, { contentType: 'image/png', upsert: false })
+          if (!uploadErr) {
+            const { data: pub } = admin.storage.from('media').getPublicUrl(fileName)
+            image_url = pub.publicUrl
+          }
         } catch {
           // Non-fatal — post without image
         }
