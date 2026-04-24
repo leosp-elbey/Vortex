@@ -30,7 +30,7 @@ For EVERY post include these exact fields:
 - platform (string)
 - caption (string, platform-native length and tone)
 - hashtags (string array, 3-8 tags)
-- image_prompt (string — vivid description for DALL-E 3 image generation, travel photography style)
+- image_prompt (string — vivid photorealistic description for DALL-E 3. ALWAYS feature real people: happy families at resorts, couples on beaches, friends exploring cities, parents with kids at pools, smiling travelers checking into hotels. Show genuine joy and excitement. Include specific details: ethnicities, ages, clothing, location, lighting. Style: candid lifestyle photography, warm golden-hour light, NOT stock-photo-stiff. Example: "A joyful Black family of four — mom, dad, and two young kids — laughing and splashing in a crystal-clear resort pool in Cancún, warm afternoon sun, candid lifestyle photo")
 - video_script (string — for tiktok/reels: a 30-45 second spoken script with [VISUAL] stage directions; for other platforms: empty string "")
 
 TikTok example video_script format:

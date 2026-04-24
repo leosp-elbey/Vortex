@@ -23,7 +23,7 @@ export async function generateImage(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: 'dall-e-3',
-      prompt: `Travel photography style, vibrant and aspirational. ${prompt}. No text overlays. Professional composition.`,
+      prompt: `Photorealistic lifestyle travel photo. ${prompt}. Real people, candid and natural expressions, not posed or stock-photo stiff. Warm, vibrant colors. No text overlays, no logos. Shot on a professional camera, shallow depth of field.`,
       n: 1,
       size: '1024x1024',
       quality: 'standard',
