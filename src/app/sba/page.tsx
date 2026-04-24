@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
 const EARNINGS = [
@@ -22,6 +22,13 @@ export default function SBAPage() {
   const [loading, setLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
+  const [sbaVideoUrl, setSbaVideoUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/sba-video').then(r => r.json()).then(d => {
+      if (d.video_url) setSbaVideoUrl(d.video_url)
+    }).catch(() => {})
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -102,6 +109,21 @@ export default function SBAPage() {
           Apply Now — Free to Start
         </a>
       </section>
+
+      {/* SBA Video */}
+      {sbaVideoUrl && (
+        <section className="px-4 pb-20 max-w-3xl mx-auto">
+          <div className="rounded-2xl overflow-hidden shadow-2xl shadow-black/40 border border-white/10">
+            <video
+              src={sbaVideoUrl}
+              controls
+              poster=""
+              className="w-full bg-black"
+              style={{ maxHeight: 480 }}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Why travel */}
       <section className="bg-white/5 py-20 px-4">

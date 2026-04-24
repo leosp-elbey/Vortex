@@ -43,7 +43,8 @@
       "Bash(node -e \"const data=JSON.parse\\(require\\('fs'\\).readFileSync\\('C:/Users/palme.000/AppData/Local/Temp/contacts.json','utf8'\\)\\);console.log\\(JSON.stringify\\(data.slice\\(0,3\\),null,2\\)\\)\")",
       "WebFetch(domain:graph.facebook.com)",
       "WebFetch(domain:www.vortextrips.com)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(xargs grep *)"
     ]
   }
 }
