@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkBlandWebhook } from '@/lib/webhook-auth'
 
 export async function POST(request: NextRequest) {
+  // Verify Bland-signed Bearer token (set BLAND_WEBHOOK_SECRET to enable enforcement)
+  if (!checkBlandWebhook(request.headers)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const body = await request.json()
     const { call_id, status, duration, metadata } = body

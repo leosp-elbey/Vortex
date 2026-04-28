@@ -4,6 +4,8 @@ import { triggerCall } from '@/lib/bland'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 import { sendEmail } from '@/lib/resend'
 import { EMAIL_TEMPLATES } from '@/lib/email-templates'
+import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
+import { checkFormToken } from '@/lib/webhook-auth'
 
 function hoursFromNow(hours: number): string {
   return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
@@ -14,6 +16,18 @@ function daysFromNow(days: number): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Anti-spam: require the public form token (deters basic bots, not motivated attackers)
+  if (!checkFormToken(request.headers)) {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 401 })
+  }
+
+  // Per-IP rate limit: 10 submissions / minute / IP
+  const ip = clientIpFrom(request.headers)
+  const rl = checkRateLimit(`lead-created:${ip}`, 10, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   try {
     const body = await request.json()
     const {

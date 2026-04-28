@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
 
 // Point values for lead scoring
 const SCORE_MAP: Record<string, number> = {
@@ -25,6 +26,13 @@ function getIntentTag(score: number): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Per-IP rate limit: 60 events / minute / IP (allows page tracking but blocks abuse)
+  const ip = clientIpFrom(request.headers)
+  const rl = checkRateLimit(`track-event:${ip}`, 60, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   try {
     const { contact_id, email, event, metadata } = await request.json()
 

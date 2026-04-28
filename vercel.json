@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/score-and-branch",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/check-heygen-jobs",
+      "schedule": "0 6 * * *"
     }
   ]
 }

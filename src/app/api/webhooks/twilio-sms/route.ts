@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { verifyTwilioSignature } from '@/lib/webhook-auth'
 
 // Twilio sends form-encoded POST when an inbound SMS arrives
 export async function POST(request: NextRequest) {
   const formData = await request.formData()
+
+  // Verify Twilio HMAC-SHA1 signature
+  const signature = request.headers.get('x-twilio-signature')
+  const url = request.headers.get('x-forwarded-proto') === 'https' || request.url.startsWith('https')
+    ? request.url
+    : request.url.replace(/^http:/, 'https:')
+  const params: Record<string, string> = {}
+  formData.forEach((value, key) => {
+    if (typeof value === 'string') params[key] = value
+  })
+  if (!verifyTwilioSignature(signature, url, params)) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
   const from = (formData.get('From') as string)?.trim()
   const body = (formData.get('Body') as string)?.trim().toUpperCase()
 

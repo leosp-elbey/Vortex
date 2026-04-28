@@ -87,7 +87,10 @@ export default function LandingPage() {
     try {
       const res = await fetch('/api/webhooks/lead-created', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vortex-Form-Token': process.env.NEXT_PUBLIC_FORM_TOKEN ?? '',
+        },
         body: JSON.stringify({ ...form, source: 'landing-page' }),
       })
 
