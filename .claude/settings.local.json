@@ -44,7 +44,24 @@
       "WebFetch(domain:graph.facebook.com)",
       "WebFetch(domain:www.vortextrips.com)",
       "Bash(npm run *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(git log *)",
+      "Bash(gh api *)",
+      "Bash(git ls-remote *)",
+      "Bash(vercel --version)",
+      "Bash(npx --yes vercel@latest whoami)",
+      "Bash(npx --yes vercel@latest login --github)",
+      "Bash(npx --yes vercel@latest link --yes --project vortex --scope leosp-elbey)",
+      "Bash(npx --yes vercel@latest link --yes --project vortex)",
+      "Bash(npx --yes vercel@latest deploy --prod --yes)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(node -e \"const {zodOutputFormat} = require\\('@anthropic-ai/sdk/helpers/zod'\\); console.log\\('zodOutputFormat:', typeof zodOutputFormat\\); console.log\\('arity:', zodOutputFormat.length\\)\")",
+      "Bash(openssl rand *)",
+      "Bash(echo \"NEXT_PUBLIC_FORM_TOKEN suggestion: vt-form-$\\(openssl rand -hex 12\\)\")",
+      "Bash(echo \"BLAND_WEBHOOK_SECRET suggestion: vt-bland-$\\(openssl rand -hex 16\\)\")",
+      "Bash(npx --yes vercel@latest env ls production)",
+      "Bash(npx --yes vercel@latest list --yes)"
     ]
   }
 }
