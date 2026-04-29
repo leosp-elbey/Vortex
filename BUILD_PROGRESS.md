@@ -1,7 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-04-28
-**Last commit:** `8e54262`
+**Last updated:** 2026-04-29
+**Last commit:** `467c0b5`
 **Status:** 🚀 LIVE on vortextrips.com
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
@@ -41,11 +41,13 @@ Phase 11 sub-tasks (all complete):
 ## Phase 12 candidates (in suggested priority)
 
 - [x] Smoke-test "Verify with Claude" button on a real job — passed 4/29/2026 (Opus 4.7, score 92/100, real recommendations)
+- [x] **Bulk import: accept .xlsx/.xls files** — shipped 4/29/2026 (commit `467c0b5`). Drop zone now accepts CSV + Excel; clear error on 0 rows.
+- [ ] HeyGen voice clone (Leo recording — in progress 4/29)
+- [ ] Twitter/X auto-post route (`/api/automations/post-to-twitter`)
+- [ ] TikTok: API access application OR partner-tier integration (Buffer/Later)
 - [ ] Cleanup: refresh Vercel env vars to remove leading whitespace (cosmetic)
 - [ ] Cleanup: fix lint config (`next lint` removed in Next 16)
 - [ ] Build `src/lib/social-specs.ts` for per-platform image/video sizing
-- [ ] HeyGen lifelike: ElevenLabs voice clone integration
-- [ ] HeyGen lifelike: custom Studio Avatar training
 
 ---
 

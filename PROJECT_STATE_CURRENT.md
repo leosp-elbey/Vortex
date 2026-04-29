@@ -1,8 +1,8 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-04-28
-**Last known good commit:** `8e54262` — "fix(ai): trim whitespace from env var reads"
-**Production deploy:** `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H` (vortextrips.com) — Phase 11 complete
+**Last updated:** 2026-04-29
+**Last known good commit:** `467c0b5` — "feat(import): accept .xlsx/.xls files"
+**Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-29)
 **Branch:** `main`
 
 ---
