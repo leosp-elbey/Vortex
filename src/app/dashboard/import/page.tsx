@@ -13,16 +13,48 @@ interface ParsedRow {
   error?: string
 }
 
-const EXPECTED_COLUMNS = ['first_name', 'last_name', 'email', 'phone', 'source', 'notes']
+function normalizeKey(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '')
+}
+
+function rowsToParsed(records: Record<string, string>[]): ParsedRow[] {
+  return records
+    .map(rawRow => {
+      const obj: Record<string, string> = {}
+      for (const [k, v] of Object.entries(rawRow)) {
+        obj[normalizeKey(k)] = String(v ?? '').trim()
+      }
+
+      const email = (obj.email || obj.email_address || obj['e_mail'] || '').trim().toLowerCase()
+      const first_name = (obj.first_name || obj.firstname || obj.first || obj.name || '').trim()
+      const last_name = (obj.last_name || obj.lastname || obj.last || '').trim()
+      const phone = (obj.phone || obj.phone_number || obj.mobile || '').trim()
+      const source = (obj.source || 'import').trim()
+      const notes = (obj.notes || obj.note || '').trim()
+
+      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
+      return {
+        first_name,
+        last_name,
+        email,
+        phone,
+        source,
+        notes,
+        valid: !!first_name && emailValid,
+        error: !first_name ? 'Missing first name' : !emailValid ? 'Invalid email' : undefined,
+      }
+    })
+    .filter(r => r.email !== '' || r.first_name !== '')
+}
 
 function parseCSV(text: string): ParsedRow[] {
   const lines = text.trim().split(/\r?\n/)
   if (lines.length < 2) return []
 
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, ''))
+  const headers = lines[0].split(',').map(h => h.trim())
 
-  return lines.slice(1).map(line => {
-    // Handle quoted fields
+  const records: Record<string, string>[] = lines.slice(1).map(line => {
     const cols: string[] = []
     let cur = ''
     let inQuote = false
@@ -35,53 +67,83 @@ function parseCSV(text: string): ParsedRow[] {
 
     const obj: Record<string, string> = {}
     headers.forEach((h, i) => { obj[h] = cols[i] ?? '' })
+    return obj
+  })
 
-    const email = (obj.email || obj.email_address || obj['e-mail'] || '').trim().toLowerCase()
-    const first_name = (obj.first_name || obj.firstname || obj.first || obj.name || '').trim()
-    const last_name = (obj.last_name || obj.lastname || obj.last || '').trim()
-    const phone = (obj.phone || obj.phone_number || obj.mobile || '').trim()
-    const source = (obj.source || 'import').trim()
-    const notes = (obj.notes || obj.note || '').trim()
+  return rowsToParsed(records)
+}
 
-    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+async function parseExcel(file: File): Promise<ParsedRow[]> {
+  const XLSX = await import('xlsx')
+  const buf = await file.arrayBuffer()
+  const workbook = XLSX.read(buf, { type: 'array' })
+  if (!workbook.SheetNames.length) return []
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+  const records = XLSX.utils.sheet_to_json<Record<string, string>>(firstSheet, {
+    defval: '',
+    raw: false,
+  })
+  return rowsToParsed(records)
+}
 
-    return {
-      first_name,
-      last_name,
-      email,
-      phone,
-      source,
-      notes,
-      valid: !!first_name && emailValid,
-      error: !first_name ? 'Missing first name' : !emailValid ? 'Invalid email' : undefined,
-    }
-  }).filter(r => r.email !== '' || r.first_name !== '')
+function isAcceptedFile(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls')
 }
 
 export default function ImportPage() {
   const [rows, setRows] = useState<ParsedRow[]>([])
   const [fileName, setFileName] = useState('')
+  const [parseError, setParseError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ inserted: number; skipped: number; errors: string[] } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     setFileName(file.name)
     setResult(null)
-    const reader = new FileReader()
-    reader.onload = e => {
-      const text = e.target?.result as string
-      setRows(parseCSV(text))
+    setParseError(null)
+    setRows([])
+
+    const lower = file.name.toLowerCase()
+    try {
+      let parsed: ParsedRow[] = []
+      if (lower.endsWith('.csv')) {
+        const text = await file.text()
+        parsed = parseCSV(text)
+      } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+        parsed = await parseExcel(file)
+      } else {
+        setParseError(`Unsupported file type. Please upload .csv, .xlsx, or .xls.`)
+        return
+      }
+
+      if (parsed.length === 0) {
+        setParseError(
+          `No rows found in ${file.name}. Make sure the first row contains column headers (first_name, email, etc.) and there is at least one data row below it.`,
+        )
+        return
+      }
+      setRows(parsed)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not read file'
+      setParseError(`Failed to parse ${file.name}: ${msg}`)
     }
-    reader.readAsText(file)
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file?.name.endsWith('.csv')) handleFile(file)
+    if (!file) return
+    if (isAcceptedFile(file.name)) {
+      void handleFile(file)
+    } else {
+      setFileName(file.name)
+      setRows([])
+      setParseError(`Unsupported file type. Please upload .csv, .xlsx, or .xls.`)
+    }
   }, [])
 
   const validRows = rows.filter(r => r.valid)
@@ -120,12 +182,12 @@ export default function ImportPage() {
     <div className="p-8 max-w-5xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-black text-[#1A1A2E]">Bulk Import Leads</h1>
-        <p className="text-gray-500 mt-1">Upload a CSV of contacts — they'll be enrolled in the 6-month MLM email nurture sequence automatically.</p>
+        <p className="text-gray-500 mt-1">Upload a CSV or Excel file of contacts — they&apos;ll be enrolled in the 6-month MLM email nurture sequence automatically.</p>
       </div>
 
       {/* Template download hint */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-sm text-blue-800">
-        <strong>CSV format:</strong> Include columns <code className="bg-blue-100 px-1 rounded">first_name, last_name, email, phone, source, notes</code> — only <strong>first_name</strong> and <strong>email</strong> are required. Extra columns are ignored.
+        <strong>Required columns:</strong> <code className="bg-blue-100 px-1 rounded">first_name, last_name, email, phone, source, notes</code> — only <strong>first_name</strong> and <strong>email</strong> are required. Extra columns are ignored. Accepts <strong>.csv</strong>, <strong>.xlsx</strong>, <strong>.xls</strong>.
       </div>
 
       {/* Drop zone */}
@@ -138,12 +200,21 @@ export default function ImportPage() {
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
       >
-        <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f) }} />
         <div className="text-4xl mb-3">📥</div>
-        <p className="text-lg font-semibold text-gray-700">Drop your CSV here or click to browse</p>
-        <p className="text-sm text-gray-400 mt-1">Supports .csv files up to 10,000 rows</p>
-        {fileName && <p className="mt-3 text-sm font-medium text-[#FF6B35]">Loaded: {fileName}</p>}
+        <p className="text-lg font-semibold text-gray-700">Drop your CSV or Excel file here or click to browse</p>
+        <p className="text-sm text-gray-400 mt-1">Supports .csv, .xlsx, .xls — up to 10,000 rows</p>
+        {fileName && !parseError && <p className="mt-3 text-sm font-medium text-[#FF6B35]">Loaded: {fileName}</p>}
+        {fileName && parseError && <p className="mt-3 text-sm font-medium text-red-500">⚠️ {fileName}</p>}
       </div>
+
+      {/* Parse error */}
+      {parseError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 text-sm text-red-700">
+          <p className="font-semibold mb-1">Could not import this file</p>
+          <p>{parseError}</p>
+        </div>
+      )}
 
       {/* Preview table */}
       {rows.length > 0 && (
