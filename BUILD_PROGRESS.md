@@ -40,7 +40,7 @@ Phase 11 sub-tasks (all complete):
 
 ## Phase 12 candidates (in suggested priority)
 
-- [ ] Smoke-test "Verify with Claude" button on a real job
+- [x] Smoke-test "Verify with Claude" button on a real job — passed 4/29/2026 (Opus 4.7, score 92/100, real recommendations)
 - [ ] Cleanup: refresh Vercel env vars to remove leading whitespace (cosmetic)
 - [ ] Cleanup: fix lint config (`next lint` removed in Next 16)
 - [ ] Build `src/lib/social-specs.ts` for per-platform image/video sizing

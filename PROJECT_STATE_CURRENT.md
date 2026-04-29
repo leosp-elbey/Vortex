@@ -60,16 +60,18 @@ This includes:
 
 ---
 
-## What is working in production
+## What is working in production (validated end-to-end)
 
 - ✅ AI Command Center page renders at vortextrips.com/dashboard/ai-command-center
-- ✅ Captions generation tested end-to-end on preview (smoke test 4 passed with llama-3.3-70b-instruct, cost $0.0000, status pending_review)
-- ✅ Sidebar nav link present at `src/components/dashboard/sidebar.tsx:14`
+- ✅ AI generation: tested via "Verifier test" job — llama-3.3-70b-instruct, cost $0.0001, output rendered correctly
+- ✅ Claude verification: tested same job — Opus 4.7 returned approved/92, all 6 brand checks passed, caught real issues (malformed hashtag, missing brand mention) → confirms verifier is doing real quality review, not rubber-stamping
+- ✅ Sidebar nav link at `src/components/dashboard/sidebar.tsx:14`
 - ✅ All AI API routes admin-gated via `src/lib/admin-auth.ts`
 - ✅ Webhook signature checks live on Bland, Twilio, HeyGen
 - ✅ Rate limiting on AI generation endpoints
 - ✅ HeyGen async pattern shipped (no more 10s timeouts)
 - ✅ Env var whitespace defense (trim on every read)
+- ✅ `ai_jobs`, `ai_verification_logs`, `ai_model_usage` tables all writing correctly
 
 ## Post-launch follow-ups (not blockers)
 
