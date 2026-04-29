@@ -33,7 +33,7 @@ function loadEnvLocal() {
   }
   const text = fs.readFileSync(envPath, 'utf8')
   const env = {}
-  for (const line of text.split('\n')) {
+  for (const line of text.split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/i)
     if (!m) continue
     let v = m[2].trim()
