@@ -95,6 +95,21 @@ export default function ContentPage() {
     }
   }
 
+  const postToTwitter = async (item: ExtendedContentItem) => {
+    const res = await fetch('/api/automations/post-to-twitter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_id: item.id }),
+    })
+    if (res.ok) {
+      setContent(prev => prev.map(c => c.id === item.id ? { ...c, status: 'posted' as ContentCalendarItem['status'] } : c))
+      show('Posted to X / Twitter!')
+    } else {
+      const d = await res.json()
+      show(d.error ?? 'Twitter post failed', 'error')
+    }
+  }
+
   const stats = {
     total: content.length,
     draft: content.filter(c => c.status === 'draft').length,
@@ -251,14 +266,12 @@ export default function ContentPage() {
                           </a>
                         )}
                         {item.platform === 'twitter' && (
-                          <a
-                            href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(item.caption)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium text-center"
+                          <button
+                            onClick={() => postToTwitter(item)}
+                            className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium"
                           >
-                            🐦 Tweet
-                          </a>
+                            🐦 Post to X
+                          </button>
                         )}
                         <button
                           onClick={() => updateStatus(item.id, 'posted')}
