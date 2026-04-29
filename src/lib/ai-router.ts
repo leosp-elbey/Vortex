@@ -41,13 +41,17 @@ const MEDIUM_TYPES = new Set<JobType>([
 ])
 const STRONG_TYPES = new Set<JobType>(['security-review', 'compliance'])
 
+function envTrim(key: string): string {
+  return (process.env[key] ?? '').trim()
+}
+
 function selectModel(jobType: JobType, override?: string): string {
-  if (override) return override
-  if (jobType === 'code') return process.env.AI_CODING_MODEL || process.env.AI_DEFAULT_MODEL || ''
-  if (CHEAP_TYPES.has(jobType)) return process.env.AI_CHEAP_MODEL || process.env.AI_DEFAULT_MODEL || ''
-  if (MEDIUM_TYPES.has(jobType)) return process.env.AI_MEDIUM_MODEL || process.env.AI_DEFAULT_MODEL || ''
-  if (STRONG_TYPES.has(jobType)) return process.env.AI_STRONG_MODEL || process.env.AI_DEFAULT_MODEL || ''
-  return process.env.AI_DEFAULT_MODEL || ''
+  if (override) return override.trim()
+  if (jobType === 'code') return envTrim('AI_CODING_MODEL') || envTrim('AI_DEFAULT_MODEL')
+  if (CHEAP_TYPES.has(jobType)) return envTrim('AI_CHEAP_MODEL') || envTrim('AI_DEFAULT_MODEL')
+  if (MEDIUM_TYPES.has(jobType)) return envTrim('AI_MEDIUM_MODEL') || envTrim('AI_DEFAULT_MODEL')
+  if (STRONG_TYPES.has(jobType)) return envTrim('AI_STRONG_MODEL') || envTrim('AI_DEFAULT_MODEL')
+  return envTrim('AI_DEFAULT_MODEL')
 }
 
 interface BudgetCheckResult {
@@ -58,8 +62,8 @@ interface BudgetCheckResult {
 }
 
 async function checkBudget(): Promise<BudgetCheckResult> {
-  const monthlyLimit = parseFloat(process.env.AI_MONTHLY_BUDGET_LIMIT || '75')
-  const dailyLimit = parseFloat(process.env.AI_DAILY_BUDGET_LIMIT || '5')
+  const monthlyLimit = parseFloat(envTrim('AI_MONTHLY_BUDGET_LIMIT') || '75')
+  const dailyLimit = parseFloat(envTrim('AI_DAILY_BUDGET_LIMIT') || '5')
 
   const now = new Date()
   const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
@@ -132,10 +136,10 @@ async function callOpenRouter(opts: {
   prompt: string
 }): Promise<{ output: string; inputTokens: number; outputTokens: number; cost: number }> {
   const client = new OpenAI({
-    apiKey: process.env.OPENROUTER_API_KEY,
-    baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    apiKey: envTrim('OPENROUTER_API_KEY'),
+    baseURL: envTrim('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1',
     defaultHeaders: {
-      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://www.vortextrips.com',
+      'HTTP-Referer': envTrim('NEXT_PUBLIC_APP_URL') || 'https://www.vortextrips.com',
       'X-Title': 'VortexTrips AI Command Center',
     },
   })
@@ -174,7 +178,7 @@ export async function runAIJob(req: AIJobRequest): Promise<AIJobResult> {
   if (!req.title?.trim()) throw new Error('title required')
   if (!req.prompt?.trim()) throw new Error('prompt required')
   if (!req.createdBy) throw new Error('createdBy required')
-  if (!process.env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY not configured')
+  if (!envTrim('OPENROUTER_API_KEY')) throw new Error('OPENROUTER_API_KEY not configured')
 
   const supabase = createAdminClient()
 
@@ -214,7 +218,7 @@ export async function runAIJob(req: AIJobRequest): Promise<AIJobResult> {
       prompt: req.prompt,
     })
 
-    const requireApproval = process.env.AI_REQUIRE_HUMAN_APPROVAL !== 'false'
+    const requireApproval = envTrim('AI_REQUIRE_HUMAN_APPROVAL') !== 'false'
     const finalStatus: AIJobResult['status'] = requireApproval ? 'pending_review' : 'completed'
 
     await supabase

@@ -7,7 +7,11 @@ import { z } from 'zod'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-const VERIFIER_MODEL = process.env.AI_VERIFIER_MODEL?.replace(/^anthropic\//, '') ?? 'claude-opus-4-7'
+function envTrim(key: string): string {
+  return (process.env[key] ?? '').trim()
+}
+
+const VERIFIER_MODEL = envTrim('AI_VERIFIER_MODEL').replace(/^anthropic\//, '') || 'claude-opus-4-7'
 
 const VerificationSchema = z.object({
   status: z.enum(['approved', 'needs_revision', 'rejected']),
@@ -90,9 +94,9 @@ export async function verifyAIOutput(opts: {
   if (!opts.jobId) throw new Error('jobId required')
   if (!opts.output?.trim()) throw new Error('output required')
   if (!opts.jobType) throw new Error('jobType required')
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured')
+  if (!envTrim('ANTHROPIC_API_KEY')) throw new Error('ANTHROPIC_API_KEY not configured')
 
-  const client = new Anthropic()
+  const client = new Anthropic({ apiKey: envTrim('ANTHROPIC_API_KEY') })
   const userMessage = `Job type: ${opts.jobType}\n\nOutput to review:\n---\n${opts.output}\n---`
 
   let result: VerificationResult
@@ -138,7 +142,7 @@ export async function verifyAIOutput(opts: {
     raw_response: rawText.slice(0, 50_000),
   })
 
-  const requireApproval = process.env.AI_REQUIRE_HUMAN_APPROVAL !== 'false'
+  const requireApproval = envTrim('AI_REQUIRE_HUMAN_APPROVAL') !== 'false'
   const newJobStatus = requireApproval
     ? 'pending_review'
     : result.status === 'approved'
