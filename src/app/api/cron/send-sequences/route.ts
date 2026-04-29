@@ -3,6 +3,24 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 import { sendEmail } from '@/lib/resend'
 import { EMAIL_TEMPLATES, type EmailTemplateKey } from '@/lib/email-templates'
+import { computeEmailHealth, renderHealthEmailHTML, type EmailHealthReport } from '@/lib/email-health'
+
+async function runHealthCheck(): Promise<EmailHealthReport | null> {
+  try {
+    const report = await computeEmailHealth(24)
+    const adminEmail = (process.env.ADMIN_NOTIFICATION_EMAIL ?? '').trim()
+    if (!adminEmail) return report
+
+    if (report.verdict !== 'GREEN' && report.total >= 10) {
+      const subject = `${report.verdict === 'RED' ? '🔴' : '🟡'} VortexTrips Email Health: ${report.verdict} (${report.bounceRate.toFixed(1)}% bounce)`
+      await sendEmail({ to: adminEmail, subject, html: renderHealthEmailHTML(report) })
+    }
+    return report
+  } catch (err) {
+    console.error('[health-check] failed:', err)
+    return null
+  }
+}
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -104,7 +122,24 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, processed: items.length, sent, failed, skipped })
+  const health = await runHealthCheck()
+
+  return NextResponse.json({
+    success: true,
+    processed: items.length,
+    sent,
+    failed,
+    skipped,
+    health: health
+      ? {
+          verdict: health.verdict,
+          total: health.total,
+          deliveryRate: Number(health.deliveryRate.toFixed(2)),
+          bounceRate: Number(health.bounceRate.toFixed(2)),
+          complaintRate: Number(health.complaintRate.toFixed(3)),
+        }
+      : null,
+  })
 }
 
 export async function POST(request: NextRequest) {
