@@ -1,7 +1,7 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-29
-**Last commit:** `c91a7b9`
+**Last commit:** `de51509`
 **Status:** 🚀 LIVE on vortextrips.com
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
@@ -44,6 +44,7 @@ Phase 11 sub-tasks (all complete):
 - [x] **Bulk import: accept .xlsx/.xls files** — shipped 4/29/2026 (commit `467c0b5`). Drop zone now accepts CSV + Excel; clear error on 0 rows.
 - [x] **Local email-stats CLI script** — shipped 4/29/2026 (`scripts/check-email-stats.js`, commit `e8da511` after CRLF fix). Run `node scripts/check-email-stats.js` for instant Resend verdict.
 - [x] **Auto email-health daily report** — shipped 4/29/2026 (commit `c91a7b9`). Embedded in `send-sequences` cron at 10am UTC: pulls 24h Resend stats, emails `ADMIN_NOTIFICATION_EMAIL` when verdict is YELLOW/RED. No 5th cron needed (still at Hobby's 4-cron limit).
+- [x] **Twitter/X auto-post** — shipped 4/29/2026 (commit `de51509`). Real Twitter API v2 integration via `twitter-api-v2` package. Text + image upload (download from image_url, upload to Twitter, post with media_ids). Replaces the manual compose-intent link. Uses `TWITTER_API_KEY/SECRET/ACCESS_TOKEN/ACCESS_SECRET` env vars (already in Vercel).
 - [ ] HeyGen voice clone (Leo recording — in progress 4/29)
 - [ ] Twitter/X auto-post route (`/api/automations/post-to-twitter`)
 - [ ] TikTok: API access application OR partner-tier integration (Buffer/Later)
