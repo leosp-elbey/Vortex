@@ -1,7 +1,7 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-29
-**Last commit:** `467c0b5`
+**Last commit:** `c91a7b9`
 **Status:** 🚀 LIVE on vortextrips.com
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
@@ -42,6 +42,8 @@ Phase 11 sub-tasks (all complete):
 
 - [x] Smoke-test "Verify with Claude" button on a real job — passed 4/29/2026 (Opus 4.7, score 92/100, real recommendations)
 - [x] **Bulk import: accept .xlsx/.xls files** — shipped 4/29/2026 (commit `467c0b5`). Drop zone now accepts CSV + Excel; clear error on 0 rows.
+- [x] **Local email-stats CLI script** — shipped 4/29/2026 (`scripts/check-email-stats.js`, commit `e8da511` after CRLF fix). Run `node scripts/check-email-stats.js` for instant Resend verdict.
+- [x] **Auto email-health daily report** — shipped 4/29/2026 (commit `c91a7b9`). Embedded in `send-sequences` cron at 10am UTC: pulls 24h Resend stats, emails `ADMIN_NOTIFICATION_EMAIL` when verdict is YELLOW/RED. No 5th cron needed (still at Hobby's 4-cron limit).
 - [ ] HeyGen voice clone (Leo recording — in progress 4/29)
 - [ ] Twitter/X auto-post route (`/api/automations/post-to-twitter`)
 - [ ] TikTok: API access application OR partner-tier integration (Buffer/Later)

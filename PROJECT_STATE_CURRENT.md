@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-29
-**Last known good commit:** `467c0b5` — "feat(import): accept .xlsx/.xls files"
+**Last known good commit:** `c91a7b9` — "feat(cron): auto email-health check + admin alerts"
 **Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-29)
 **Branch:** `main`
 
