@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-28
-**Last known good commit:** `ad42f44` — "feat: Vortex AI Command Center (Phases 1-10) + webhook security + HeyGen async cron"
+**Last known good commit:** `f2b41e6` — "Phase 10.5: save protocol + image safety guard"
 **Branch:** `main`
 
 ---
@@ -22,7 +22,7 @@ See `SAVE_PROTOCOL.md` for the full workflow.
 
 ## Current completed phase
 
-**Phases 0 through 10 — SHIPPED** (in commit `ad42f44`).
+**Phases 0 through 10.5 — SHIPPED** (Phases 0-10 in `ad42f44`, save protocol + image safety in `f2b41e6`).
 
 This includes:
 - Phase 0 — Audit & plan
@@ -82,7 +82,9 @@ This session added the save-and-status workflow plus the image safety guard. Fil
 
 ## Exact next step
 
-1. Run the save protocol from `SAVE_PROTOCOL.md` to commit this session's work (status files + image safety guard).
-2. Then — and only then — begin Phase 11 deploy prep with a local build verification.
-
-Do **not** start Phase 11 until this commit is pushed to `origin/main` and confirmed.
+**Phase 11 — Deploy prep + production deploy.** Subtasks:
+1. Local build verification: `npm run lint && npx tsc --noEmit && npm run build` — all must pass.
+2. Confirm 11 new env vars are present in Vercel dashboard (Leo verifies).
+3. Deploy preview: `npx vercel` → smoke test on preview URL.
+4. Promote to prod: `npx vercel --prod` → smoke test on vortextrips.com.
+5. Run save protocol for Phase 11 (update MD files + commit + push).

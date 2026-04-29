@@ -1,7 +1,7 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-28
-**Last commit:** `ad42f44`
+**Last commit:** `f2b41e6`
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -20,23 +20,21 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 - [x] **Phase 8 — Security hardening** (`src/lib/webhook-auth.ts`, `src/lib/rate-limit.ts`)
 - [x] **Phase 9 — HeyGen async** (`src/app/api/cron/check-heygen-jobs/route.ts`)
 - [x] **Phase 10 — Local testing** (lint, typecheck, build pass before commit `ad42f44`)
-- [~] **Phase 10.5 — Save protocol + image safety guard** (this session)
-- [ ] **Phase 11 — Deploy prep & production deploy** (NOT STARTED)
+- [x] **Phase 10.5 — Save protocol + image safety guard** (commit `f2b41e6`)
+- [~] **Phase 11 — Deploy prep & production deploy** (in progress)
 
 ---
 
 ## Current focus
 
-**Phase 10.5 — Save protocol + image safety guard.**
+**Phase 11 — Deploy prep + production deploy.**
 
 Sub-tasks:
-- [x] Update `PROJECT_STATE_CURRENT.md` to reflect real shipped state
-- [x] Create `BUILD_PROGRESS.md` (this file)
-- [x] Create `SAVE_PROTOCOL.md`
-- [x] Create `IMAGE_UPLOAD_RULES.md`
-- [x] Create `src/lib/image-safety.ts`
-- [x] Create `scripts/resize-images.js`
-- [ ] Commit + push (run `SAVE_PROTOCOL.md` checklist)
+- [ ] Local build verification: `npm run lint && npx tsc --noEmit && npm run build`
+- [ ] Verify 11 new env vars present in Vercel dashboard (Leo)
+- [ ] Deploy preview: `npx vercel` and smoke test on preview URL
+- [ ] Promote to prod: `npx vercel --prod` and smoke test on vortextrips.com
+- [ ] Run save protocol (update MD files, commit, push)
 
 ---
 
