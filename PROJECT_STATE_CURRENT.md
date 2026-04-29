@@ -1,7 +1,8 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-28
-**Last known good commit:** `f2b41e6` — "Phase 10.5: save protocol + image safety guard"
+**Last known good commit:** `8e54262` — "fix(ai): trim whitespace from env var reads"
+**Production deploy:** `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H` (vortextrips.com) — Phase 11 complete
 **Branch:** `main`
 
 ---
@@ -22,7 +23,11 @@ See `SAVE_PROTOCOL.md` for the full workflow.
 
 ## Current completed phase
 
-**Phases 0 through 10.5 — SHIPPED** (Phases 0-10 in `ad42f44`, save protocol + image safety in `f2b41e6`).
+**Phases 0 through 11 — SHIPPED.** System is LIVE on vortextrips.com.
+
+- Phases 0-10 in `ad42f44` (AI Command Center, security, HeyGen async)
+- Phase 10.5 in `f2b41e6` (save protocol + image safety guard)
+- Phase 11 deploy hotfix in `8e54262` (env var whitespace trim — prevented OpenRouter 401 errors caused by tabs/spaces in pasted env values)
 
 This includes:
 - Phase 0 — Audit & plan
@@ -39,40 +44,41 @@ This includes:
 
 ---
 
-## Files created/edited in the latest session
-
-This session added the save-and-status workflow plus the image safety guard. Files touched:
+## Files created/edited in the latest session (Phase 11)
 
 **Created:**
-- `BUILD_PROGRESS.md` — phase checklist
-- `SAVE_PROTOCOL.md` — save-after-every-phase rule
-- `IMAGE_UPLOAD_RULES.md` — 2000px max, why, how to enforce
-- `src/lib/image-safety.ts` — runtime image dimension/size validator
-- `scripts/resize-images.js` — local batch resize utility (opt-in, requires `sharp`)
+- `src/app/api/admin/env-check/route.ts` — admin-only diagnostic showing env var presence, length, and prefix (no values exposed). Was instrumental in finding the whitespace bug.
 
 **Edited:**
-- `PROJECT_STATE_CURRENT.md` — this file (now reflects real shipped state)
+- `src/lib/ai-router.ts` — all `process.env.X` reads now go through `envTrim()` helper that strips leading/trailing whitespace
+- `src/lib/ai-verifier.ts` — same trim treatment, plus explicit `apiKey` passed to Anthropic client
+- `PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md` — Phase 11 complete
+
+**Deployed:**
+- Preview chain: `vortex-el75d800f` → `vortex-9soz0ntmi` → `vortex-ik4zkym1a` → `vortex-bczpnbclr` → `vortex-cfb100glz` (the one that worked)
+- Production: `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H` → vortextrips.com
 
 ---
 
-## What is working
+## What is working in production
 
-- AI Command Center page renders at `/dashboard/ai-command-center`
-- Sidebar nav link present at `src/components/dashboard/sidebar.tsx:14`
-- All AI API routes admin-gated via `src/lib/admin-auth.ts`
-- Webhook signature checks live on Bland, Twilio, Stripe, HeyGen webhooks
-- Rate limiting on AI generation endpoints
-- HeyGen async pattern: kick off generation, daily cron checks status, no more 10s timeouts
+- ✅ AI Command Center page renders at vortextrips.com/dashboard/ai-command-center
+- ✅ Captions generation tested end-to-end on preview (smoke test 4 passed with llama-3.3-70b-instruct, cost $0.0000, status pending_review)
+- ✅ Sidebar nav link present at `src/components/dashboard/sidebar.tsx:14`
+- ✅ All AI API routes admin-gated via `src/lib/admin-auth.ts`
+- ✅ Webhook signature checks live on Bland, Twilio, HeyGen
+- ✅ Rate limiting on AI generation endpoints
+- ✅ HeyGen async pattern shipped (no more 10s timeouts)
+- ✅ Env var whitespace defense (trim on every read)
 
-## What is still pending
+## Post-launch follow-ups (not blockers)
 
-- **Phase 11 — Deploy prep** (NOT YET RUN)
-  - Confirm all 11 new env vars are set in Vercel dashboard
-  - Run `npm run lint && npx tsc --noEmit && npm run build` locally — must all pass
-  - Deploy preview via `npx vercel`
-  - Smoke test on preview URL
-  - Promote to prod via `npx vercel --prod`
-- Final verification of AI Center end-to-end (create → generate → verify → approve → push to calendar)
+- **Code lint config:** `next lint` was removed in Next.js 16. The `lint` script in package.json is broken. Fix: install ESLint v9 + `eslint-config-next` flat config, or remove the lint script. Typecheck and build are the real gates and both pass.
+- **Vercel "Needs Attention" flags** on Supabase env vars: cosmetic, not blocking. Refresh via the Supabase integration UI when convenient.
+- **Whitespace cleanup in Vercel env vars:** the trim fix means tabs/spaces in env values are now harmless, but it's still good hygiene to delete and re-paste OPENROUTER_BASE_URL, AI_MEDIUM_MODEL, OPENROUTER_API_KEY without leading whitespace. Do this on a slow day.
+- **Verify Claude verification flow** end-to-end (click "Verify with Claude" on a real job and confirm `ai_verification_logs` row appears).
+- **HeyGen lifelike upgrades** (post-launch quality): ElevenLabs voice clone, Studio Avatar, b-roll cutaways. See chat history.
+- **Per-platform image/video sizing** (`src/lib/social-specs.ts`). 2-3 hours, post-launch enhancement.
 
 ## Known issues
 
@@ -82,9 +88,10 @@ This session added the save-and-status workflow plus the image safety guard. Fil
 
 ## Exact next step
 
-**Phase 11 — Deploy prep + production deploy.** Subtasks:
-1. Local build verification: `npm run lint && npx tsc --noEmit && npm run build` — all must pass.
-2. Confirm 11 new env vars are present in Vercel dashboard (Leo verifies).
-3. Deploy preview: `npx vercel` → smoke test on preview URL.
-4. Promote to prod: `npx vercel --prod` → smoke test on vortextrips.com.
-5. Run save protocol for Phase 11 (update MD files + commit + push).
+**Phase 11 is complete. System is live.** No urgent next step — pick from the post-launch follow-ups above based on priority.
+
+Recommended Phase 12 candidates (in priority order):
+1. Smoke-test "Verify with Claude" on a real job (5 minutes, just click the button)
+2. Build social-specs.ts for per-platform sizing (2-3 hours)
+3. ElevenLabs voice clone for HeyGen videos (half day)
+4. Custom HeyGen Studio Avatar trained on Leo's face (1-2 days)

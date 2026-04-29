@@ -1,7 +1,8 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-28
-**Last commit:** `f2b41e6`
+**Last commit:** `8e54262`
+**Status:** 🚀 LIVE on vortextrips.com
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -21,20 +22,30 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 - [x] **Phase 9 — HeyGen async** (`src/app/api/cron/check-heygen-jobs/route.ts`)
 - [x] **Phase 10 — Local testing** (lint, typecheck, build pass before commit `ad42f44`)
 - [x] **Phase 10.5 — Save protocol + image safety guard** (commit `f2b41e6`)
-- [~] **Phase 11 — Deploy prep & production deploy** (in progress)
+- [x] **Phase 11 — Deploy prep & production deploy** (commits `c361e8d`, `8e54262`; prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 
 ---
 
 ## Current focus
 
-**Phase 11 — Deploy prep + production deploy.**
+**System is live. Pick a Phase 12 enhancement based on priority.**
 
-Sub-tasks:
-- [ ] Local build verification: `npm run lint && npx tsc --noEmit && npm run build`
-- [ ] Verify 11 new env vars present in Vercel dashboard (Leo)
-- [ ] Deploy preview: `npx vercel` and smoke test on preview URL
-- [ ] Promote to prod: `npx vercel --prod` and smoke test on vortextrips.com
-- [ ] Run save protocol (update MD files, commit, push)
+Phase 11 sub-tasks (all complete):
+- [x] Local typecheck + build verification (lint script broken — separate cleanup)
+- [x] Verified all 11 new env vars present in Vercel dashboard
+- [x] Deployed preview, smoke-tested AI generation end-to-end
+- [x] Diagnosed and fixed env var whitespace bug (commit `c361e8d` diagnostic + `8e54262` fix)
+- [x] Promoted to prod via `npx vercel --prod`
+- [x] Save protocol run
+
+## Phase 12 candidates (in suggested priority)
+
+- [ ] Smoke-test "Verify with Claude" button on a real job
+- [ ] Cleanup: refresh Vercel env vars to remove leading whitespace (cosmetic)
+- [ ] Cleanup: fix lint config (`next lint` removed in Next 16)
+- [ ] Build `src/lib/social-specs.ts` for per-platform image/video sizing
+- [ ] HeyGen lifelike: ElevenLabs voice clone integration
+- [ ] HeyGen lifelike: custom Studio Avatar training
 
 ---
 
