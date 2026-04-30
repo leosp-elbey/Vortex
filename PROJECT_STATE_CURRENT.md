@@ -1,8 +1,8 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-04-29
-**Last known good commit:** `31e5c7d` — "feat(cron): auto weekly-content via OpenRouter cheap-tier"
-**Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-29)
+**Last updated:** 2026-04-30
+**Last known good commit:** `4b48474` — "feat(funnel): Surge365 corporate videos + signup CTA"
+**Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-30)
 **Branch:** `main`
 
 ---
