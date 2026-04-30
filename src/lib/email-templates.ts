@@ -1,5 +1,12 @@
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://www.vortextrips.com'
 
+// Surge365 corporate affiliate links — wa=leosp preserves Leo's referral attribution.
+const SURGE365 = {
+  opportunityVideo: 'https://surge365.com/Page/OpportunityVideo/wa=leosp',
+  powerlineVideo: 'https://surge365.com/Page/powerlinevideo/wa=leosp',
+  signup: 'https://signup.surge365.com/?wa=leosp',
+}
+
 function wrapper(content: string): string {
   return `
 <div style="font-family:sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
@@ -277,7 +284,9 @@ export const EMAIL_TEMPLATES = {
       <p>VortexTrips gives members access to hotel rates 40–60% below Expedia, Booking.com, and every other public platform. When you show someone a side-by-side price comparison — the same room, same dates — it closes itself.</p>
       ${savingsBadge('No convincing required. The savings do the selling.')}
       <p>Over the next two weeks I want to show you exactly how this works, what our affiliates earn, and why travel converts better than almost any other product in network marketing.</p>
-      <p>First — want to see a real price comparison? Here's a live look at member rates:</p>
+      <p>The fastest way to understand it — watch the official 5-minute opportunity video:</p>
+      ${ctaButton('▶ Watch the Opportunity Video', SURGE365.opportunityVideo)}
+      <p>Or jump straight to a real member-rate comparison:</p>
       ${ctaButton('See Member Rates →', `${BASE_URL}/destinations/cancun`)}
       <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
     `),
@@ -334,6 +343,9 @@ export const EMAIL_TEMPLATES = {
         </div>
       </div>
       <p>The best part? <strong>You're already talking to people who spend money on travel.</strong> Your existing network is your market.</p>
+      <p>Want to see exactly how the comp plan works? The Powerline video walks through it:</p>
+      ${ctaButton('▶ Watch the Powerline Video', SURGE365.powerlineVideo)}
+      <p>Or see the full SBA breakdown on our site:</p>
       ${ctaButton('See the SBA Opportunity →', `${BASE_URL}/sba`)}
       <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
     `),

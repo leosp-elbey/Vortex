@@ -115,7 +115,7 @@ export default function SBAPage() {
 
       {/* SBA Video */}
       {sbaVideoUrl && (
-        <section className="px-4 pb-20 max-w-3xl mx-auto">
+        <section className="px-4 pb-12 max-w-3xl mx-auto">
           <div className="rounded-2xl overflow-hidden shadow-2xl shadow-black/40 border border-white/10">
             <video
               src={sbaVideoUrl}
@@ -127,6 +127,42 @@ export default function SBAPage() {
           </div>
         </section>
       )}
+
+      {/* Surge365 Corporate Videos */}
+      <section className="px-4 pb-20 max-w-4xl mx-auto">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl md:text-3xl font-black mb-2">Want the Full Picture?</h2>
+          <p className="text-gray-400">Watch the official corporate videos. They walk you through how it all works.</p>
+        </div>
+        <div className="grid md:grid-cols-2 gap-6">
+          <a
+            href="https://surge365.com/Page/OpportunityVideo/wa=leosp"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group bg-gradient-to-br from-[#FF6B35] to-orange-700 rounded-2xl p-8 hover:scale-[1.02] transition-transform shadow-xl shadow-orange-900/30"
+          >
+            <div className="text-5xl mb-4">🎬</div>
+            <h3 className="text-xl font-bold mb-2">Opportunity Video</h3>
+            <p className="text-white/90 text-sm leading-relaxed mb-4">Why this exists and who it's for. The 5-minute company overview every prospect should watch.</p>
+            <span className="inline-flex items-center gap-2 font-semibold text-sm group-hover:gap-3 transition-all">
+              Watch now <span>→</span>
+            </span>
+          </a>
+          <a
+            href="https://surge365.com/Page/powerlinevideo/wa=leosp"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group bg-gradient-to-br from-[#1A1A2E] to-slate-900 border border-white/10 rounded-2xl p-8 hover:scale-[1.02] transition-transform shadow-xl"
+          >
+            <div className="text-5xl mb-4">📊</div>
+            <h3 className="text-xl font-bold mb-2">Powerline Video</h3>
+            <p className="text-gray-300 text-sm leading-relaxed mb-4">How the comp plan actually works. See exactly how affiliates earn from referrals and team building.</p>
+            <span className="inline-flex items-center gap-2 font-semibold text-[#FF6B35] text-sm group-hover:gap-3 transition-all">
+              Watch now <span>→</span>
+            </span>
+          </a>
+        </div>
+      </section>
 
       {/* Why travel */}
       <section className="bg-white/5 py-20 px-4">
@@ -304,10 +340,21 @@ export default function SBAPage() {
       {/* Footer CTA */}
       <section className="text-center py-16 px-4">
         <h2 className="text-3xl font-black mb-4">Ready to Start Earning?</h2>
-        <p className="text-gray-400 mb-8">Join thousands of affiliates who share travel deals and get paid weekly.</p>
-        <a href="#apply" className="inline-block bg-[#FF6B35] text-white font-bold text-lg px-10 py-4 rounded-xl hover:bg-orange-600 transition">
-          Apply Now →
-        </a>
+        <p className="text-gray-400 mb-8">Two paths in. Start free with your welcome kit, or jump straight to enrollment.</p>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <a href="#apply" className="inline-block bg-white/10 text-white border border-white/20 font-bold text-lg px-10 py-4 rounded-xl hover:bg-white/20 transition">
+            Apply Free →
+          </a>
+          <a
+            href="https://signup.surge365.com/?wa=leosp"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block bg-[#FF6B35] text-white font-bold text-lg px-10 py-4 rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-900/30"
+          >
+            Get Started Today →
+          </a>
+        </div>
+        <p className="text-xs text-gray-500 mt-4">Get Started enrolls you directly with Surge365 (our parent affiliate program)</p>
       </section>
 
       <footer className="text-center py-8 text-gray-600 text-sm border-t border-white/10">
