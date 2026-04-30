@@ -10,7 +10,7 @@ Members save up to 60 percent on hotels and vacations. And we pay you to share t
 
 You get a personal booking link. When someone signs up, you earn. Simple.
 
-Part-time affiliates pull 400 to 1,200 dollars a month. Full-time team builders clear over ten thousand a month.
+Part-time affiliates pull 400 to one thousand dollars a month. Full-time team builders clear over ten thousand a month.
 
 Hit the link below this video. Your welcome kit lands in minutes.`
 
