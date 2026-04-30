@@ -20,7 +20,8 @@ export interface AIJobRequest {
   systemPrompt?: string
   inputPayload?: Record<string, unknown>
   modelOverride?: string
-  createdBy: string
+  /** auth.users.id, or null for system/cron jobs */
+  createdBy: string | null
 }
 
 export interface AIJobResult {
@@ -177,7 +178,7 @@ export async function runAIJob(req: AIJobRequest): Promise<AIJobResult> {
   if (!req.jobType) throw new Error('jobType required')
   if (!req.title?.trim()) throw new Error('title required')
   if (!req.prompt?.trim()) throw new Error('prompt required')
-  if (!req.createdBy) throw new Error('createdBy required')
+  // createdBy may be null for system/cron jobs (anchored to NULL FK on ai_jobs.created_by)
   if (!envTrim('OPENROUTER_API_KEY')) throw new Error('OPENROUTER_API_KEY not configured')
 
   const supabase = createAdminClient()
@@ -201,7 +202,7 @@ export async function runAIJob(req: AIJobRequest): Promise<AIJobResult> {
       model_requested: req.modelOverride ?? modelToUse,
       provider: 'openrouter',
       status: 'running',
-      created_by: req.createdBy,
+      created_by: req.createdBy, // null allowed for cron / system jobs
     })
     .select('id')
     .single()
