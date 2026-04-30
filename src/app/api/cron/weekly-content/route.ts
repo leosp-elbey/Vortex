@@ -22,6 +22,53 @@ interface ParsedPost {
   imagePrompt: string
 }
 
+interface PexelsResponse {
+  photos?: Array<{ src?: { large2x?: string; large?: string; original?: string } }>
+}
+
+/**
+ * Fetch a relevant photo from Pexels using the imagePrompt as the search query,
+ * download it, upload to Supabase Storage, and return the public URL.
+ * Returns null on any failure — caller treats image as optional.
+ */
+async function fetchAndStoreImage(
+  imagePrompt: string,
+  platform: string,
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<string | null> {
+  const pexelsKey = envTrim('PEXELS_API_KEY')
+  if (!pexelsKey || !imagePrompt) return null
+
+  try {
+    const query = encodeURIComponent(imagePrompt.slice(0, 60))
+    const orientation = platform === 'instagram' || platform === 'tiktok' ? 'portrait' : 'landscape'
+    const pexelsRes = await fetch(
+      `https://api.pexels.com/v1/search?query=${query}&per_page=1&orientation=${orientation}`,
+      { headers: { Authorization: pexelsKey } },
+    )
+    if (!pexelsRes.ok) return null
+    const pexelsData = (await pexelsRes.json()) as PexelsResponse
+    const srcUrl = pexelsData?.photos?.[0]?.src?.large2x ?? pexelsData?.photos?.[0]?.src?.large
+    if (!srcUrl) return null
+
+    const imgRes = await fetch(srcUrl)
+    if (!imgRes.ok) return null
+    const imgBuffer = await imgRes.arrayBuffer()
+
+    const fileName = `content/${Date.now()}-${platform}-${Math.random().toString(36).slice(2, 8)}.jpg`
+    const { error: uploadErr } = await supabase.storage
+      .from('media')
+      .upload(fileName, imgBuffer, { contentType: 'image/jpeg', upsert: false })
+    if (uploadErr) return null
+
+    const { data: pub } = supabase.storage.from('media').getPublicUrl(fileName)
+    return pub.publicUrl
+  } catch (err) {
+    console.error('[weekly-content] image fetch failed for', platform, '—', err)
+    return null
+  }
+}
+
 function envTrim(key: string): string {
   return (process.env[key] ?? '').trim()
 }
@@ -170,14 +217,24 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       }, { status: 500 })
     }
 
-    const rows = posts.map(p => ({
-      week_of: startDate,
-      platform: p.platform,
-      caption: p.caption,
-      hashtags: p.hashtags,
-      image_prompt: p.imagePrompt,
-      status: 'draft' as const,
-    }))
+    // Fetch real photos from Pexels in parallel and store in Supabase Storage.
+    // Each fetch is independent; failures don't block other posts.
+    const rowsWithImages = await Promise.all(
+      posts.map(async p => {
+        const image_url = await fetchAndStoreImage(p.imagePrompt, p.platform, supabase)
+        return {
+          week_of: startDate,
+          platform: p.platform,
+          caption: p.caption,
+          hashtags: p.hashtags,
+          image_prompt: p.imagePrompt,
+          image_url,
+          status: 'draft' as const,
+        }
+      }),
+    )
+    const rows = rowsWithImages
+    const imagesGenerated = rows.filter(r => r.image_url).length
 
     const { error: insertError } = await supabase.from('content_calendar').insert(rows)
     if (insertError) {
@@ -194,6 +251,7 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       status: 'success',
       response_payload: {
         generated: rows.length,
+        images_generated: imagesGenerated,
         weekOf: startDate,
         model: result.modelUsed,
         cost: result.costEstimate,
@@ -204,6 +262,7 @@ Be terse. Skip filler. Optimize for parseability over prose.`
     return NextResponse.json({
       success: true,
       generated: rows.length,
+      images_generated: imagesGenerated,
       weekOf: startDate,
       model: result.modelUsed,
       cost: result.costEstimate,
