@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-29
-**Last known good commit:** `de51509` — "feat(twitter): real auto-post via Twitter API v2"
+**Last known good commit:** `31e5c7d` — "feat(cron): auto weekly-content via OpenRouter cheap-tier"
 **Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-29)
 **Branch:** `main`
 
