@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-30
-**Last known good commit:** `4b48474` — "feat(funnel): Surge365 corporate videos + signup CTA"
+**Last known good commit:** `869e1b6` — "fix(cron): images on auto-content + SEO files"
 **Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-30)
 **Branch:** `main`
 

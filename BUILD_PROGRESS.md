@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-30
-**Last commit:** `4b48474`
-**Status:** 🚀 LIVE on vortextrips.com · ~92% automated
+**Last commit:** `869e1b6`
+**Status:** 🚀 LIVE on vortextrips.com · ~93% automated
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -49,7 +49,9 @@ Phase 11 sub-tasks (all complete):
 - [x] **HeyGen avatar swap to Raul_expressive_2024112501** — shipped 4/30/2026.
 - [x] **HeyGen voice clone (Leo's voice, ID `2263a0768f7a4eb7b13ae680b3b57fc4`)** — shipped 4/30/2026.
 - [x] **SBA video script tightened to 30 sec, speed 1.05, emotion Excited** — shipped 4/30/2026 (commit `c8a5851`). Cuts credit cost ~50% per render.
-- [x] **Surge365 corporate video integration** — shipped 4/30/2026 (commit `4b48474`). Embedded on /sba page (Opportunity + Powerline videos) + integrated into mlmDay0 + mlmDay4 email templates with `wa=leosp` referral attribution. Final CTA on /sba goes to `signup.surge365.com/?wa=leosp` for direct enrollment with commission tracking. Mondays 1pm UTC, generates 7 days × 4 platforms (28 posts) via OpenRouter cheap-tier (llama-3.3-70b). Logs to `ai_jobs` for audit. Inserts directly to `content_calendar` as drafts. Verified on prod 4/29: 28 posts generated, cost $0.00069. Uses ai-router budget guards (AI_DAILY_BUDGET_LIMIT, AI_MONTHLY_BUDGET_LIMIT). Modified `ai-router.ts` to allow `createdBy: null` for system/cron jobs.
+- [x] **Surge365 corporate video integration** — shipped 4/30/2026 (commit `4b48474`).
+- [x] **Bug fix: images on auto-generated weekly content** — shipped 4/30/2026 (commit `869e1b6`). Ported Pexels image fetching from old admin route into new `weekly-content` cron. Verified on prod: 28/28 posts now have images.
+- [x] **SEO: robots.txt + dynamic sitemap.xml** — shipped 4/30/2026 (commit `869e1b6`). All public pages now indexable. Embedded on /sba page (Opportunity + Powerline videos) + integrated into mlmDay0 + mlmDay4 email templates with `wa=leosp` referral attribution. Final CTA on /sba goes to `signup.surge365.com/?wa=leosp` for direct enrollment with commission tracking. Mondays 1pm UTC, generates 7 days × 4 platforms (28 posts) via OpenRouter cheap-tier (llama-3.3-70b). Logs to `ai_jobs` for audit. Inserts directly to `content_calendar` as drafts. Verified on prod 4/29: 28 posts generated, cost $0.00069. Uses ai-router budget guards (AI_DAILY_BUDGET_LIMIT, AI_MONTHLY_BUDGET_LIMIT). Modified `ai-router.ts` to allow `createdBy: null` for system/cron jobs.
 - [ ] HeyGen voice clone (Leo recording — in progress 4/29)
 - [ ] Twitter/X auto-post route (`/api/automations/post-to-twitter`)
 - [ ] TikTok: API access application OR partner-tier integration (Buffer/Later)
