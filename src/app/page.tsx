@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import ExitIntent from '@/components/ExitIntent'
 
 interface LeadFormProps {
   id: string
@@ -156,24 +157,8 @@ export default function LandingPage() {
           </div>
 
           <div className="bg-white rounded-2xl p-8 shadow-2xl">
-            <div className="text-center mb-6">
-              <a
-                href="https://myvortex365.com/leosp"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full bg-[#16C79A] hover:bg-emerald-500 text-white font-black py-4 px-6 rounded-xl text-lg transition-all shadow-lg"
-              >
-                ✅ Create My FREE Savings Account →
-              </a>
-              <p className="text-xs text-gray-400 mt-2">Zero cost. No credit card. Start saving instantly.</p>
-              <div className="flex items-center gap-3 my-5">
-                <div className="flex-1 h-px bg-gray-200" />
-                <span className="text-gray-400 text-sm">or get a personalized quote</span>
-                <div className="flex-1 h-px bg-gray-200" />
-              </div>
-            </div>
-            <h2 className="text-xl font-bold text-[#1A1A2E] mb-2">Get a Free Savings Quote</h2>
-            <p className="text-gray-500 mb-4 text-sm">Leave your info — our team calls you in 60 seconds with your personalized breakdown.</p>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-2">Unlock Your Travel Savings</h2>
+            <p className="text-gray-500 mb-4 text-sm">Drop your info — we&apos;ll set up your free savings account and call you in 60 seconds with your personalized rates.</p>
             <LeadForm
               id="hero-form"
               form={form}
@@ -182,6 +167,20 @@ export default function LandingPage() {
               onChange={handleChange}
               onSubmit={handleSubmit}
             />
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-gray-400 text-xs">or skip the call</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+            <a
+              href="https://myvortex365.com/leosp"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl text-sm transition-all"
+            >
+              Create My Free Account Directly →
+            </a>
+            <p className="text-xs text-gray-400 mt-2 text-center">No credit card required.</p>
           </div>
         </div>
       </section>
@@ -384,6 +383,8 @@ export default function LandingPage() {
           <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
         </div>
       </footer>
+
+      <ExitIntent />
     </div>
   )
 }

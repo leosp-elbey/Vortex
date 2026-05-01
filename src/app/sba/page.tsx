@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import ExitIntent from '@/components/ExitIntent'
 
 const EARNINGS = [
   { role: 'Part-Time Affiliate', monthly: '$400 – $1,200', how: '3–8 referrals/month' },
@@ -361,6 +362,12 @@ export default function SBAPage() {
       <footer className="text-center py-8 text-gray-600 text-sm border-t border-white/10">
         <p>© 2026 VortexTrips · <Link href="/privacy" className="hover:text-gray-400">Privacy</Link> · <Link href="/terms" className="hover:text-gray-400">Terms</Link></p>
       </footer>
+
+      <ExitIntent
+        source="sba-exit-intent"
+        headline="Before you go — get the 30-second pitch"
+        subheadline="Drop your email and we&apos;ll send you a quick video showing exactly how affiliates earn weekly commissions. Plus the next steps to get started."
+      />
     </div>
   )
 }
