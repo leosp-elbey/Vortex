@@ -340,7 +340,8 @@ export default function SBAPage() {
       {/* Footer CTA */}
       <section className="text-center py-16 px-4">
         <h2 className="text-3xl font-black mb-4">Ready to Start Earning?</h2>
-        <p className="text-gray-400 mb-8">Two paths in. Start free with your welcome kit, or jump straight to enrollment.</p>
+        <p className="text-gray-400 mb-8">Join other affiliates sharing travel deals and getting paid weekly.</p>
+        <p className="text-gray-400 mb-8 text-sm">Two paths in. Start free with your welcome kit, or jump straight to enrollment.</p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
           <a href="#apply" className="inline-block bg-white/10 text-white border border-white/20 font-bold text-lg px-10 py-4 rounded-xl hover:bg-white/20 transition">
             Apply Free →

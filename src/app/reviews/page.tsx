@@ -13,6 +13,39 @@ interface Review {
   created_at: string
 }
 
+function ReviewsJsonLd({ reviews }: { reviews: Review[] }) {
+  if (!reviews.length) return null
+  const avgRating = reviews.reduce((s, r) => s + (r.rating || 0), 0) / reviews.length
+  const ld = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: 'VortexTrips Travel Savings Membership',
+    description: 'Exclusive travel savings membership giving members up to 60% off hotels, flights, and vacation packages worldwide.',
+    brand: { '@type': 'Brand', name: 'VortexTrips' },
+    aggregateRating: {
+      '@type': 'AggregateRating',
+      ratingValue: avgRating.toFixed(1),
+      reviewCount: reviews.length,
+      bestRating: 5,
+      worstRating: 1,
+    },
+    review: reviews.slice(0, 10).map(r => ({
+      '@type': 'Review',
+      reviewRating: { '@type': 'Rating', ratingValue: r.rating, bestRating: 5 },
+      author: { '@type': 'Person', name: r.first_name },
+      reviewBody: r.review_text,
+      datePublished: r.created_at,
+    })),
+  }
+  return (
+    <script
+      type="application/ld+json"
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }}
+    />
+  )
+}
+
 export default function ReviewsPage() {
   const [reviews, setReviews] = useState<Review[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,12 +98,25 @@ export default function ReviewsPage() {
           <p className="text-gray-500 text-lg">Every review below is from a verified VortexTrips member.</p>
         </div>
 
-        {/* Stats bar */}
+        {/* Stats bar — derived from real reviews */}
         <div className="grid grid-cols-3 gap-4 mb-12">
           {[
-            { label: 'Active Members', value: '2,000+' },
-            { label: 'Total Saved', value: '$3.2M' },
-            { label: 'Avg. Rating', value: '4.9 / 5' },
+            { label: 'Verified Reviews', value: reviews.length > 0 ? reviews.length.toString() : '—' },
+            {
+              label: 'Avg. Saved per Trip',
+              value: (() => {
+                const withAmt = reviews.filter(r => r.saved_amount && r.saved_amount > 0)
+                if (!withAmt.length) return '—'
+                const avg = withAmt.reduce((s, r) => s + (r.saved_amount ?? 0), 0) / withAmt.length
+                return `$${Math.round(avg).toLocaleString()}`
+              })(),
+            },
+            {
+              label: 'Avg. Rating',
+              value: reviews.length > 0
+                ? `${(reviews.reduce((s, r) => s + (r.rating || 0), 0) / reviews.length).toFixed(1)} / 5`
+                : '—',
+            },
           ].map(stat => (
             <div key={stat.label} className="bg-white rounded-xl p-6 text-center shadow-sm">
               <p className="text-3xl font-black text-[#FF6B35]">{stat.value}</p>
@@ -78,6 +124,8 @@ export default function ReviewsPage() {
             </div>
           ))}
         </div>
+
+        <ReviewsJsonLd reviews={reviews} />
 
         {/* Review grid */}
         {loading ? (

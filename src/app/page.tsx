@@ -189,10 +189,10 @@ export default function LandingPage() {
       {/* Social proof bar */}
       <section className="bg-[#FF6B35] py-4 px-6">
         <div className="max-w-6xl mx-auto flex flex-wrap justify-center gap-8 text-white text-sm font-semibold text-center">
-          <span>⭐⭐⭐⭐⭐ 4.9/5 rating</span>
-          <span>👥 2,000+ active members</span>
-          <span>💰 $3.2M saved last year</span>
-          <span>🌍 180+ countries covered</span>
+          <span>⭐⭐⭐⭐⭐ Members love it</span>
+          <span>💰 Save $1,200+ per trip on average</span>
+          <span>🏨 500,000+ hotels worldwide</span>
+          <span>🤖 AI-powered deal matching</span>
         </div>
       </section>
 
