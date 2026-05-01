@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-04-30
-**Last commit:** `869e1b6`
-**Status:** 🚀 LIVE on vortextrips.com · ~93% automated
+**Last commit:** `bb38c0a`
+**Status:** 🚀 LIVE on vortextrips.com · ~94% automated
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -51,7 +51,9 @@ Phase 11 sub-tasks (all complete):
 - [x] **SBA video script tightened to 30 sec, speed 1.05, emotion Excited** — shipped 4/30/2026 (commit `c8a5851`). Cuts credit cost ~50% per render.
 - [x] **Surge365 corporate video integration** — shipped 4/30/2026 (commit `4b48474`).
 - [x] **Bug fix: images on auto-generated weekly content** — shipped 4/30/2026 (commit `869e1b6`). Ported Pexels image fetching from old admin route into new `weekly-content` cron. Verified on prod: 28/28 posts now have images.
-- [x] **SEO: robots.txt + dynamic sitemap.xml** — shipped 4/30/2026 (commit `869e1b6`). All public pages now indexable. Embedded on /sba page (Opportunity + Powerline videos) + integrated into mlmDay0 + mlmDay4 email templates with `wa=leosp` referral attribution. Final CTA on /sba goes to `signup.surge365.com/?wa=leosp` for direct enrollment with commission tracking. Mondays 1pm UTC, generates 7 days × 4 platforms (28 posts) via OpenRouter cheap-tier (llama-3.3-70b). Logs to `ai_jobs` for audit. Inserts directly to `content_calendar` as drafts. Verified on prod 4/29: 28 posts generated, cost $0.00069. Uses ai-router budget guards (AI_DAILY_BUDGET_LIMIT, AI_MONTHLY_BUDGET_LIMIT). Modified `ai-router.ts` to allow `createdBy: null` for system/cron jobs.
+- [x] **SEO: robots.txt + dynamic sitemap.xml** — shipped 4/30/2026 (commit `869e1b6`). All public pages now indexable.
+- [x] **Batch A: stats softening + parallel queue + favicon + JSON-LD + /sba metadata** — shipped 4/30/2026 (commit `f646150`). Soft brand claims, send-sequences now 250/day in parallel chunks of 10 (~3-5sec wall time vs 10sec before), favicon, /sba dedicated OG/Twitter cards, /reviews schema.org Product+AggregateRating+Review JSON-LD.
+- [x] **Batch B: capture-first homepage + exit-intent popup** — shipped 4/30/2026 (commit `bb38c0a`). Homepage primary CTA now captures lead first then redirects to myvortex365.com/leosp. New ExitIntent component on / and /sba captures bouncing visitors with localStorage dismiss state (24h cooldown). Embedded on /sba page (Opportunity + Powerline videos) + integrated into mlmDay0 + mlmDay4 email templates with `wa=leosp` referral attribution. Final CTA on /sba goes to `signup.surge365.com/?wa=leosp` for direct enrollment with commission tracking. Mondays 1pm UTC, generates 7 days × 4 platforms (28 posts) via OpenRouter cheap-tier (llama-3.3-70b). Logs to `ai_jobs` for audit. Inserts directly to `content_calendar` as drafts. Verified on prod 4/29: 28 posts generated, cost $0.00069. Uses ai-router budget guards (AI_DAILY_BUDGET_LIMIT, AI_MONTHLY_BUDGET_LIMIT). Modified `ai-router.ts` to allow `createdBy: null` for system/cron jobs.
 - [ ] HeyGen voice clone (Leo recording — in progress 4/29)
 - [ ] Twitter/X auto-post route (`/api/automations/post-to-twitter`)
 - [ ] TikTok: API access application OR partner-tier integration (Buffer/Later)

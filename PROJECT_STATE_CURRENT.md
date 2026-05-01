@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-04-30
-**Last known good commit:** `869e1b6` — "fix(cron): images on auto-content + SEO files"
+**Last known good commit:** `bb38c0a` — "feat(batch-b): capture-first CTA + exit-intent popup"
 **Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-30)
 **Branch:** `main`
 
