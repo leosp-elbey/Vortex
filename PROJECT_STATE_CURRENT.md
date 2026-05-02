@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14E complete — admin dashboard campaign planner in working tree, not deployed)
-**Last known good commit:** `410e0a8` — "Phase 14D: campaign generator API and asset generator library"
+**Last updated:** 2026-05-02 (post-audit — read-only system audit complete; SYSTEM_AUDIT_PHASE_14_STATUS.md added to repo)
+**Last known good commit:** `b7fc8ad` — "Phase 14E: dashboard campaign planner UI and admin campaign asset routes"
 **Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D + 14E changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E dashboard planner in working tree
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · **Read-only system audit complete** (see `SYSTEM_AUDIT_PHASE_14_STATUS.md`)
 
 ---
 
@@ -461,3 +461,31 @@ Code only. Nothing deployed. Adds an admin-only dashboard surface for the event-
 ### Next recommended phase
 
 **Phase 14F — Auto-Push Approved Campaigns into `content_calendar`** (when an admin approves a `campaign_assets` draft, the asset becomes eligible for a `content_calendar` insert so the existing posters pick it up). Requires a small schema add (`content_calendar.campaign_asset_id` nullable FK) per the roadmap. Do not start until Phase 14E is committed/pushed and migrations are applied.
+
+---
+
+## System Audit (2026-05-02) — READ-ONLY
+
+A full read-only system audit was performed at HEAD `b7fc8ad`. No code was modified, nothing was deployed, no DB writes occurred. Full report in [SYSTEM_AUDIT_PHASE_14_STATUS.md](SYSTEM_AUDIT_PHASE_14_STATUS.md).
+
+**Tests run:**
+- `npx tsc --noEmit` — ✅ PASS (exit 0)
+- `npm run build` — ✅ PASS (exit 0); all 5 new Phase 14E routes/pages registered
+- `npm run lint` — ❌ pre-existing Phase 13 ESLint v8/v9 mismatch; not a regression
+
+**Scores:** Revenue readiness 78 / Technical health 80 / Marketing & funnel readiness 80 / Security 85.
+
+**Phase 14F safety verdict: ❌ NOT SAFE to start yet.** Three prerequisites must clear first:
+1. Apply migrations 017-021 to Supabase prod (`supabase db push` or paste SQL Editor in order).
+2. Deploy `b7fc8ad` to Vercel production (preview → prod cutover).
+3. Smoke-test the dashboard campaign planner end-to-end against the migrated DB (list, generate, approve, reject).
+
+Once all three are green, Phase 14F is a low-risk session: one schema migration adding nullable `content_calendar.campaign_asset_id`, one route to insert approved assets into `content_calendar` with `scheduled_for` derived from the wave offset, and the existing posters do the rest.
+
+**Other open follow-ups surfaced by the audit:**
+- Phase 13: `.env.local` `ANTHROPIC_API_KEY` has duplicated `sk-ant-` prefix; OpenRouter key stored under non-canonical names (`Management_Key`, `Your_new_API_key`) — code reads `OPENROUTER_API_KEY` only.
+- Phase 13 lint: run `npm install` to bring in ESLint v9 then `npm run lint` to validate the flat config.
+- Webhook auth helpers fail-open when the secret env var is unset (`checkFormToken`, `checkBlandWebhook`, `verifyTwilioSignature`). Tighten to fail-closed once Vercel env audit confirms all three are populated.
+- No Vercel env audit has been run since Phase 11; Phase 13 follow-up `vercel env ls production` still pending.
+
+The audit confirmed: 4-cron Hobby cap respected, no NEXT_PUBLIC env leaks, service-role key server-only, admin routes uniformly gated by `requireAdminUser()`, Surge365 path-based `/leosp` URLs correct in code (still on old `?wa=leosp` in prod until next deploy), Phase 14B-14E code internally consistent and matches the spec in `VORTEX_EVENT_CAMPAIGN_SKILL.md`.

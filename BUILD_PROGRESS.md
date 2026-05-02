@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14E complete — admin dashboard campaign planner in working tree)
-**Last code-shipping commit:** `410e0a8` (Phase 14D campaign generator API and asset generator library)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A-14D shipped · Phase 14E dashboard planner in working tree
+**Last updated:** 2026-05-02 (post-audit — `SYSTEM_AUDIT_PHASE_14_STATUS.md` added; tests run but no code modified)
+**Last code-shipping commit:** `b7fc8ad` (Phase 14E dashboard campaign planner)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phases 14A-14E shipped to `main` (not deployed) · **Read-only audit complete** — see `SYSTEM_AUDIT_PHASE_14_STATUS.md`
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,17 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14E — Dashboard Campaign Planner.** New admin dashboard page at `src/app/dashboard/campaigns/page.tsx` plus four admin-gated API routes: `GET /api/admin/campaigns`, `GET /api/admin/campaigns/[id]`, `POST /api/admin/campaigns/assets/[assetId]/approve`, `POST /api/admin/campaigns/assets/[assetId]/reject`. Sidebar nav updated. Lets an admin filter and review event campaigns, view the latest 10-dimension score breakdown, generate the asset bundle (calls Phase 14D route), and approve or reject individual `campaign_assets` drafts. Strictly a human-approval surface — no `content_calendar` writes, no auto-post, no schema changes. Awaiting commit + push, and still depends on Phase 14B migrations 017-021 being applied to Supabase prod before the dashboard can be exercised end-to-end.
+**Phase 14F-Prep (3 manual gates) before Phase 14F can start.**
+
+The 2026-05-02 read-only system audit confirmed Phases 14A-14E are committed cleanly to `main` (typecheck + build pass; lint pre-broken from Phase 13). Phase 14F is **not safe to start yet** because three prerequisites are still open:
+
+1. **Apply migrations 017-021 to Supabase prod.** Without this, `event_campaigns` / `campaign_assets` / `campaign_scores` / `event_sources` / `campaign_schedule` don't exist; 14C/14D/14E error against the missing schema.
+2. **Deploy `b7fc8ad` to Vercel production.** Production is still on the 2026-04-30 build; the new `Campaigns` dashboard nav and Phase 14A Surge365 path-based `/leosp` redirect are in code but not in prod.
+3. **Smoke-test the dashboard end-to-end** against the migrated DB: list shows campaigns, `Generate Asset Bundle` calls `/api/admin/campaigns/generate-assets`, approve/reject flips status correctly.
+
+Once all three are green, Phase 14F is a low-risk session: one schema migration adding nullable `content_calendar.campaign_asset_id`, one approve-handler extension to insert into `content_calendar` with `scheduled_for` from the wave offset, and the existing posters do the rest.
+
+See [SYSTEM_AUDIT_PHASE_14_STATUS.md](SYSTEM_AUDIT_PHASE_14_STATUS.md) for the full audit report (executive summary, scores, priority fix lists, automation status, security posture).
 
 **Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C/14D/14E. **Phase 14E note:** `npm run lint` failed with the same `TypeError: Converting circular structure to JSON` from ESLint 8.57.1 trying to load the v9 flat config — pre-existing, not a Phase 14E regression. Resolves once Leo runs the Phase 13 follow-up `npm install` to bring in v9.
 
