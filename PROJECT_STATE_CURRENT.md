@@ -1,9 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-04-30
-**Last known good commit:** `bb38c0a` — "feat(batch-b): capture-first CTA + exit-intent popup"
-**Production:** vortextrips.com (deployed via `npx vercel --prod` on 2026-04-30)
+**Last updated:** 2026-05-02
+**Last known good commit:** `67d83c0` — "Phase 12.8: Batch A + B audit fixes shipped to prod"
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30)
 **Branch:** `main`
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · No blockers · Phase 13 is next
 
 ---
 
@@ -23,11 +24,14 @@ See `SAVE_PROTOCOL.md` for the full workflow.
 
 ## Current completed phase
 
-**Phases 0 through 11 — SHIPPED.** System is LIVE on vortextrips.com.
+**Phases 0 through 12.8 — SHIPPED.** System is LIVE on vortextrips.com. No active blockers.
 
 - Phases 0-10 in `ad42f44` (AI Command Center, security, HeyGen async)
 - Phase 10.5 in `f2b41e6` (save protocol + image safety guard)
 - Phase 11 deploy hotfix in `8e54262` (env var whitespace trim — prevented OpenRouter 401 errors caused by tabs/spaces in pasted env values)
+- Phase 12.0 → 12.7 across multiple commits (bulk import xlsx, email-stats CLI, daily email-health report, Twitter/X auto-post, weekly-content auto-gen, HeyGen avatar/voice swap, SBA video tightened, Surge365 corp video, weekly-content image fix, robots.txt + sitemap.xml)
+- Phase 12.8 in `67d83c0` (Batch A: stats softening + parallel send-sequences + favicon + JSON-LD + /sba metadata; Batch B: capture-first homepage CTA + exit-intent popup, commits `f646150` + `bb38c0a` rolled into 12.8 audit pass)
+- Strict-mode session continuity layer in `e256a13` (CLAUDE_SESSION_SKILL.md + anchors + chat continuation file — no code changes)
 
 This includes:
 - Phase 0 — Audit & plan
@@ -90,33 +94,37 @@ This includes:
 
 ## Exact next step
 
-**Phase 11 is complete. System is live.** No urgent next step — pick from the post-launch follow-ups above based on priority.
+**Phase 12.8 is complete. System is live. No blockers.** Phase 13 is next — scope to be confirmed by Leo before any code changes.
 
-Recommended Phase 12 candidates (in priority order):
-1. Smoke-test "Verify with Claude" on a real job (5 minutes, just click the button)
-2. Build social-specs.ts for per-platform sizing (2-3 hours)
-3. ElevenLabs voice clone for HeyGen videos (half day)
-4. Custom HeyGen Studio Avatar trained on Leo's face (1-2 days)
+Carryover Phase 12 sub-items still open (these may roll into Phase 13 or be picked individually):
+1. HeyGen voice clone — Leo recording in progress
+2. Twitter/X auto-post route at `/api/automations/post-to-twitter` (current Twitter integration is in `de51509`; a dedicated automation route is still pending)
+3. TikTok: API access application OR partner-tier integration (Buffer/Later)
+4. Cleanup: refresh Vercel env vars to remove leading whitespace (cosmetic — trim guard is live)
+5. Cleanup: fix lint config (`next lint` removed in Next 16)
+6. Build `src/lib/social-specs.ts` for per-platform image/video sizing
 
 ---
 
-## STRICT MODE — Session Continuity Anchor (2026-05-01)
+## STRICT MODE — Session Continuity Anchor (reconciled 2026-05-02)
 
 This block is appended (not overwriting prior content). Treat the markdown system as the only durable source of truth. Chat history is unreliable due to session resets and image-size limits.
+
+> **Reconciliation note (2026-05-02):** the original anchor (dated 2026-05-01) listed Phase 10.5 as the last completed phase and Phase 11 as pending. That snapshot was already stale at the time of writing — Phases 11 and 12.0 → 12.8 had in fact shipped to production. The anchor has been corrected below to match the git log and the body of this file. Historical phase entries in `BUILD_PROGRESS.md` are preserved unchanged.
 
 ### Current system summary (locked in)
 - Project: VortexTrips AI Command Center
 - Architecture: Next.js App Router (TypeScript)
-- Database: Supabase (connected + migrated; tables include `trips`, `itineraries`, `chat_sessions`, `saved_items` per the broader system; AI tables `ai_jobs`, `ai_verification_logs`, `ai_model_usage`, `ai_command_templates` migrated)
-- Deployment target: Vercel
-- API routes functional, OpenRouter integration wired, image generation implemented with safety guard
-- Save protocol introduced; markdown tracking system in use
+- Database: Supabase (connected + migrated; tables include `trips`, `itineraries`, `chat_sessions`, `saved_items`; AI tables `ai_jobs`, `ai_verification_logs`, `ai_model_usage`, `ai_command_templates` migrated)
+- Deployment target: Vercel — LIVE on vortextrips.com
+- API routes functional, OpenRouter integration wired, image generation with safety guard live
+- Save protocol + Claude Session Skill in force; markdown tracking system is the source of truth
 
 ### Last completed phase
-**Phase 10.5** — confirmed via this strict-mode anchor. Any work after 10.5 is not considered formally complete in the phase tracker until re-validated under Phase 11 deployment prep.
+**Phase 12.8** — Batch A + B audit fixes shipped to prod (commit `67d83c0`, 2026-04-30). Phases 0 → 12.8 are all complete and deployed.
 
 ### Current blocker
-Claude session resets + image-size limits. Chat history cannot be relied on as memory.
+**None.** System is live and stable. The session-continuity hardening from the prior anchor (image-size limits, session resets) is solved by `CLAUDE_SESSION_SKILL.md` + the markdown tracking system; this is no longer treated as an active blocker.
 
 ### Rules locked in
 - Markdown files are the **only** source of truth.
@@ -124,4 +132,4 @@ Claude session resets + image-size limits. Chat history cannot be relied on as m
 - A phase is NOT complete until: `PROJECT_STATE_CURRENT.md` updated, `BUILD_PROGRESS.md` updated, changes committed, changes pushed, `git status` shows clean.
 
 ### Next phase
-**Phase 11 — Deployment prep** (do not start until explicitly authorized in a new session, after reading this file).
+**Phase 13** — scope TBD. Do not start until explicitly authorized by Leo in this or a new session, after reading this file and `BUILD_PROGRESS.md`.

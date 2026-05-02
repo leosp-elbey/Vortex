@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-04-30
-**Last commit:** `bb38c0a`
-**Status:** 🚀 LIVE on vortextrips.com · ~94% automated
+**Last updated:** 2026-05-02
+**Last commit:** `67d83c0` (last code-shipping commit; `e256a13` followed with strict-mode docs only)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 complete · No blockers · Phase 13 next
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,7 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**System is live. Pick a Phase 12 enhancement based on priority.**
+**Phase 12.8 complete. System is live. No blockers.** Phase 13 scope TBD — awaiting Leo's go-ahead. Carryover Phase 12 sub-items (HeyGen voice clone, Twitter/X auto-post route, TikTok integration, env-var whitespace cleanup, lint config fix, social-specs.ts) remain available to pick from.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -65,10 +65,12 @@ Phase 11 sub-tasks (all complete):
 
 ## Blocked / pending items
 
-- [ ] Verify all 11 new env vars are present in Vercel dashboard
-- [ ] Run final local build: `npm run lint && npx tsc --noEmit && npm run build`
-- [ ] Deploy preview, smoke test, then promote to prod
-- [ ] End-to-end AI Center test (job → verify → approve → push to calendar)
+> **Reconciliation note (2026-05-02):** the four items below were Phase 11 deployment-prep checks. All four were satisfied during the Phase 11 prod cutover (commits `c361e8d` + `8e54262`, prod deploy `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`). Left in place as a historical record only — they are not active TODOs. There are no current blockers.
+
+- [x] ~~Verify all 11 new env vars are present in Vercel dashboard~~ — done in Phase 11
+- [x] ~~Run final local build: `npm run lint && npx tsc --noEmit && npm run build`~~ — done (lint script broken under Next 16; typecheck + build pass)
+- [x] ~~Deploy preview, smoke test, then promote to prod~~ — done; live on vortextrips.com
+- [x] ~~End-to-end AI Center test (job → verify → approve → push to calendar)~~ — done 2026-04-29 (Opus 4.7 verifier, score 92/100)
 
 ## Notes
 
@@ -77,10 +79,15 @@ Phase 11 sub-tasks (all complete):
 
 ---
 
-## STRICT MODE Phase Tracker (2026-05-01 anchor)
+## STRICT MODE Phase Tracker (reconciled 2026-05-02)
 
-- [x] **Phase 10.5 — Save protocol + image safety guard** (confirmed complete via strict-mode anchor)
-- [ ] **Phase 11 — Deployment prep** — Pending. Do not start without explicit authorization in a new session.
+> **Reconciliation note:** the original 2026-05-01 anchor listed Phase 10.5 as last-complete and Phase 11 as pending. That snapshot was already stale at the time of writing — Phases 11 through 12.8 had shipped to production. Below reflects true current state. Historical phase entries above are preserved unchanged.
+
+- [x] **Phase 10.5 — Save protocol + image safety guard** (commit `f2b41e6`)
+- [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
+- [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
+- [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [ ] **Phase 13** — scope TBD. Do not start without explicit authorization from Leo.
 
 ## Session Safety Rules
 - One phase per session
