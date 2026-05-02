@@ -97,3 +97,31 @@ Recommended Phase 12 candidates (in priority order):
 2. Build social-specs.ts for per-platform sizing (2-3 hours)
 3. ElevenLabs voice clone for HeyGen videos (half day)
 4. Custom HeyGen Studio Avatar trained on Leo's face (1-2 days)
+
+---
+
+## STRICT MODE — Session Continuity Anchor (2026-05-01)
+
+This block is appended (not overwriting prior content). Treat the markdown system as the only durable source of truth. Chat history is unreliable due to session resets and image-size limits.
+
+### Current system summary (locked in)
+- Project: VortexTrips AI Command Center
+- Architecture: Next.js App Router (TypeScript)
+- Database: Supabase (connected + migrated; tables include `trips`, `itineraries`, `chat_sessions`, `saved_items` per the broader system; AI tables `ai_jobs`, `ai_verification_logs`, `ai_model_usage`, `ai_command_templates` migrated)
+- Deployment target: Vercel
+- API routes functional, OpenRouter integration wired, image generation implemented with safety guard
+- Save protocol introduced; markdown tracking system in use
+
+### Last completed phase
+**Phase 10.5** — confirmed via this strict-mode anchor. Any work after 10.5 is not considered formally complete in the phase tracker until re-validated under Phase 11 deployment prep.
+
+### Current blocker
+Claude session resets + image-size limits. Chat history cannot be relied on as memory.
+
+### Rules locked in
+- Markdown files are the **only** source of truth.
+- No phase proceeds without saving state.
+- A phase is NOT complete until: `PROJECT_STATE_CURRENT.md` updated, `BUILD_PROGRESS.md` updated, changes committed, changes pushed, `git status` shows clean.
+
+### Next phase
+**Phase 11 — Deployment prep** (do not start until explicitly authorized in a new session, after reading this file).

@@ -74,3 +74,24 @@ Phase 11 sub-tasks (all complete):
 
 - Previous Claude chat froze because images >2000px were attached. Image safety guard now in place; rule is documented in `IMAGE_UPLOAD_RULES.md`.
 - Vercel Hobby plan caps: 10s function timeout, daily cron only, 4 cron jobs max — we're at 4.
+
+---
+
+## STRICT MODE Phase Tracker (2026-05-01 anchor)
+
+- [x] **Phase 10.5 — Save protocol + image safety guard** (confirmed complete via strict-mode anchor)
+- [ ] **Phase 11 — Deployment prep** — Pending. Do not start without explicit authorization in a new session.
+
+## Session Safety Rules
+- One phase per session
+- Always read `PROJECT_STATE_CURRENT.md` first
+- Never rely on chat history
+- Always save progress before ending
+
+## Global completion rule (mirrored from SAVE_PROTOCOL.md)
+A phase is NOT complete until:
+- `PROJECT_STATE_CURRENT.md` updated
+- `BUILD_PROGRESS.md` updated
+- Changes committed
+- Changes pushed
+- `git status` shows clean

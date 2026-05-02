@@ -110,3 +110,21 @@ git push origin main   # confirm "Everything up-to-date"
 - Do not amend or force-push to `main`. New work = new commits.
 - Do not commit `.env`, `.env.local`, screenshots >2000px, or any oversized binaries. See `IMAGE_UPLOAD_RULES.md`.
 - Do not begin the next phase until step 7 confirms `Everything up-to-date`.
+
+---
+
+## Claude Session Hardening Rules (2026-05-01)
+
+- Never process the full repo unless required.
+- Never generate long chat outputs when files can be used.
+- Always write outputs into `.md` files.
+- Always confirm git clean state before ending session.
+- Image uploads must be under 1920px on the longest side.
+
+## Global completion rule (canonical)
+A phase is NOT complete until:
+- `PROJECT_STATE_CURRENT.md` updated
+- `BUILD_PROGRESS.md` updated
+- Changes committed
+- Changes pushed
+- `git status` shows clean
