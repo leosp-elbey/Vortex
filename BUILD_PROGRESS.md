@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 13 in progress)
-**Last commit (pre-Phase-13):** `e256a13` (strict-mode docs); last code-shipping commit `67d83c0`
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete, awaiting Leo follow-ups before close
+**Last updated:** 2026-05-02 (Phase 14A complete — markdown only; Phase 13 still awaiting Leo follow-ups before close)
+**Last code-shipping commit:** `04d397c` (Phase 13 stability layer)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A skill spec + Surge365 referral-link sweep in working tree
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,9 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 13 — Stability Layer.** Code-side ships in this session (env-var audit, `.env.local` whitespace cleanup, `.env.example` doc fix, Next 16 flat eslint config, `typecheck` script). System remains LIVE; not redeploying. Closing the phase is gated on Leo's manual follow-ups: validate `npm install && npm run lint`, fix the two malformed env values in `.env.local` (and Vercel mirror), audit Vercel env vars via CLI.
+**Phase 14A — Destination/Event Campaign Skill.** Markdown-only deliverables shipped to working tree along with a code-side sweep of Surge365 signup CTAs to the canonical path-based URL `https://signup.surge365.com/leosp`. Awaiting commit + push.
+
+**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -87,6 +89,13 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [x] **Phase 14A — Destination/Event Campaign Skill** (markdown only, 2026-05-02)
+  - [x] `VORTEX_EVENT_CAMPAIGN_SKILL.md` created (purpose, formula, 32 categories, 8 timing waves, output spec, cruise add-on, compliance rules, scoring rubric, 15 seed campaigns)
+  - [x] `EVENT_CAMPAIGN_ROADMAP.md` created (Phases 14A-14H with exit criteria)
+  - [x] Surge365 signup-CTA sweep — 6 code-side links corrected to path-based `/leosp`: `next.config.js`, `src/app/sba/page.tsx`, `src/app/join/page.tsx`, `src/lib/email-templates.ts`, `src/lib/twilio.ts` (leadDay12 + sbaDay7)
+  - [x] Surge365 corporate video URLs left intact (`wa=leosp` query is correct for video pages)
+  - [x] `myvortex365.com/leosp` references left intact (different domain — free portal)
+  - [ ] **Leo to do:** run the git commands at the end of this session to commit and push Phase 14A
 - [~] **Phase 13 — Stability Layer** (code-side complete 2026-05-02, awaiting Leo follow-ups)
   - [x] Env-var audit across `.env.example`, `.env.local`, and code (full inventory below)
   - [x] `.env.local` whitespace + admin-password-comment removed (gitignored, not committed)

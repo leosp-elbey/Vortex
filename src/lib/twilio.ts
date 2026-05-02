@@ -44,13 +44,13 @@ export const SMS_TEMPLATES = {
     `${firstName}, exclusive alert from VortexTrips: hotel rates are dropping this week. Your free savings account is waiting — create it now: myvortex365.com/leosp — Reply STOP to opt out.`,
 
   leadDay12: (firstName: string) =>
-    `Last chance, ${firstName}! Don't leave savings on the table. Your free VortexTrips account takes 30 seconds: myvortex365.com/leosp — Or join our SBA program to earn: signup.surge365.com/signup — Reply STOP to opt out.`,
+    `Last chance, ${firstName}! Don't leave savings on the table. Your free VortexTrips account takes 30 seconds: myvortex365.com/leosp — Or join our SBA program to earn: signup.surge365.com/leosp — Reply STOP to opt out.`,
 
   sbaDay0: (firstName: string) =>
     `Welcome to the VortexTrips team, ${firstName}! Create your free savings account now: myvortex365.com/leosp — Then share your link to start earning commissions. Reply HELP for help, STOP to cancel.`,
 
   sbaDay7: (firstName: string) =>
-    `Hey ${firstName}! Quick check-in from VortexTrips. Booking trips? Use code LEOSP at vortextrips.com/booking — Ready to grow your team? signup.surge365.com/signup — Reply STOP to cancel.`,
+    `Hey ${firstName}! Quick check-in from VortexTrips. Booking trips? Use code LEOSP at vortextrips.com/booking — Ready to grow your team? signup.surge365.com/leosp — Reply STOP to cancel.`,
 
   reviewRequestSms: (firstName: string, destination?: string) =>
     `Hey ${firstName}! Hope your${destination ? ` ${destination}` : ''} trip was amazing! We'd love a quick review — it takes 60 seconds and helps other travelers. ${process.env.NEXT_PUBLIC_APP_URL}/reviews — Reply STOP to opt out.`,

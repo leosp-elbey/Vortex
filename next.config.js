@@ -4,7 +4,7 @@ const nextConfig = {
     return [
       {
         source: '/join',
-        destination: 'https://signup.surge365.com/signup',
+        destination: 'https://signup.surge365.com/leosp',
         permanent: false,
       },
       {

@@ -65,7 +65,7 @@ export default function JoinPage() {
               ) : (
                 <div className="space-y-3">
                   <a
-                    href="https://signup.surge365.com/signup"
+                    href="https://signup.surge365.com/leosp"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 rounded-lg text-lg transition-all text-center"

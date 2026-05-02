@@ -1,10 +1,10 @@
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://www.vortextrips.com'
 
-// Surge365 corporate affiliate links — wa=leosp preserves Leo's referral attribution.
+// Surge365 corporate affiliate links. Signup is path-based (/leosp); the corporate video pages still use the wa=leosp query.
 const SURGE365 = {
   opportunityVideo: 'https://surge365.com/Page/OpportunityVideo/wa=leosp',
   powerlineVideo: 'https://surge365.com/Page/powerlinevideo/wa=leosp',
-  signup: 'https://signup.surge365.com/?wa=leosp',
+  signup: 'https://signup.surge365.com/leosp',
 }
 
 function wrapper(content: string): string {

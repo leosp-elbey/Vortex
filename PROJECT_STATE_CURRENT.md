@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 13 in progress)
-**Last known good commit:** `67d83c0` — "Phase 12.8: Batch A + B audit fixes shipped to prod"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 changes are NOT deployed yet by design)
+**Last updated:** 2026-05-02 (Phase 14A complete — markdown only; Phase 13 still awaiting Leo follow-ups before close)
+**Last known good commit:** `04d397c` — "Phase 13: stability layer env audit and lint config"
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete, awaiting Leo follow-ups before close
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A skill spec + Surge365 referral-link sweep shipped to working tree
 
 ---
 
@@ -184,3 +184,38 @@ This block is appended (not overwriting prior content). Treat the markdown syste
 
 ### Next phase
 **Phase 13** — scope TBD. Do not start until explicitly authorized by Leo in this or a new session, after reading this file and `BUILD_PROGRESS.md`.
+
+---
+
+## Phase 14A — Destination/Event Campaign Skill (DONE 2026-05-02)
+
+Markdown-only phase. No database, no automation, no deploy. The skill file is the spec; future phases (14B-14H) implement it.
+
+**Created:**
+- `VORTEX_EVENT_CAMPAIGN_SKILL.md` — full spec: purpose, six-part formula, 32 categories, 8 timing waves, output requirements, cruise add-on logic, hard compliance rules, automation rules, 10-dimension scoring rubric, 15 seed campaigns, canonical URLs.
+- `EVENT_CAMPAIGN_ROADMAP.md` — Phases 14A-14H with exit criteria and the cross-cutting rules (Hobby cron limit, budget guards, human approval).
+
+**Edited (Surge365 signup CTA sweep — path-based `/leosp` is canonical):**
+- `next.config.js` — `/join` redirect destination corrected to `https://signup.surge365.com/leosp`.
+- `src/app/sba/page.tsx` — footer "Get Started Today" CTA now uses `/leosp` path.
+- `src/lib/email-templates.ts` — `SURGE365.signup` now `/leosp` path; comment clarifies that videos still use the older `wa=leosp` query.
+- `src/app/join/page.tsx` — "Join the SBA Program" CTA uses `/leosp` path.
+- `src/lib/twilio.ts` — `leadDay12` and `sbaDay7` SMS templates use `signup.surge365.com/leosp`.
+
+**Intentionally unchanged (per Phase 14A scope):**
+- Surge365 corporate video URLs (Opportunity, Powerline) — these are video pages, not signup CTAs, and use `wa=leosp` by design.
+- All `myvortex365.com/leosp` references — different domain (free portal), already correct.
+- Historical signup URL strings inside `BUILD_PROGRESS.md` and `PROJECT-STATUS.md` — preserved as historical record per session rules.
+
+### Phase 14A — exit criteria
+
+- [x] `VORTEX_EVENT_CAMPAIGN_SKILL.md` created
+- [x] `EVENT_CAMPAIGN_ROADMAP.md` created
+- [x] Surge365 referral-link sweep complete (6 active code-side CTAs corrected; 4 video links and all `myvortex365.com/leosp` links left intact)
+- [x] No unrelated app code modified
+- [x] `PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md` updated
+- [ ] Working tree committed and pushed (Leo to run the git commands at the end of this session)
+
+### Next recommended phase
+
+**Phase 14B — Campaign Calendar Schema** (Supabase migrations for `event_campaigns`, `campaign_assets`, `campaign_scores`, `event_sources`, `campaign_schedule`). Do not start until explicitly authorized in a new session.

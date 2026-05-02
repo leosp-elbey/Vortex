@@ -348,7 +348,7 @@ export default function SBAPage() {
             Apply Free →
           </a>
           <a
-            href="https://signup.surge365.com/?wa=leosp"
+            href="https://signup.surge365.com/leosp"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block bg-[#FF6B35] text-white font-bold text-lg px-10 py-4 rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-900/30"
