@@ -10,6 +10,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { runAIJob } from '@/lib/ai-router'
 import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
+import { runEventCampaignResearch, type RunResult as EventResearchResult } from '@/lib/event-campaign-generator'
+
+// Phase 14C: cap how many event seeds get scored per cron tick. Vercel Hobby
+// has a 10-second function timeout — the research pass runs in series after
+// weekly-content's main work completes, so we keep it conservative.
+const EVENT_RESEARCH_LIMIT_PER_RUN = 6
 
 const PLATFORMS = ['instagram', 'facebook', 'twitter', 'tiktok'] as const
 type Platform = (typeof PLATFORMS)[number]
@@ -245,6 +251,19 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       }, { status: 500 })
     }
 
+    // Phase 14C: piggyback the event-campaign research pass on the weekly cron.
+    // We're at Vercel Hobby's 4-cron limit, so this lives inside weekly-content
+    // rather than as its own route. Failures here are logged but never break the
+    // weekly content generation that already succeeded above.
+    let eventResearch: EventResearchResult | null = null
+    let eventResearchError: string | null = null
+    try {
+      eventResearch = await runEventCampaignResearch({ limit: EVENT_RESEARCH_LIMIT_PER_RUN })
+    } catch (err) {
+      eventResearchError = err instanceof Error ? err.message : String(err)
+      console.error('[weekly-content] event research failed —', eventResearchError)
+    }
+
     await supabase.from('ai_actions_log').insert({
       action_type: 'weekly-content-cron',
       service: 'openrouter',
@@ -256,6 +275,15 @@ Be terse. Skip filler. Optimize for parseability over prose.`
         model: result.modelUsed,
         cost: result.costEstimate,
         jobId: result.jobId,
+        event_research: eventResearch
+          ? {
+              processed: eventResearch.processed,
+              inserted: eventResearch.inserted,
+              updated: eventResearch.updated,
+              errors: eventResearch.errors.length,
+            }
+          : null,
+        event_research_error: eventResearchError,
       } as Record<string, unknown>,
     })
 
@@ -267,6 +295,8 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       model: result.modelUsed,
       cost: result.costEstimate,
       jobId: result.jobId,
+      event_research: eventResearch,
+      event_research_error: eventResearchError,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Internal error'

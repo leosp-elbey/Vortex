@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14B complete — migration files only)
-**Last code-shipping commit:** `dd01930` (Phase 14A skill + Surge365 sweep)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped · Phase 14B migrations 017-021 in working tree
+**Last updated:** 2026-05-02 (Phase 14C complete — research engine code in working tree)
+**Last code-shipping commit:** `8340a62` (Phase 14B campaign calendar schema migrations 017-021)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped · Phase 14B shipped · Phase 14C research engine in working tree
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,9 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14B — Campaign Calendar Schema.** Five Supabase migration files created (`017_create_event_campaigns.sql` → `021_create_campaign_schedule.sql`). Migrations not yet applied to Supabase prod — Leo runs `supabase db push` (or pastes into the Supabase SQL Editor) when ready. Awaiting commit + push.
+**Phase 14C — Event Research Cron.** Three new files in `src/lib/` plus an integration patch into the existing `weekly-content` cron. No new Vercel cron (Hobby cap respected). Status defaults to `idea` and human approval is still required. Awaiting commit + push, and awaiting Leo's application of Phase 14B migrations 017-021 to Supabase prod.
 
-**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B.
+**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -89,6 +89,16 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [x] **Phase 14C — Event Research Cron** (code only, 2026-05-02)
+  - [x] `src/lib/event-seeds.json` — 31 worldwide event seeds across all 17 required categories (Carnival, Cruise, Art & Culture, Sports, Music Festival, Business Conference, Family Reunion, Wedding Guest, Faith-Based, Youth Sports, Creator/Influencer, Diaspora/Back Home, Wellness Retreat, Luxury-on-a-Budget, No-Passport/Easy, Last-Minute, Seasonal/Shoulder)
+  - [x] `src/lib/event-campaign-scoring.ts` — pure 1-100 scorer implementing the 10-dimension rubric in `VORTEX_EVENT_CAMPAIGN_SKILL.md` §9
+  - [x] `src/lib/event-campaign-generator.ts` — reads seeds, computes next-future occurrence, scores, upserts into `event_campaigns`, inserts into `campaign_scores`. Duplicate prevention by `ilike(event_name) + event_year + ilike(destination_city)`. Round-robin batching across weekly runs.
+  - [x] `src/app/api/cron/weekly-content/route.ts` — calls `runEventCampaignResearch({ limit: 6 })` after the existing weekly content insert; isolated try/catch ensures research failures never break weekly content; result and error count logged into `ai_actions_log.response_payload`.
+  - [x] No new Vercel cron route (Hobby cap of 4 respected — score-and-branch, send-sequences, weekly-content, check-heygen-jobs)
+  - [x] No content auto-published; status defaults to `idea`; `requires_human_approval = TRUE`
+  - [x] `npx tsc --noEmit` passes
+  - [ ] **Leo to do:** apply migrations 017-021 to Supabase prod before next Monday 1pm UTC weekly-content tick (`supabase db push` or paste into SQL Editor in order). Until applied, the research call will catch-and-log a "relation does not exist" error each week without breaking weekly content.
+  - [ ] **Leo to do:** run the git commands at the end of this session to commit and push Phase 14C
 - [x] **Phase 14B — Campaign Calendar Schema** (migration files only, 2026-05-02)
   - [x] `supabase/migrations/017_create_event_campaigns.sql` — root campaign table (worldwide events, cruise add-on, scoring, lifecycle, approval, AI metadata, parent-campaign FK for yearly repeats, tracking URL template)
   - [x] `supabase/migrations/018_create_campaign_assets.sql` — generated assets (10 asset types × 10 platforms, wave W1-W8, image/video source provenance, FK to existing `content_calendar`)
