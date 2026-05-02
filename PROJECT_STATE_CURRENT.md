@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02
+**Last updated:** 2026-05-02 (Phase 13 in progress)
 **Last known good commit:** `67d83c0` — "Phase 12.8: Batch A + B audit fixes shipped to prod"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30)
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · No blockers · Phase 13 is next
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete, awaiting Leo follow-ups before close
 
 ---
 
@@ -94,15 +94,66 @@ This includes:
 
 ## Exact next step
 
-**Phase 12.8 is complete. System is live. No blockers.** Phase 13 is next — scope to be confirmed by Leo before any code changes.
+**Phase 13 — Stability Layer.** Code-side changes from this session are in working tree, awaiting commit. Production is unchanged. Before closing the phase, Leo must complete the manual follow-ups below.
 
-Carryover Phase 12 sub-items still open (these may roll into Phase 13 or be picked individually):
-1. HeyGen voice clone — Leo recording in progress
-2. Twitter/X auto-post route at `/api/automations/post-to-twitter` (current Twitter integration is in `de51509`; a dedicated automation route is still pending)
-3. TikTok: API access application OR partner-tier integration (Buffer/Later)
-4. Cleanup: refresh Vercel env vars to remove leading whitespace (cosmetic — trim guard is live)
-5. Cleanup: fix lint config (`next lint` removed in Next 16)
-6. Build `src/lib/social-specs.ts` for per-platform image/video sizing
+### Phase 13 — what shipped this session (in working tree, not yet committed)
+
+**Edited:**
+- `.env.example` — Twitter section comment corrected (posting routes are shipped, not pending).
+- `.env.local` — whitespace around `=` removed on `NEXT_PUBLIC_FORM_TOKEN` + `BLAND_WEBHOOK_SECRET`; admin-password comment line removed. **Gitignored — not committed.**
+- `package.json` — `lint` script changed from `next lint` (removed in Next 16) to `eslint .`; `typecheck` script added; `eslint` bumped from `^8` to `^9.17.0`; added `@eslint/eslintrc ^3.2.0` for FlatCompat.
+- `PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md` — this Phase 13 entry.
+
+**Created:**
+- `eslint.config.mjs` — flat config using FlatCompat to load `next/core-web-vitals` + `next/typescript` presets, with sensible ignores (`.next/**`, `mobile/**`, `scripts/**`, `supabase/**`, etc.).
+
+### Phase 13 — Leo follow-ups required before closing the phase
+
+1. **Lint validation.** Run:
+   ```
+   npm install
+   npm run lint
+   ```
+   First run will install eslint v9 + @eslint/eslintrc and update `package-lock.json`. Commit the lockfile separately. If lint surfaces real issues, fix or `// eslint-disable-next-line` per case — do not regress the config.
+
+2. **Fix `.env.local` malformed values** (both must be fixed in Vercel as well, in case the same paste error is mirrored there):
+   - **Line 53** — `ANTHROPIC_API_KEY` has duplicated prefix `sk-ant-sk-ant-api03-…`. Remove the leading 7 chars `sk-ant-`. Confirm against Anthropic console.
+   - **Lines 56-57** — OpenRouter keys are stored under wrong variable names (`Management_Key`, `Your_new_API_key`). Code reads `OPENROUTER_API_KEY` only. Pick whichever key is current and rename the line to `OPENROUTER_API_KEY=…`. Delete the other.
+
+3. **Vercel env audit.** Run:
+   ```
+   npx vercel env ls production
+   ```
+   Cross-check against the Required Env Vars list below. For any value that triggered the env-trim defense in Phase 11, delete and re-paste it cleanly (no leading/trailing whitespace). Pay attention to: `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, all `AI_*_MODEL` vars, `ANTHROPIC_API_KEY`.
+
+4. **(Optional) Prune unused Vercel env vars** to reduce surface area. The following are declared but not referenced anywhere in `src/`:
+   - `NEXT_PUBLIC_FB_APP_ID`, `NEXT_PUBLIC_FB_LOGIN_CONFIG_ID` (FB Login flow not implemented)
+   - `FACEBOOK_APP_SECRET` (only Page Access Token is used)
+   - `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` (no TikTok posting routes)
+   - `TWITTER_BEARER_TOKEN`, `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` (only the 4 OAuth1 vars are consumed by `post-to-twitter`)
+   - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_PRICE_ID` (membership flow paused)
+
+### Required Env Vars — actually consumed by `src/` code (Phase 13 audit)
+
+**Server-side (must exist in Vercel for prod, never `NEXT_PUBLIC_*`):**
+- Supabase: `SUPABASE_SERVICE_ROLE_KEY`
+- App ops: `CRON_SECRET`, `ADMIN_NOTIFICATION_EMAIL`
+- Webhook auth: `BLAND_WEBHOOK_SECRET`
+- AI router: `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` (optional, defaults to OpenRouter), `AI_DEFAULT_MODEL`, `AI_CHEAP_MODEL`, `AI_MEDIUM_MODEL`, `AI_STRONG_MODEL`, `AI_CODING_MODEL`, `AI_VERIFIER_MODEL`, `AI_MONTHLY_BUDGET_LIMIT`, `AI_DAILY_BUDGET_LIMIT`, `AI_REQUIRE_HUMAN_APPROVAL`
+- AI verifier: `ANTHROPIC_API_KEY`
+- OpenAI image/text: `OPENAI_API_KEY`
+- Email/SMS: `RESEND_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
+- Voice: `BLAND_API_KEY`
+- Social posting: `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_SECRET`
+- Content: `PEXELS_API_KEY`, `HEYGEN_API_KEY`, `HEYGEN_AVATAR_ID`, `HEYGEN_VOICE_ID`
+
+**Client-side (`NEXT_PUBLIC_*` — public by design):**
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (anon-key safe — protected by RLS)
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_FORM_TOKEN` (anti-bot deterrent only, documented as such)
+- `NEXT_PUBLIC_FB_PIXEL_ID`, `NEXT_PUBLIC_GA_MEASUREMENT_ID` (analytics IDs are inherently public)
+
+**Vercel-injected (no setup needed):** `VERCEL_URL`, `VERCEL_ENV`, `NODE_ENV`
 
 ---
 

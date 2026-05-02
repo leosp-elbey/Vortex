@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02
-**Last commit:** `67d83c0` (last code-shipping commit; `e256a13` followed with strict-mode docs only)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 complete · No blockers · Phase 13 next
+**Last updated:** 2026-05-02 (Phase 13 in progress)
+**Last commit (pre-Phase-13):** `e256a13` (strict-mode docs); last code-shipping commit `67d83c0`
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete, awaiting Leo follow-ups before close
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,7 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 12.8 complete. System is live. No blockers.** Phase 13 scope TBD — awaiting Leo's go-ahead. Carryover Phase 12 sub-items (HeyGen voice clone, Twitter/X auto-post route, TikTok integration, env-var whitespace cleanup, lint config fix, social-specs.ts) remain available to pick from.
+**Phase 13 — Stability Layer.** Code-side ships in this session (env-var audit, `.env.local` whitespace cleanup, `.env.example` doc fix, Next 16 flat eslint config, `typecheck` script). System remains LIVE; not redeploying. Closing the phase is gated on Leo's manual follow-ups: validate `npm install && npm run lint`, fix the two malformed env values in `.env.local` (and Vercel mirror), audit Vercel env vars via CLI.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -87,7 +87,18 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
-- [ ] **Phase 13** — scope TBD. Do not start without explicit authorization from Leo.
+- [~] **Phase 13 — Stability Layer** (code-side complete 2026-05-02, awaiting Leo follow-ups)
+  - [x] Env-var audit across `.env.example`, `.env.local`, and code (full inventory below)
+  - [x] `.env.local` whitespace + admin-password-comment removed (gitignored, not committed)
+  - [x] Verified no secrets exposed to client (`next.config.js` has no `env` block; all 6 used `NEXT_PUBLIC_*` vars are public-by-design)
+  - [x] `.env.example` Twitter comment fixed (posting routes are shipped, not pending)
+  - [x] Next 16 lint config: created `eslint.config.mjs` (FlatCompat) + updated `package.json` lint script + bumped `eslint` to ^9 + added `@eslint/eslintrc`
+  - [x] Added `typecheck` script to `package.json`
+  - [ ] **Leo to do:** run `npm install` and `npm run lint` to validate flat config (do not deploy from this until lint exits clean)
+  - [ ] **Leo to do:** in `.env.local`, fix duplicated `sk-ant-` prefix on `ANTHROPIC_API_KEY` (line 53). Confirm against Anthropic console.
+  - [ ] **Leo to do:** in `.env.local`, rename `Management_Key` / `Your_new_API_key` → one canonical `OPENROUTER_API_KEY` (lines 56-57). Code reads `OPENROUTER_API_KEY` only.
+  - [ ] **Leo to do:** Vercel env audit — run `vercel env ls production` and cross-check against the Required-vars list in `PROJECT_STATE_CURRENT.md`. Confirm no leading/trailing whitespace on values.
+  - [ ] **Leo to do (optional):** prune Vercel of unused `NEXT_PUBLIC_FB_APP_ID`, `NEXT_PUBLIC_FB_LOGIN_CONFIG_ID`, `FACEBOOK_APP_SECRET`, `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TWITTER_BEARER_TOKEN`, `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`, `STRIPE_*` (all declared but unused in current code).
 
 ## Session Safety Rules
 - One phase per session
