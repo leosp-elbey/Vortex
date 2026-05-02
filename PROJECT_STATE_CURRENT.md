@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14D complete — campaign asset generator API in working tree, not deployed)
-**Last known good commit:** `f4bae3a` — "Phase 14C: event research engine seeds scoring generator wired into weekly content cron"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D changes are NOT deployed yet by design)
+**Last updated:** 2026-05-02 (Phase 14E complete — admin dashboard campaign planner in working tree, not deployed)
+**Last known good commit:** `410e0a8` — "Phase 14D: campaign generator API and asset generator library"
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D + 14E changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D asset generator API in working tree
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E dashboard planner in working tree
 
 ---
 
@@ -388,4 +388,76 @@ Returns 200:
 
 ### Next recommended phase
 
-**Phase 14E — Dashboard Campaign Planner** (admin UI to list `event_campaigns`, drill into a campaign's asset bundle, and approve/reject `campaign_assets` drafts). Do not start until Phase 14D is committed/pushed and migrations are applied.
+**Phase 14E — Dashboard Campaign Planner** — DONE 2026-05-02 (see entry below).
+
+---
+
+## Phase 14E — Dashboard Campaign Planner (DONE 2026-05-02)
+
+Code only. Nothing deployed. Adds an admin-only dashboard surface for the event-campaign system: list `event_campaigns`, drill into a campaign, view its score breakdown and asset bundle, generate the bundle (calling the Phase 14D route), and approve/reject `campaign_assets` drafts. Strictly a human-approval surface — does not push to `content_calendar`, does not auto-post, does not modify schema.
+
+**Created:**
+- `src/app/dashboard/campaigns/page.tsx` — single client component. Filters (status / category / min score / search), left-rail campaign list with status / score / urgency-wave / asset-count chips, right-rail detail panel covering identity, dates, audience, all six campaign angles, latest score breakdown (10 dimensions), CTA, tracking URL. Asset section grouped by `asset_type` in the canonical 10-type order; each card shows platform, wave, status, scheduled_for, hashtags, banned-term compliance flag from `verification_metadata`, and (when present) rejection reason. Generate button posts to `/api/admin/campaigns/generate-assets`; force-regenerate button shown only when assets already exist, gated by a confirm dialog explaining "This archives existing draft assets only. Posted, approved, scheduled, and rejected assets are not overwritten." Uses existing `useToast`/`Toaster` for notifications. No new component library, no new colors — reuses `getStatusColor`, `formatDate`, `formatDateTime` from `src/lib/utils.ts`.
+- `src/app/api/admin/campaigns/route.ts` — `GET`. Admin-gated via `requireAdminUser()`. Returns up to 500 campaigns ordered by `event_start_date ASC`. Optional query filters: `status` (validated against the enum), `category` (`.contains(['cat'])` against `categories TEXT[]`), `min_score` (1-100 numeric), `q` (case-insensitive `ilike` across `campaign_name`, `event_name`, `destination_city`, sanitized to strip `,()` and clamped to 200 chars). Returns each campaign enriched with `asset_counts` aggregated from a single `campaign_assets` query (one round-trip per list call, not N+1).
+- `src/app/api/admin/campaigns/[id]/route.ts` — `GET`. Admin-gated. Returns the full `event_campaigns` row, all related `campaign_assets` ordered by `created_at DESC`, asset counts aggregated by status, and the latest `campaign_scores` row (with full 10-dimension `breakdown` JSONB). 404 when campaign not found.
+- `src/app/api/admin/campaigns/assets/[assetId]/approve/route.ts` — `POST`. Admin-gated. Allowed only when current status is `'draft'` or `'idea'`. Sets `status='approved'`, `approved_at=now()`, `approved_by=current admin user id`. Uses an optimistic-concurrency guard (`.eq('status', asset.status)` on the update) so two clicks racing on the same asset return 409 instead of double-applying. 400 when status is not approvable, 404 when asset missing. Does not push to `content_calendar` and does not auto-post.
+- `src/app/api/admin/campaigns/assets/[assetId]/reject/route.ts` — `POST`. Admin-gated. Allowed when current status is `'draft'`, `'idea'`, or `'approved'`. Sets `status='rejected'`. Optional body `{reason: string}` — when provided, merged into `verification_metadata.rejection_reason` (the table has no dedicated rejection-reason column; the JSONB metadata is the only safe place without a schema change). Same optimistic-concurrency guard. 400 when status is not rejectable.
+
+**Edited:**
+- `src/components/dashboard/sidebar.tsx` — added `{ href: '/dashboard/campaigns', label: 'Campaigns', icon: '🌍' }` between AI Center and Videos.
+- `PROJECT_STATE_CURRENT.md` — this entry.
+- `BUILD_PROGRESS.md` — Phase 14E checklist + sub-tasks.
+
+**Status-transition rules (locked in by the routes):**
+- `approve` accepts: `draft → approved`, `idea → approved`. Anything else returns 400.
+- `reject` accepts: `draft → rejected`, `idea → rejected`, `approved → rejected`. Anything else (`scheduled`, `posted`, `archived`, `rejected`) returns 400.
+- Posted assets are never modified by either route. The optimistic guard means a click on stale UI returns 409 instead of clobbering a status change made by another tab.
+- Generation of new assets goes through the existing Phase 14D `POST /api/admin/campaigns/generate-assets` route — it already enforces draft-only archiving on `force_regenerate=true`. Phase 14E only adds the UI button + confirm dialog.
+
+**Tests run:**
+- `npx tsc --noEmit` — passes clean.
+- `npm run build` — compiles successfully. New routes registered as `ƒ /api/admin/campaigns`, `ƒ /api/admin/campaigns/[id]`, `ƒ /api/admin/campaigns/assets/[assetId]/approve`, `ƒ /api/admin/campaigns/assets/[assetId]/reject`. New page registered as `ƒ /dashboard/campaigns`.
+- `npm run lint` — fails with the **known** Phase 13 ESLint v8/v9 mismatch (`TypeError: Converting circular structure to JSON` from ESLint 8.57.1 trying to load the v9 flat config). Pre-existing — not a Phase 14E regression. Resolves once Leo runs the Phase 13 follow-up `npm install` + `npm run lint` cycle.
+
+**Tables read from (after migrations 017-021 applied):**
+- `event_campaigns` — list + detail.
+- `campaign_assets` — counts + detail + approve/reject updates. Updates only touch `status`, `approved_at`, `approved_by`, `verification_metadata`. Never touches `posted_at`, `post_url`, `content_calendar_id`, `scheduled_for`, or any generation fields.
+- `campaign_scores` — latest row only, for the score-breakdown panel.
+- `admin_users` — via `requireAdminUser()`.
+
+**Intentionally NOT done in Phase 14E:**
+- No auto-publish, no auto-post, no `content_calendar` writes — Phase 14F is where approved assets become calendar slots.
+- No edit-in-place for asset body / hashtags — the approve/reject loop is the only mutation in this phase. Editing is a future enhancement.
+- No bulk approve / bulk reject — single-asset actions only.
+- No new component library, no new dependencies.
+- No DB schema changes — all five Phase 14B migrations still apply unmodified.
+- No deployment.
+
+**Risks:**
+- The new routes depend on Phase 14B migrations 017-021 being applied to Supabase prod. Until applied, the dashboard list will return a "relation event_campaigns does not exist" error and render an empty state with a toast. Per Phase 14C/14D notes, Leo is the one to apply the migrations.
+- `verification_metadata` is the only column carrying rejection reason. If Phase 14F or later refactors that JSONB, rejection reasons recorded in this phase will need a migration to relocate. Acceptable trade-off vs. introducing a schema change in 14E.
+- The list query is capped at 500 rows. If the seed file ever grows past that, add server-side pagination (cursor on `event_start_date`).
+- The optimistic-concurrency guard (`.eq('status', prior_status)`) only protects against in-flight races. It does not protect against a posted asset being approved by Phase 14F machinery — by design, the Phase 14E routes won't approve a `posted` asset because `posted` is not in the approvable-from set.
+- The dashboard makes one `campaign_assets` count query per list refresh. On the current data scale this is fine; if assets grow past low-thousands, switch to a Postgres view that pre-aggregates counts.
+
+### Phase 14E — exit criteria
+
+- [x] `src/app/dashboard/campaigns/page.tsx` created — admin UI with filters, list, detail, generate button, asset approval/rejection.
+- [x] `src/app/api/admin/campaigns/route.ts` created — admin-gated list with status/category/min_score/q filters; returns asset counts per campaign.
+- [x] `src/app/api/admin/campaigns/[id]/route.ts` created — admin-gated detail with assets + latest score breakdown.
+- [x] `src/app/api/admin/campaigns/assets/[assetId]/approve/route.ts` created — only allowed from `draft` or `idea`.
+- [x] `src/app/api/admin/campaigns/assets/[assetId]/reject/route.ts` created — only allowed from `draft`, `idea`, or `approved`. Stores reason in `verification_metadata.rejection_reason` when provided.
+- [x] `src/components/dashboard/sidebar.tsx` updated — Campaigns nav entry.
+- [x] Reuses existing `requireAdminUser`, `createAdminClient`, `useToast`, `getStatusColor`, `formatDate`, `formatDateTime`.
+- [x] No auto-publish; no `content_calendar` writes; posted assets never mutated.
+- [x] Force-regenerate confirms with the exact warning copy: "This archives existing draft assets only. Posted, approved, scheduled, and rejected assets are not overwritten."
+- [x] `npx tsc --noEmit` passes.
+- [x] `npm run build` compiles cleanly; all 4 new routes + new page registered.
+- [ ] `npm run lint` — known Phase 13 ESLint v8/v9 mismatch; not a 14E regression.
+- [x] `PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md` updated.
+- [ ] Working tree committed and pushed (Leo to run the git commands at the end of this session).
+- [ ] **Leo to do:** apply migrations 017-021 to Supabase prod before exercising the dashboard end-to-end (still pending from Phase 14C/14D).
+
+### Next recommended phase
+
+**Phase 14F — Auto-Push Approved Campaigns into `content_calendar`** (when an admin approves a `campaign_assets` draft, the asset becomes eligible for a `content_calendar` insert so the existing posters pick it up). Requires a small schema add (`content_calendar.campaign_asset_id` nullable FK) per the roadmap. Do not start until Phase 14E is committed/pushed and migrations are applied.

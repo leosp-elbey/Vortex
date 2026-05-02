@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14D complete — campaign asset generator API in working tree)
-**Last code-shipping commit:** `f4bae3a` (Phase 14C event research engine seeds scoring generator wired into weekly content cron)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A-14C shipped · Phase 14D asset generator API in working tree
+**Last updated:** 2026-05-02 (Phase 14E complete — admin dashboard campaign planner in working tree)
+**Last code-shipping commit:** `410e0a8` (Phase 14D campaign generator API and asset generator library)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A-14D shipped · Phase 14E dashboard planner in working tree
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,9 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14D — Campaign Generator API.** New library `src/lib/event-campaign-asset-generator.ts` and admin POST route `src/app/api/admin/campaigns/generate-assets/route.ts`. Loads an `event_campaigns` row, asks the OpenRouter medium-tier model for the full §5/§6 bundle, parses the JSON, optionally calls the existing Claude verifier, and inserts every asset into `campaign_assets` as a draft requiring human approval. No new schema, no new cron, no auto-publish, no `content_calendar` writes. Awaiting commit + push, and still depends on Phase 14B migrations 017-021 being applied to Supabase prod before the route can be exercised end-to-end.
+**Phase 14E — Dashboard Campaign Planner.** New admin dashboard page at `src/app/dashboard/campaigns/page.tsx` plus four admin-gated API routes: `GET /api/admin/campaigns`, `GET /api/admin/campaigns/[id]`, `POST /api/admin/campaigns/assets/[assetId]/approve`, `POST /api/admin/campaigns/assets/[assetId]/reject`. Sidebar nav updated. Lets an admin filter and review event campaigns, view the latest 10-dimension score breakdown, generate the asset bundle (calls Phase 14D route), and approve or reject individual `campaign_assets` drafts. Strictly a human-approval surface — no `content_calendar` writes, no auto-post, no schema changes. Awaiting commit + push, and still depends on Phase 14B migrations 017-021 being applied to Supabase prod before the dashboard can be exercised end-to-end.
 
-**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C/14D. **Phase 14D note:** `npm run lint` was not run this session because the Phase 13 ESLint v9 + `@eslint/eslintrc` install hasn't happened yet — `eslint .` is invoked under v8 against a flat config it can't load. Not a Phase 14D regression.
+**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C/14D/14E. **Phase 14E note:** `npm run lint` failed with the same `TypeError: Converting circular structure to JSON` from ESLint 8.57.1 trying to load the v9 flat config — pre-existing, not a Phase 14E regression. Resolves once Leo runs the Phase 13 follow-up `npm install` to bring in v9.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -89,6 +89,21 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [x] **Phase 14E — Dashboard Campaign Planner** (code only, 2026-05-02)
+  - [x] `src/app/dashboard/campaigns/page.tsx` — admin UI. Filters (status / category / min score / search). Left rail = campaign list with status, score, urgency-wave inferred from event date, asset-count chips, top-4 categories. Right rail = detail panel: identity + dates + audience + 6 angles + tracking URL; latest score panel with 10-dimension breakdown; asset bundle grouped by `asset_type` in canonical 10-type order. Each asset card surfaces platform, wave, status, scheduled_for, hashtags, banned-term `compliance_flag` from `verification_metadata`, and rejection reason when present.
+  - [x] Generate Asset Bundle button posts to existing Phase 14D route `/api/admin/campaigns/generate-assets`. Force Regenerate button is hidden until assets exist; when shown, it confirms with the exact warning copy: "This archives existing draft assets only. Posted, approved, scheduled, and rejected assets are not overwritten."
+  - [x] `src/app/api/admin/campaigns/route.ts` — `GET`. `requireAdminUser`. Filters: `status` (validated against the enum), `category` (TEXT[] contains), `min_score` (1-100 numeric), `q` (sanitized ilike across `campaign_name`, `event_name`, `destination_city`). Returns campaigns enriched with `asset_counts` aggregated from a single `campaign_assets` query (no N+1).
+  - [x] `src/app/api/admin/campaigns/[id]/route.ts` — `GET`. `requireAdminUser`. Returns full `event_campaigns` row, all related `campaign_assets`, asset counts by status, latest `campaign_scores` row with 10-dimension `breakdown` JSONB.
+  - [x] `src/app/api/admin/campaigns/assets/[assetId]/approve/route.ts` — `POST`. `requireAdminUser`. Allowed only from `'draft'` or `'idea'`. Sets `status='approved'`, `approved_at=now()`, `approved_by=auth.user.id`. Optimistic-concurrency guard via `.eq('status', prior_status)` — returns 409 instead of clobbering. Never auto-posts. Never writes to `content_calendar`.
+  - [x] `src/app/api/admin/campaigns/assets/[assetId]/reject/route.ts` — `POST`. `requireAdminUser`. Allowed from `'draft'`, `'idea'`, `'approved'`. Sets `status='rejected'`. Optional `{reason}` body merged into `verification_metadata.rejection_reason` + `rejected_by` + `rejected_at`. Same optimistic-concurrency guard. Never modifies `posted` / `scheduled` / `archived` / `rejected` assets.
+  - [x] `src/components/dashboard/sidebar.tsx` — `Campaigns` nav entry added between AI Center and Videos.
+  - [x] Reuses `requireAdminUser`, `createAdminClient`, `useToast`/`Toaster`, `getStatusColor`, `formatDate`, `formatDateTime`. No new component library, no new dependencies, no new env vars, no new auth helper.
+  - [x] No DB schema changes. No `content_calendar` writes. No auto-publish. No bulk operations. No edit-in-place.
+  - [x] `npx tsc --noEmit` passes.
+  - [x] `npm run build` compiles cleanly. New routes: `ƒ /api/admin/campaigns`, `ƒ /api/admin/campaigns/[id]`, `ƒ /api/admin/campaigns/assets/[assetId]/approve`, `ƒ /api/admin/campaigns/assets/[assetId]/reject`. New page: `ƒ /dashboard/campaigns`.
+  - [ ] `npm run lint` — known Phase 13 ESLint v8/v9 mismatch (`TypeError: Converting circular structure to JSON` from ESLint 8.57.1 trying to load the v9 flat config). Not a Phase 14E regression.
+  - [ ] **Leo to do:** apply migrations 017-021 to Supabase prod (still pending from Phase 14C/14D) before exercising the dashboard end-to-end.
+  - [ ] **Leo to do:** run the git commands at the end of this session to commit and push Phase 14E.
 - [x] **Phase 14D — Campaign Generator API** (code only, 2026-05-02)
   - [x] `src/lib/event-campaign-asset-generator.ts` — server-only library. Loads campaign, builds the §5/§6 system+user prompt, calls `runAIJob` (medium-tier OpenRouter), parses JSON output (markdown-fence aware), maps to up to 33 `campaign_assets` rows across all 10 asset types, computes `scheduled_for` per wave (W1−180d, W2−120d, W3−90d, W4−60d, W5−30d, W6−14d, W7−7d, W8+7d), tags banned-vocab hits in `verification_metadata`, and calls the existing Claude verifier on the concatenated text bundle when `ANTHROPIC_API_KEY` is present.
   - [x] `src/app/api/admin/campaigns/generate-assets/route.ts` — admin-gated POST. Zod validates `event_campaign_id` (required UUID), `model_override`, `asset_types[]`, `force_regenerate`. Returns 400/404/200/502/500. `maxDuration = 60`.

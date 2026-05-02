@@ -12,6 +12,7 @@ const navItems = [
   { href: '/dashboard/calls', label: 'Calls', icon: '📞' },
   { href: '/dashboard/content', label: 'Content', icon: '✍️' },
   { href: '/dashboard/ai-command-center', label: 'AI Center', icon: '🤖' },
+  { href: '/dashboard/campaigns', label: 'Campaigns', icon: '🌍' },
   { href: '/dashboard/videos', label: 'Videos', icon: '🎬' },
   { href: '/dashboard/attribution', label: 'Attribution', icon: '📡' },
   { href: '/dashboard/import', label: 'Import Leads', icon: '📥' },
