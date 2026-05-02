@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14C complete — research engine code in working tree, not deployed)
-**Last known good commit:** `8340a62` — "Phase 14B: campaign calendar schema migrations 017-021"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C changes are NOT deployed yet by design)
+**Last updated:** 2026-05-02 (Phase 14D complete — campaign asset generator API in working tree, not deployed)
+**Last known good commit:** `f4bae3a` — "Phase 14C: event research engine seeds scoring generator wired into weekly content cron"
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C research engine in working tree
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D asset generator API in working tree
 
 ---
 
@@ -299,3 +299,93 @@ Code only. Nothing deployed. The research engine reads a hand-curated seed file,
 ### Next recommended phase
 
 **Phase 14D — Campaign Generator API** (admin-only route that takes an `event_campaign_id` and produces the full asset bundle from `VORTEX_EVENT_CAMPAIGN_SKILL.md` §5/§6, OpenRouter cheap tier + Claude verifier, inserts into `campaign_assets` as drafts). Do not start until Phase 14C is committed/pushed and migrations are applied.
+
+---
+
+## Phase 14D — Campaign Generator API (DONE 2026-05-02)
+
+Code only. Nothing deployed. Admin-only API route + a server-only generator library that loads an `event_campaigns` row, asks the OpenRouter medium-tier model for the full bundle defined in `VORTEX_EVENT_CAMPAIGN_SKILL.md` §5/§6, parses the JSON response, optionally calls the existing Claude verifier, and inserts every asset into `campaign_assets` as a draft requiring human approval. Never touches `content_calendar`. Never auto-publishes. Never overwrites `posted` / `scheduled` / `approved` rows.
+
+**Created:**
+- `src/lib/event-campaign-asset-generator.ts` — server-only library. Exposes `generateCampaignAssets({ event_campaign_id, model_override?, asset_types?, force_regenerate?, createdBy })` and the `ALL_ASSET_TYPES` / `ALL_WAVES` constants. Internally:
+  - Loads the campaign row and 404s safely if absent.
+  - Inspects existing `campaign_assets`. If ≥1 non-archived/non-rejected row exists and `force_regenerate` is not set, returns `{ already_exists: true, existing_count }` without calling the model.
+  - When `force_regenerate=true`, archives only `status='draft'` rows (belt-and-braces filter — never touches `posted`, `scheduled`, `approved`, `idea`).
+  - Builds the system + user prompt with all six skill sections inlined (formula, output spec, cruise add-on, compliance, platform voice, wave guidance).
+  - Calls `runAIJob` with `jobType: 'social-pack'` so the existing AI router routes through `AI_MEDIUM_MODEL`, applies budget guards (`AI_DAILY_BUDGET_LIMIT` / `AI_MONTHLY_BUDGET_LIMIT`), retries on transient errors, and writes to `ai_jobs` + `ai_model_usage`. `model_override` is forwarded as the per-job override.
+  - Parses the model output through a robust JSON extractor that strips markdown fences and handles type-coerced field names (`body|caption`, `body|script`, `body|prompt`, `landing_headline|landing_page_headline`, etc.).
+  - Maps the bundle to one row per asset (10 asset types, max 33 rows + 1 hashtag-set row) and inserts everything in a single batch.
+  - Computes `scheduled_for` per wave: W1 −180d, W2 −120d, W3 −90d, W4 −60d, W5 −30d, W6 −14d, W7 −7d, W8 +7d from `event_campaigns.event_start_date`. Past dates are blanked so a human can reschedule.
+  - Detects banned vocabulary (`mlm`, `downline`, `network marketing`, `Travel Team Perks`, `guaranteed savings/income/earnings`) per case and tags the row's `verification_metadata.compliance_flag` so reviewers can spot them in the dashboard. Assets still insert as drafts — humans decide.
+  - Calls `verifyAIOutput({ jobId, output: <concatenated text bundle>, jobType: 'social-pack' })` when `ANTHROPIC_API_KEY` is present. Failures or missing key set `verification.skipped=true` with a reason; never blocks the insert path.
+- `src/app/api/admin/campaigns/generate-assets/route.ts` — POST endpoint guarded by `requireAdminUser()`. Zod-validates the body (`event_campaign_id` UUID required, optional `model_override`, optional `asset_types[]` from the canonical 10, optional `force_regenerate`). Returns 400 on invalid input, 404 when campaign not found, 502 on generation failure, 500 on unexpected throw, 200 with the full result on success or already-exists. `export const maxDuration = 60` so a Pro-plan deploy gets the full window; Hobby will still cap at 10s as documented.
+
+**Edited:**
+- `PROJECT_STATE_CURRENT.md` — this Phase 14D entry.
+- `BUILD_PROGRESS.md` — Phase 14D checklist + sub-tasks.
+
+**API contract:**
+```
+POST /api/admin/campaigns/generate-assets
+Auth: admin only (Supabase session cookie + admin_users row)
+Body:
+{
+  "event_campaign_id": "uuid",            // required
+  "model_override":   "anthropic/claude-haiku-4.5",  // optional
+  "asset_types":      ["social_post","email_body"],  // optional; default = all 10
+  "force_regenerate": false                // optional; default false
+}
+Returns 200:
+{
+  "ok": true,
+  "campaign_id": "uuid",
+  "campaign_name": "Trinidad Carnival 2027",
+  "generation_job_id": "uuid",             // ai_jobs row id
+  "asset_count": 33,
+  "asset_breakdown": { "social_post": 10, "short_form_script": 3, ... },
+  "schedule": [{ "asset_id":"uuid","asset_type":"social_post","wave":"W2","platform":"instagram","scheduled_for":"2026-..." }, ...],
+  "archived_count": 0,                     // > 0 only when force_regenerate=true
+  "verification": { "status":"approved","score":92,"skipped":false },
+  "warnings": [ ... ]                      // banned-term hits, parse warnings
+}
+```
+
+**Tables written to (after migrations 017-021 are applied):**
+- `ai_jobs` — one row per call (status, cost, tokens, model). Author = the admin user.
+- `ai_model_usage` — token / cost telemetry tied to the `ai_jobs.id`.
+- `ai_verification_logs` — populated only when the verifier runs (Anthropic key present + verifier didn't throw).
+- `campaign_assets` — up to 33 rows per call. Always `status='draft'`, `requires_human_approval=true`, `generation_job_id` linking back to `ai_jobs`.
+- `campaign_assets` (update) — only on `force_regenerate=true`: existing `status='draft'` rows for the same campaign are flipped to `status='archived'` before the new insert. Other statuses are never touched.
+
+**Intentionally NOT done in Phase 14D:**
+- No dashboard UI (Phase 14E).
+- No auto-push into `content_calendar` (Phase 14F).
+- No DB schema changes — all five Phase 14B migrations still apply unmodified.
+- No new cron job. The route is invoked manually from the dashboard or via curl.
+- No deployment from this session.
+
+**Risks:**
+- The route depends on Phase 14B migrations 017-021 being applied to Supabase prod. Until applied, the first POST will return a 502 with a "relation campaign_assets does not exist" error. Per Phase 14C notes, Leo is the one to apply the migrations.
+- One LLM call must produce the full ~33-asset JSON bundle. On Vercel Hobby's 10s function ceiling, slow models can timeout; `AI_MEDIUM_MODEL` (default Llama 3.3 70B) usually fits. If the model returns truncated/invalid JSON, the route returns a 502 with `unparseable model output` and inserts nothing — the raw text is preserved on the `ai_jobs` row for debugging.
+- The verifier runs on a concatenated text dump of the bundle, not on each asset individually. It catches brand-voice + banned-term issues across the bundle but can't pinpoint which asset is offending. `verification_metadata.compliance_flag` on individual rows backstops this for explicit banned terms.
+- Banned-term detection is substring-based and case-insensitive. False positives are possible (e.g. "downline" inside an unrelated word). The flag is advisory — humans approve or reject the asset.
+- Response payload can exceed 100 KB on a full 33-asset run. Acceptable for an admin tool; the dashboard in Phase 14E will paginate.
+
+### Phase 14D — exit criteria
+
+- [x] `src/lib/event-campaign-asset-generator.ts` created — loads campaign, generates bundle, parses JSON, archives drafts on regenerate, inserts assets, calls verifier when safe.
+- [x] `src/app/api/admin/campaigns/generate-assets/route.ts` created — admin-gated POST with Zod validation, 400/404/200/502/500 status mapping, `maxDuration=60`.
+- [x] Reuses existing `requireAdminUser`, `runAIJob`, `verifyAIOutput`, `createAdminClient` — no new auth, no new AI router, no new budget logic.
+- [x] Never auto-publishes; every asset inserted as `status='draft'` with `requires_human_approval=true`.
+- [x] Never writes to `content_calendar`. Never overwrites posted/scheduled/approved rows.
+- [x] Duplicate-prevention logic: returns `already_exists=true` when assets exist and `force_regenerate` is not set; archives only `status='draft'` rows when forced.
+- [x] `npx tsc --noEmit` passes.
+- [x] `npm run build` compiles cleanly; new route registered as `ƒ /api/admin/campaigns/generate-assets`.
+- [ ] `npm run lint` — not run; pre-existing ESLint v8/v9 flat-config breakage from the unfinished Phase 13 lint follow-up. Not a Phase 14D regression. Leo to complete the Phase 13 lint validation step before lint becomes meaningful.
+- [x] `PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md` updated.
+- [ ] Working tree committed and pushed (Leo to run the git commands at the end of this session).
+- [ ] **Leo to do:** apply Phase 14B migrations 017-021 to Supabase prod before exercising the route end-to-end.
+
+### Next recommended phase
+
+**Phase 14E — Dashboard Campaign Planner** (admin UI to list `event_campaigns`, drill into a campaign's asset bundle, and approve/reject `campaign_assets` drafts). Do not start until Phase 14D is committed/pushed and migrations are applied.

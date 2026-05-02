@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14C complete — research engine code in working tree)
-**Last code-shipping commit:** `8340a62` (Phase 14B campaign calendar schema migrations 017-021)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped · Phase 14B shipped · Phase 14C research engine in working tree
+**Last updated:** 2026-05-02 (Phase 14D complete — campaign asset generator API in working tree)
+**Last code-shipping commit:** `f4bae3a` (Phase 14C event research engine seeds scoring generator wired into weekly content cron)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A-14C shipped · Phase 14D asset generator API in working tree
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,9 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14C — Event Research Cron.** Three new files in `src/lib/` plus an integration patch into the existing `weekly-content` cron. No new Vercel cron (Hobby cap respected). Status defaults to `idea` and human approval is still required. Awaiting commit + push, and awaiting Leo's application of Phase 14B migrations 017-021 to Supabase prod.
+**Phase 14D — Campaign Generator API.** New library `src/lib/event-campaign-asset-generator.ts` and admin POST route `src/app/api/admin/campaigns/generate-assets/route.ts`. Loads an `event_campaigns` row, asks the OpenRouter medium-tier model for the full §5/§6 bundle, parses the JSON, optionally calls the existing Claude verifier, and inserts every asset into `campaign_assets` as a draft requiring human approval. No new schema, no new cron, no auto-publish, no `content_calendar` writes. Awaiting commit + push, and still depends on Phase 14B migrations 017-021 being applied to Supabase prod before the route can be exercised end-to-end.
 
-**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C.
+**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B/14C/14D. **Phase 14D note:** `npm run lint` was not run this session because the Phase 13 ESLint v9 + `@eslint/eslintrc` install hasn't happened yet — `eslint .` is invoked under v8 against a flat config it can't load. Not a Phase 14D regression.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -89,6 +89,18 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [x] **Phase 14D — Campaign Generator API** (code only, 2026-05-02)
+  - [x] `src/lib/event-campaign-asset-generator.ts` — server-only library. Loads campaign, builds the §5/§6 system+user prompt, calls `runAIJob` (medium-tier OpenRouter), parses JSON output (markdown-fence aware), maps to up to 33 `campaign_assets` rows across all 10 asset types, computes `scheduled_for` per wave (W1−180d, W2−120d, W3−90d, W4−60d, W5−30d, W6−14d, W7−7d, W8+7d), tags banned-vocab hits in `verification_metadata`, and calls the existing Claude verifier on the concatenated text bundle when `ANTHROPIC_API_KEY` is present.
+  - [x] `src/app/api/admin/campaigns/generate-assets/route.ts` — admin-gated POST. Zod validates `event_campaign_id` (required UUID), `model_override`, `asset_types[]`, `force_regenerate`. Returns 400/404/200/502/500. `maxDuration = 60`.
+  - [x] Reuses `requireAdminUser`, `runAIJob`, `verifyAIOutput`, `createAdminClient` — no new auth, no new AI router, no new budget logic. `AI_DAILY_BUDGET_LIMIT` / `AI_MONTHLY_BUDGET_LIMIT` enforced automatically.
+  - [x] Duplicate prevention: returns `{ already_exists:true, existing_count }` when non-archived/non-rejected assets already exist for the campaign and `force_regenerate` is not true. Never inserts a duplicate.
+  - [x] On `force_regenerate=true`, archives only `status='draft'` rows (double-filtered in code) before inserting. Posted, scheduled, approved, idea, rejected rows are never touched.
+  - [x] Every inserted row: `status='draft'`, `requires_human_approval=true`, `generation_job_id` linked to `ai_jobs`. Never auto-publishes; never writes to `content_calendar`.
+  - [x] `npx tsc --noEmit` passes.
+  - [x] `npm run build` compiles cleanly; new route registered as `ƒ /api/admin/campaigns/generate-assets`.
+  - [ ] `npm run lint` — not run; pre-existing Phase 13 lint config not yet validated by Leo. Phase 14D introduces no lint regression in either of its two new files.
+  - [ ] **Leo to do:** apply migrations 017-021 to Supabase prod (still pending from Phase 14C) before exercising the route end-to-end.
+  - [ ] **Leo to do:** run the git commands at the end of this session to commit and push Phase 14D.
 - [x] **Phase 14C — Event Research Cron** (code only, 2026-05-02)
   - [x] `src/lib/event-seeds.json` — 31 worldwide event seeds across all 17 required categories (Carnival, Cruise, Art & Culture, Sports, Music Festival, Business Conference, Family Reunion, Wedding Guest, Faith-Based, Youth Sports, Creator/Influencer, Diaspora/Back Home, Wellness Retreat, Luxury-on-a-Budget, No-Passport/Easy, Last-Minute, Seasonal/Shoulder)
   - [x] `src/lib/event-campaign-scoring.ts` — pure 1-100 scorer implementing the 10-dimension rubric in `VORTEX_EVENT_CAMPAIGN_SKILL.md` §9
