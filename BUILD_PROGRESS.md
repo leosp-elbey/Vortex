@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14A complete — markdown only; Phase 13 still awaiting Leo follow-ups before close)
-**Last code-shipping commit:** `04d397c` (Phase 13 stability layer)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A skill spec + Surge365 referral-link sweep in working tree
+**Last updated:** 2026-05-02 (Phase 14B complete — migration files only)
+**Last code-shipping commit:** `dd01930` (Phase 14A skill + Surge365 sweep)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped · Phase 14B migrations 017-021 in working tree
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,9 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14A — Destination/Event Campaign Skill.** Markdown-only deliverables shipped to working tree along with a code-side sweep of Surge365 signup CTAs to the canonical path-based URL `https://signup.surge365.com/leosp`. Awaiting commit + push.
+**Phase 14B — Campaign Calendar Schema.** Five Supabase migration files created (`017_create_event_campaigns.sql` → `021_create_campaign_schedule.sql`). Migrations not yet applied to Supabase prod — Leo runs `supabase db push` (or pastes into the Supabase SQL Editor) when ready. Awaiting commit + push.
 
-**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A.
+**Phase 13** remains `[~]` — code-side complete, awaiting Leo's three manual follow-ups (lint validation, `.env.local` value fixes, Vercel env audit). Independent of Phase 14A/14B.
 
 Phase 11 sub-tasks (all complete):
 - [x] Local typecheck + build verification (lint script broken — separate cleanup)
@@ -89,6 +89,14 @@ Phase 11 sub-tasks (all complete):
 - [x] **Phase 11 — Deployment prep & prod cutover** (commits `c361e8d` + `8e54262`, prod `dpl_qDc73T2dNmEmtQZPajwZpdAW6R6H`)
 - [x] **Phase 12.0 → 12.8 — Post-launch enhancements + audit fixes** (last commit `67d83c0`, 2026-04-30)
 - [x] **Strict-mode session-continuity layer** (commit `e256a13`, docs only — no code)
+- [x] **Phase 14B — Campaign Calendar Schema** (migration files only, 2026-05-02)
+  - [x] `supabase/migrations/017_create_event_campaigns.sql` — root campaign table (worldwide events, cruise add-on, scoring, lifecycle, approval, AI metadata, parent-campaign FK for yearly repeats, tracking URL template)
+  - [x] `supabase/migrations/018_create_campaign_assets.sql` — generated assets (10 asset types × 10 platforms, wave W1-W8, image/video source provenance, FK to existing `content_calendar`)
+  - [x] `supabase/migrations/019_create_campaign_scores.sql` — score history with 10-dimension breakdown JSONB
+  - [x] `supabase/migrations/020_create_event_sources.sql` — source registry (manual_seed/ics_feed/api/scrape/partner_feed/rss/other) with pull-status tracking
+  - [x] `supabase/migrations/021_create_campaign_schedule.sql` — schedule slots bridging assets to existing `content_calendar`
+  - [x] All five tables: `gen_random_uuid()` PKs, `update_updated_at` trigger, RLS via `admin_users`, indexes on hot columns, GIN index on `event_campaigns.categories`
+  - [ ] **Leo to do:** apply migrations via `supabase db push` (or paste each file into Supabase SQL Editor in order 017 → 021) before starting Phase 14C
 - [x] **Phase 14A — Destination/Event Campaign Skill** (markdown only, 2026-05-02)
   - [x] `VORTEX_EVENT_CAMPAIGN_SKILL.md` created (purpose, formula, 32 categories, 8 timing waves, output spec, cruise add-on, compliance rules, scoring rubric, 15 seed campaigns)
   - [x] `EVENT_CAMPAIGN_ROADMAP.md` created (Phases 14A-14H with exit criteria)

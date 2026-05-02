@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14A complete — markdown only; Phase 13 still awaiting Leo follow-ups before close)
-**Last known good commit:** `04d397c` — "Phase 13: stability layer env audit and lint config"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A changes are NOT deployed yet by design)
+**Last updated:** 2026-05-02 (Phase 14B complete — migration files only; not yet applied to Supabase)
+**Last known good commit:** `dd01930` — "Phase 14A: add destination event campaign skill and correct Surge365 signup CTAs to leosp"
+**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B changes are NOT deployed yet by design)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A skill spec + Surge365 referral-link sweep shipped to working tree
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B migrations 017-021 in working tree
 
 ---
 
@@ -219,3 +219,35 @@ Markdown-only phase. No database, no automation, no deploy. The skill file is th
 ### Next recommended phase
 
 **Phase 14B — Campaign Calendar Schema** (Supabase migrations for `event_campaigns`, `campaign_assets`, `campaign_scores`, `event_sources`, `campaign_schedule`). Do not start until explicitly authorized in a new session.
+
+---
+
+## Phase 14B — Campaign Calendar Schema (DONE 2026-05-02)
+
+Migration files only. Nothing applied to Supabase yet — Leo runs `supabase db push` (or pastes the SQL into the Supabase SQL Editor) when ready. No app code, no UI, no automation.
+
+**Created (5 migration files under `supabase/migrations/`):**
+- `017_create_event_campaigns.sql` — root campaign table. Worldwide events, cruise add-on fields, scoring, lifecycle status (`idea/draft/approved/scheduled/active/archived`), human-approval gate, AI generation + Claude verification metadata, parent-campaign FK for yearly repeatability, tracking URL template.
+- `018_create_campaign_assets.sql` — every generated asset (social_post, short_form_script, email_subject, email_body, dm_reply, hashtag_set, image_prompt, video_prompt, landing_headline, lead_magnet). Wave (W1-W8), platform, image source (pexels/openai/heygen/manual/unsplash/other), video source, scheduled_for, posted_at, lifecycle, approval, AI metadata, FK to existing `content_calendar`.
+- `019_create_campaign_scores.sql` — score history per (campaign × week). Top-line 1-100 score plus 10-dimension breakdown JSONB matching the rubric in `VORTEX_EVENT_CAMPAIGN_SKILL.md` §9.
+- `020_create_event_sources.sql` — registry of event-data sources (manual_seed/ics_feed/api/scrape/partner_feed/rss/other). Pull-frequency, last-pull status, non-sensitive integration metadata only (no secrets).
+- `021_create_campaign_schedule.sql` — joins `campaign_assets` to a calendar slot. Platform, scheduled_for, status (pending/queued/posted/skipped/failed/cancelled), retry_count, FK to existing `content_calendar`.
+
+**Conventions followed (matches existing migrations 001-016):**
+- UUID primary keys via `gen_random_uuid()`
+- `IF NOT EXISTS` and `DROP IF EXISTS` for idempotency
+- `update_updated_at()` trigger on every mutable table (defined in `001_create_contacts.sql`)
+- RLS enabled with the standard `Admins full access <table>` policy gated on `admin_users`
+- All FKs have explicit `ON DELETE` semantics (CASCADE for parent-child, SET NULL for soft references)
+- Indexes on hot lookup columns (status, scheduled_for, score, FK columns) and a GIN index on `event_campaigns.categories`
+
+**Risks logged for Phase 14B → 14C handoff:**
+- Migrations are file-only; nothing applied to Supabase yet. Phase 14C cannot run before Leo applies the SQL.
+- `campaign_assets.content_calendar_id` and `campaign_schedule.content_calendar_id` reference `content_calendar(id)`. If Phase 14F ever changes that table's PK type, both FKs break — keep `content_calendar.id` as UUID.
+- `categories` is `TEXT[]` with no DB-level CHECK against the 32-category list. Validation happens in app code (Phase 14D). The skill spec is the source of truth.
+- `event_year` is hard-bounded to 2024-2099. Out-of-range data must be normalized before insert.
+- `event_sources.credentials_metadata` is for non-sensitive integration shape only. Secrets stay in Vercel env vars; never write API keys here.
+
+### Next recommended phase
+
+**Phase 14C — Event Research Cron** (weekly job that pulls upcoming events from `event_sources` rows, scores them, writes `event_campaigns` candidates). Do not start until Phase 14B migrations are applied to Supabase prod and explicitly authorized in a new session.
