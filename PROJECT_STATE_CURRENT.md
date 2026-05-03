@@ -1,10 +1,29 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14E.1 media-clarity patch in working tree on top of the timeout patch; tests pass; not deployed yet)
-**Last known good commit:** `b7fc8ad` — "Phase 14E: dashboard campaign planner UI and admin campaign asset routes"
-**Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D + 14E changes are NOT deployed yet by design)
+**Last updated:** 2026-05-02 (Phase 14E + timeout patch + 14E.1 media-clarity patch all shipped to prod and smoke-tested. Phase 14F starting in this session.)
+**Last known good commit:** `a91acd3` — "Phase 14E.1: campaign dashboard media clarity image video prompt placeholders"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14E.1 deployed and verified**; Supabase migrations 017-022 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · **Read-only system audit complete** (see `SYSTEM_AUDIT_PHASE_14_STATUS.md`)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · **Phase 14F starting** (push approved campaign assets into `content_calendar`)
+
+---
+
+## Phase 14E Production Smoke Test (PASSED 2026-05-02)
+
+End-to-end verification on prod after the 14E timeout patch + 14E.1 media-clarity patch were deployed:
+- ✅ `/dashboard/campaigns` loads and displays event campaigns from the live Supabase tables
+- ✅ Phase 14C cron-driven research seeded 6 event campaigns (FIFA World Cup 2026 / F1 Miami GP / Super Bowl Weekend / Paris Fashion Week / Art Basel Miami / NBA All-Star Weekend) with `campaign_scores` rows
+- ✅ Selected **Art Basel Miami Beach 2026** (`7ca6bc3f-5cb2-4bdf-9883-1470a31c8a8f`) and clicked Generate Asset Bundle
+- ✅ 4-batch sequential flow ran cleanly under Vercel Hobby's 10s ceiling: Llama 3.3 70B with `skip_verifier: true`
+- ✅ **33 draft `campaign_assets` rows inserted** across all 10 asset types, asset-type-aware dedup confirmed working
+- ✅ All 10 asset-group sections render with correct labels (Social Posts / Short-Form Video Scripts / Email Subjects / Email Bodies / DM Replies / Hashtag Sets / Image Prompts / Video Prompts / Landing Headlines / Lead Magnets)
+- ✅ Image Prompts and Video Prompts sections show italic helper text and per-row "🖼️ No image generated yet" / "🎬 No video generated yet" placeholders
+- ✅ Approve / Reject actions confirmed working with correct state transitions and optimistic-concurrency guard
+
+**Phase 14F is now safe to start** — all three prerequisites from `SYSTEM_AUDIT_PHASE_14_STATUS.md` §9 are green:
+1. ✅ Migrations 017-021 applied to Supabase prod
+2. ✅ Phase 14E (+ patches) deployed to Vercel
+3. ✅ Approval surface exercised end-to-end against the migrated DB
 
 ---
 
@@ -552,3 +571,59 @@ This patch is dashboard-only. No API change, no schema change, no Pexels / OpenA
 - Approve / reject / force-regenerate semantics from Phase 14E and the timeout patch are unchanged.
 - API response shape from `GET /api/admin/campaigns/[id]` is unchanged.
 - Existing assets, jobs, and verification logs are untouched.
+
+---
+
+## Phase 14F — Push Approved Campaign Assets into `content_calendar` (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + migration apply + deploy)
+
+Connects approved `campaign_assets` rows to the existing `content_calendar` table so the rest of the publishing pipeline (Twitter / Facebook / Instagram poster routes; the `/dashboard/content` review surface) can pick them up. Strictly an admin-triggered, idempotent, human-approved push. **Never auto-posts.** Never calls OpenRouter / Claude / Pexels / OpenAI / HeyGen.
+
+**Created:**
+- `supabase/migrations/022_add_campaign_asset_link_to_content_calendar.sql` — adds nullable `content_calendar.campaign_asset_id UUID REFERENCES campaign_assets(id) ON DELETE SET NULL`. Adds partial unique index `idx_content_calendar_campaign_asset_unique ON content_calendar(campaign_asset_id) WHERE campaign_asset_id IS NOT NULL` — at most one calendar row per campaign asset (server-side dedup) while leaving legacy NULL rows alone. Idempotent: every operation uses `IF NOT EXISTS`. Existing rows are unaffected (column nullable, defaults NULL).
+- `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts` — admin-gated POST. Optional body `{ scheduled_for?: ISO, platform?: string }`. Loads asset → checks `status='approved'` → checks asset_type is in the calendar-pushable set (today: `social_post` only) → resolves and validates target platform against `content_calendar.platform` CHECK (`instagram|facebook|tiktok|twitter`) → validates non-empty body for the NOT NULL `caption` → derives `week_of` (Monday UTC) from override / asset.scheduled_for / now → INSERTs `content_calendar` row with `status='draft'` and `campaign_asset_id` set → UPDATEs `campaign_assets.content_calendar_id` to link back. Two layers of idempotency: forward link via `campaign_assets.content_calendar_id` (existing column from migration 018) and back link via `content_calendar.campaign_asset_id`. On a `23505` race, requeries the winning row and returns `{ ok:true, already_pushed:true }`. Partial-success path (calendar row exists but forward-link update failed) returns `{ ok:true, partial:true, warning }` so a re-click cleanly repairs the link.
+- (No new file) — `src/app/dashboard/campaigns/page.tsx` extended with a new dashboard surface for the push action.
+
+**Edited:**
+- `src/app/dashboard/campaigns/page.tsx`
+  - `AssetRow` gains optional `content_calendar_id?: string | null` (forward-compat — the campaign-detail API does not select this column today; see "Risks" below).
+  - New top-level constants `CALENDAR_PUSHABLE_ASSET_TYPES = {'social_post'}` and `CALENDAR_PLATFORMS = {'instagram','facebook','tiktok','twitter'}` mirror the route's allowlists so the UI only shows the button where it will work.
+  - New `pushedAssetIds: Set<string>` component state — tracks assets pushed during the current session so the badge appears immediately after a successful push, since the campaign-detail API does not return `content_calendar_id` today.
+  - New `handlePushToCalendar(assetId)` — POSTs to the new route, surfaces result via toast (`'Pushed to content calendar as draft'` / `'Already on the content calendar'` / partial-link repair message), refreshes the campaign detail.
+  - `CampaignDetailPanel`, `AssetGroup`, and `AssetCard` props extended with `pushedAssetIds`, `onPushToCalendar`, and (on `AssetCard`) the derived `pushedToCalendar` boolean.
+  - `AssetCard` action row now renders:
+    - `📅 Push to Calendar` button — only when `asset.status === 'approved'` AND asset_type is in the pushable allowlist AND not already pushed.
+    - `✓ Added to Calendar` badge — when the asset is in the local `pushedAssetIds` set OR the API ever starts returning `content_calendar_id`. Hides the Push button.
+    - Muted hint "Calendar push not yet supported for {asset_type}" — when the asset is approved but its type is not in the allowlist (gives the operator a reason rather than silently hiding the action).
+  - Approve / reject / generate flows unchanged.
+
+**Supported asset types this phase:** `social_post` only. Email / DM / hashtag-set / landing-headline / lead-magnet are explicitly out of scope because `content_calendar.platform` CHECK only allows the four social platforms. The route returns a specific 400 with the project-stipulated message ("This asset type is not yet supported for calendar push.") for unsupported types. `image_prompt` / `video_prompt` are deferred to a future media-generation phase.
+
+**Idempotency / duplicate prevention:**
+- Forward-link short-circuit: if `campaign_assets.content_calendar_id` is already set and the row exists, return it as `already_pushed: true` without inserting.
+- Back-link short-circuit: if a `content_calendar` row with `campaign_asset_id = assetId` exists (even when the forward link is missing), return that row and repair the forward link.
+- Partial unique index on `content_calendar.campaign_asset_id` enforces uniqueness at the DB level — a race-window double-insert returns `23505`; the route catches that, requeries, and returns the winning row.
+- Posted `content_calendar` rows are never modified by this code path; the route only INSERTs and UPDATEs `content_calendar_id` on the asset.
+
+**Behavioral guarantees:**
+- Never auto-posts (the route only writes `status='draft'`; the per-platform poster routes still require `status='approved'` set manually on `/dashboard/content`).
+- Never modifies posted, scheduled, or rejected `content_calendar` rows.
+- Never modifies asset status; the asset stays `approved` after push.
+- Never calls OpenRouter / Claude / Pexels / OpenAI / HeyGen.
+- Never touches `campaign_assets.body`, `hashtags`, or `verification_metadata`.
+
+**Tests run this session:**
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS; new route registered as `ƒ /api/admin/campaigns/assets/[assetId]/push-to-calendar`. `Compiled successfully in 15.3s`.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated to this patch.
+
+**Risks:**
+- Migration 022 must be applied to Supabase prod **before** the new route is exercised. Until applied, the back-link lookup in step 5 of the route returns "column does not exist", and the `INSERT ... campaign_asset_id` in step 9 fails. The forward-link lookup in step 4 still works because that column exists from migration 018.
+- The campaign-detail API (`GET /api/admin/campaigns/[id]`) does not select `campaign_assets.content_calendar_id` today. The "✓ Added to Calendar" badge only renders for assets pushed in the current browser session OR after a future change to the detail API. This is a documented trade-off; the route is fully idempotent so a stale "Push to Calendar" button on a previously-pushed asset is safe to click — it returns `already_pushed: true`.
+- `image_prompt` / `video_prompt` rows currently store only the prompt text. Pushing to `content_calendar` is intentionally blocked for these because the existing posters expect a finished `image_url` / video. A later media-generation phase will produce the actual files first, then surface a separate path.
+- Operators can still manually approve a `content_calendar` row on `/dashboard/content` and trigger a poster route. That is the existing 12.x flow and is not part of Phase 14F's surface — Phase 14F just lands the row as a draft.
+
+**Leo to do:**
+- [ ] Commit + push the patch (commands at the end of the session response).
+- [ ] Apply migration 022 to Supabase prod (`supabase db push` or paste the SQL into the SQL Editor). **Required before the new route can be exercised.**
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → approve a `social_post` asset → click `📅 Push to Calendar` → verify a `content_calendar` row with `status='draft'` and the asset's caption / hashtags / platform → confirm the badge updates → click again to confirm idempotency.

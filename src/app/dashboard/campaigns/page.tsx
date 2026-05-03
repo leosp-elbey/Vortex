@@ -61,6 +61,17 @@ const GENERATION_BATCHES: Array<{ label: string; types: string[] }> = [
 ]
 const BATCH_MODEL_OVERRIDE = 'meta-llama/llama-3.3-70b-instruct'
 
+// Phase 14F — Push to Calendar.
+// Today the existing content_calendar.platform CHECK only accepts the four social
+// platforms below, so only `social_post` assets carrying one of them can land on the
+// calendar. Email / DM / headline / lead-magnet / hashtag-set / image-prompt /
+// video-prompt assets are explicitly out of scope until a future phase reshapes
+// content_calendar (or introduces a separate planning table). The route enforces this
+// server-side; the dashboard mirrors the rule so the operator only sees the Push button
+// where it will actually work.
+const CALENDAR_PUSHABLE_ASSET_TYPES = new Set(['social_post'])
+const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok', 'twitter'])
+
 interface CampaignListRow {
   id: string
   campaign_name: string
@@ -124,6 +135,7 @@ interface AssetRow {
   body: string | null
   image_url?: string | null
   video_url?: string | null
+  content_calendar_id?: string | null
   hashtags: string[] | null
   status: string
   scheduled_for: string | null
@@ -167,6 +179,12 @@ export default function CampaignsPage() {
   const [generating, setGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number; label: string } | null>(null)
   const [actionInFlight, setActionInFlight] = useState<string | null>(null)
+  // Local-only set of asset IDs that have been pushed to content_calendar this session.
+  // The campaign-detail API does not return campaign_assets.content_calendar_id today, so
+  // this client-side set is what powers the "Added to Calendar" badge between page loads.
+  // After a successful push we add the id; the same badge will also render whenever the
+  // API starts returning content_calendar_id without further dashboard changes.
+  const [pushedAssetIds, setPushedAssetIds] = useState<Set<string>>(new Set())
   const { toasts, show } = useToast()
 
   const loadList = useCallback(async () => {
@@ -298,6 +316,38 @@ export default function CampaignsPage() {
     }
   }
 
+  const handlePushToCalendar = async (assetId: string) => {
+    setActionInFlight(assetId)
+    try {
+      const res = await fetch(`/api/admin/campaigns/assets/${assetId}/push-to-calendar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        throw new Error(json.error || 'Push to calendar failed')
+      }
+      setPushedAssetIds(prev => {
+        const next = new Set(prev)
+        next.add(assetId)
+        return next
+      })
+      if (json.already_pushed) {
+        show('Already on the content calendar', 'info')
+      } else if (json.partial) {
+        show(json.warning || 'Calendar row created; click again to repair the link', 'info')
+      } else {
+        show('Pushed to content calendar as draft')
+      }
+      if (selectedId) await loadDetail(selectedId)
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Push to calendar failed', 'error')
+    } finally {
+      setActionInFlight(null)
+    }
+  }
+
   const handleReject = async (assetId: string) => {
     const reason = window.prompt('Reason for rejection (optional)') ?? ''
     setActionInFlight(assetId)
@@ -361,9 +411,11 @@ export default function CampaignsPage() {
             generating={generating}
             generationProgress={generationProgress}
             actionInFlight={actionInFlight}
+            pushedAssetIds={pushedAssetIds}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
             onReject={handleReject}
+            onPushToCalendar={handlePushToCalendar}
           />
         </div>
       </div>
@@ -530,18 +582,22 @@ function CampaignDetailPanel({
   generating,
   generationProgress,
   actionInFlight,
+  pushedAssetIds,
   onGenerate,
   onApprove,
   onReject,
+  onPushToCalendar,
 }: {
   detail: DetailResponse | null
   loading: boolean
   generating: boolean
   generationProgress: { current: number; total: number; label: string } | null
   actionInFlight: string | null
+  pushedAssetIds: Set<string>
   onGenerate: (id: string, force: boolean) => void
   onApprove: (assetId: string) => void
   onReject: (assetId: string) => void
+  onPushToCalendar: (assetId: string) => void
 }) {
   if (loading) {
     return <div className="bg-white rounded-xl shadow-sm p-6 text-sm text-gray-400">Loading campaign…</div>
@@ -688,8 +744,10 @@ function CampaignDetailPanel({
                 helperText={ASSET_TYPE_HELPER_TEXT[type]}
                 assets={grouped[type]}
                 actionInFlight={actionInFlight}
+                pushedAssetIds={pushedAssetIds}
                 onApprove={onApprove}
                 onReject={onReject}
+                onPushToCalendar={onPushToCalendar}
               />
             ))}
           </div>
@@ -735,16 +793,20 @@ function AssetGroup({
   helperText,
   assets,
   actionInFlight,
+  pushedAssetIds,
   onApprove,
   onReject,
+  onPushToCalendar,
 }: {
   assetType: string
   title: string
   helperText?: string
   assets: AssetRow[]
   actionInFlight: string | null
+  pushedAssetIds: Set<string>
   onApprove: (id: string) => void
   onReject: (id: string) => void
+  onPushToCalendar: (id: string) => void
 }) {
   return (
     <div>
@@ -763,8 +825,10 @@ function AssetGroup({
             asset={a}
             assetType={assetType}
             disabled={actionInFlight === a.id}
+            pushedToCalendar={pushedAssetIds.has(a.id) || !!a.content_calendar_id}
             onApprove={onApprove}
             onReject={onReject}
+            onPushToCalendar={onPushToCalendar}
           />
         ))}
       </div>
@@ -776,14 +840,18 @@ function AssetCard({
   asset,
   assetType,
   disabled,
+  pushedToCalendar,
   onApprove,
   onReject,
+  onPushToCalendar,
 }: {
   asset: AssetRow
   assetType: string
   disabled: boolean
+  pushedToCalendar: boolean
   onApprove: (id: string) => void
   onReject: (id: string) => void
+  onPushToCalendar: (id: string) => void
 }) {
   const meta = (asset.verification_metadata ?? {}) as Record<string, unknown>
   const complianceFlag = typeof meta.compliance_flag === 'string' ? (meta.compliance_flag as string) : null
@@ -793,6 +861,13 @@ function AssetCard({
   const canApprove = asset.status === 'draft' || asset.status === 'idea'
   const canReject = asset.status === 'draft' || asset.status === 'idea' || asset.status === 'approved'
   const isPosted = asset.status === 'posted'
+
+  // Phase 14F: Push-to-Calendar gating. Only shown for 'approved' assets whose
+  // type is in the calendar-pushable allowlist (today: social_post only). Hidden
+  // when the asset has already been pushed (badge shown instead) and never shown
+  // for rejected/draft/posted/etc.
+  const isCalendarPushable = CALENDAR_PUSHABLE_ASSET_TYPES.has(assetType)
+  const canPushToCalendar = asset.status === 'approved' && isCalendarPushable && !pushedToCalendar
 
   // Media display: image_url and video_url are nullable on the schema. Today
   // image_prompt / video_prompt rows ship without a populated URL because the
@@ -850,6 +925,29 @@ function AssetCard({
             >
               ✕ Reject
             </button>
+          )}
+          {canPushToCalendar && (
+            <button
+              onClick={() => onPushToCalendar(asset.id)}
+              disabled={disabled}
+              title="Push this approved asset into the content calendar as a draft (does not auto-post)"
+              className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 disabled:opacity-50 font-medium"
+            >
+              📅 Push to Calendar
+            </button>
+          )}
+          {pushedToCalendar && (
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">
+              ✓ Added to Calendar
+            </span>
+          )}
+          {asset.status === 'approved' && !isCalendarPushable && (
+            <span
+              className="text-[11px] text-gray-400"
+              title="Calendar push is only available for social_post assets in this phase. Email / DM / headline / lead-magnet / hashtag-set / image-prompt / video-prompt assets are out of scope until a future content_calendar phase."
+            >
+              Calendar push not yet supported for {assetType.replace(/_/g, ' ')}
+            </span>
           )}
           {isPosted && <span className="text-[11px] text-gray-400">Posted — read only</span>}
         </div>

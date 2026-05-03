@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14E.1 media-clarity patch stacked on the timeout patch in working tree; tests pass; not deployed yet)
-**Last code-shipping commit:** `b7fc8ad` (Phase 14E dashboard campaign planner)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phases 14A-14E shipped through `b7fc8ad` and deployed; **Phase 14E Timeout Patch in working tree, awaiting commit + deploy**.
+**Last updated:** 2026-05-02 (Phase 14F starting — migrations 017-021 applied, 14E flow smoke-tested on prod, Art Basel generated 33 draft assets, approve/reject verified)
+**Last code-shipping commit:** `a91acd3` (Phase 14E.1 media-clarity)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14E.1 deployed and verified on prod** · **Phase 14F starting** (approved `campaign_assets` → `content_calendar` push)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,37 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14E.1 Campaign Dashboard Media Clarity Patch (in working tree, 2026-05-02 — typecheck + build pass; stacked on the Phase 14E timeout patch; awaiting commit + deploy).**
+**Phase 14F — Push Approved Campaign Assets into `content_calendar` (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + migration apply + deploy).**
+
+Phases 14E timeout patch + 14E.1 media-clarity have been committed (`5037a6c` + `a91acd3`), deployed to prod, and smoke-tested end-to-end — Art Basel generated 33 draft assets across the 4 batches, all asset-group sections render with helper text and prompt placeholders, approve/reject works. Phase 14F is now safe to start (migrations 017-021 applied, code deployed, surface validated).
+
+**Patch applied:**
+- [x] `supabase/migrations/022_add_campaign_asset_link_to_content_calendar.sql` — adds nullable `content_calendar.campaign_asset_id` FK + partial unique index. Idempotent. Existing rows unaffected.
+- [x] `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts` — admin-gated POST. Loads asset, checks `status='approved'`, validates asset_type ∈ pushable allowlist (today: `social_post`), validates platform ∈ {`instagram`,`facebook`,`tiktok`,`twitter`}, validates non-empty body, derives `week_of` from override / asset.scheduled_for / now, INSERTs `content_calendar` row with `status='draft'`, links the back-pointer on the asset. Two layers of idempotency (forward link via `campaign_assets.content_calendar_id`, back link via `content_calendar.campaign_asset_id`); `23505` race recovery; partial-success path for failed forward-link update. Returns `{ ok, already_pushed?, partial?, content_calendar }`.
+- [x] `src/app/dashboard/campaigns/page.tsx` — adds `📅 Push to Calendar` button (only for approved + supported assets), `✓ Added to Calendar` badge (driven by client-session set + future API support of `content_calendar_id`), muted hint when calendar push isn't supported for an approved asset's type. New `handlePushToCalendar` POSTs the route, surfaces idempotency / partial-success messages, refreshes the campaign detail.
+
+**Supported asset types this phase:** `social_post` only. Other types return 400 with `"This asset type is not yet supported for calendar push."` because `content_calendar.platform` CHECK only allows the four social platforms.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — compiles cleanly; new route registered as `ƒ /api/admin/campaigns/assets/[assetId]/push-to-calendar`
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees:**
+- Never auto-posts (calendar row lands as `status='draft'`; per-platform posters still require `status='approved'` set on `/dashboard/content`).
+- Never modifies posted/scheduled/rejected `content_calendar` rows.
+- Never modifies asset status; asset stays `approved` after push.
+- Never calls OpenRouter / Claude / Pexels / OpenAI / HeyGen.
+
+**Leo to do:**
+- [ ] Apply migration 022 to Supabase prod (`supabase db push` or paste SQL Editor). **Required before the route works.**
+- [ ] Commit + push (commands in the session response).
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: open Art Basel → approve a social_post → click Push to Calendar → confirm a draft `content_calendar` row with caption / hashtags / platform → click again to confirm idempotency.
+
+---
+
+## Phase 14E.1 Campaign Dashboard Media Clarity Patch (in working tree, 2026-05-02 — typecheck + build pass; stacked on the Phase 14E timeout patch; awaiting commit + deploy).**
 
 After the timeout patch let Art Basel generate 33 draft assets, operator feedback surfaced one residual UX gap: `image_prompt` / `video_prompt` rows render only as text and look incomplete because no actual image/video file is attached yet. This patch makes the prompt-vs-finished-media distinction explicit in the UI without touching the API, schema, or any media generation pipeline.
 
