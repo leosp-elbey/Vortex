@@ -13,7 +13,7 @@ const STATUS_OPTIONS = ['', 'idea', 'draft', 'approved', 'scheduled', 'active', 
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
   social_post: 'Social Posts',
-  short_form_script: 'Short-Form Scripts',
+  short_form_script: 'Short-Form Video Scripts',
   email_subject: 'Email Subjects',
   email_body: 'Email Bodies',
   dm_reply: 'DM Replies',
@@ -22,6 +22,17 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
   video_prompt: 'Video Prompts',
   landing_headline: 'Landing Headlines',
   lead_magnet: 'Lead Magnets',
+}
+
+// Helper text shown under media-related asset groups so operators understand the
+// asset is a *prompt*, not a finished image/video. Actual media is produced in a
+// later phase when assets are pushed to the content calendar (Pexels / OpenAI image
+// gen / HeyGen). Leaving this null/undefined means no helper text for that group.
+const ASSET_TYPE_HELPER_TEXT: Record<string, string | undefined> = {
+  image_prompt:
+    'These are image generation/fetch instructions. Actual images are created later when assets are pushed to the content calendar.',
+  video_prompt:
+    'These are video generation instructions. Actual videos are created later through the video workflow.',
 }
 
 const ASSET_TYPE_ORDER = [
@@ -111,6 +122,8 @@ interface AssetRow {
   wave: string | null
   platform: string | null
   body: string | null
+  image_url?: string | null
+  video_url?: string | null
   hashtags: string[] | null
   status: string
   scheduled_for: string | null
@@ -670,7 +683,9 @@ function CampaignDetailPanel({
             {ASSET_TYPE_ORDER.filter(t => grouped[t]?.length).map(type => (
               <AssetGroup
                 key={type}
+                assetType={type}
                 title={ASSET_TYPE_LABELS[type] ?? type}
+                helperText={ASSET_TYPE_HELPER_TEXT[type]}
                 assets={grouped[type]}
                 actionInFlight={actionInFlight}
                 onApprove={onApprove}
@@ -715,13 +730,17 @@ function ScorePanel({ score }: { score: ScoreRow }) {
 }
 
 function AssetGroup({
+  assetType,
   title,
+  helperText,
   assets,
   actionInFlight,
   onApprove,
   onReject,
 }: {
+  assetType: string
   title: string
+  helperText?: string
   assets: AssetRow[]
   actionInFlight: string | null
   onApprove: (id: string) => void
@@ -729,14 +748,20 @@ function AssetGroup({
 }) {
   return (
     <div>
-      <h4 className="text-sm font-bold text-gray-700 mb-2">
+      <h4 className="text-sm font-bold text-gray-700 mb-1">
         {title} <span className="text-xs text-gray-400 font-normal">({assets.length})</span>
       </h4>
+      {helperText && (
+        <p className="text-xs text-gray-500 italic mb-2 max-w-prose">
+          {helperText}
+        </p>
+      )}
       <div className="space-y-2">
         {assets.map(a => (
           <AssetCard
             key={a.id}
             asset={a}
+            assetType={assetType}
             disabled={actionInFlight === a.id}
             onApprove={onApprove}
             onReject={onReject}
@@ -749,11 +774,13 @@ function AssetGroup({
 
 function AssetCard({
   asset,
+  assetType,
   disabled,
   onApprove,
   onReject,
 }: {
   asset: AssetRow
+  assetType: string
   disabled: boolean
   onApprove: (id: string) => void
   onReject: (id: string) => void
@@ -766,6 +793,17 @@ function AssetCard({
   const canApprove = asset.status === 'draft' || asset.status === 'idea'
   const canReject = asset.status === 'draft' || asset.status === 'idea' || asset.status === 'approved'
   const isPosted = asset.status === 'posted'
+
+  // Media display: image_url and video_url are nullable on the schema. Today
+  // image_prompt / video_prompt rows ship without a populated URL because the
+  // generator only writes the prompt text — Pexels/OpenAI/HeyGen run in a later
+  // phase. Show a small preview when a URL is set; show a clear "not generated
+  // yet" placeholder for image_prompt/video_prompt rows so the operator
+  // understands the asset is a brief, not a finished file.
+  const imageUrl = typeof asset.image_url === 'string' && asset.image_url ? asset.image_url : null
+  const videoUrl = typeof asset.video_url === 'string' && asset.video_url ? asset.video_url : null
+  const isImagePromptRow = assetType === 'image_prompt'
+  const isVideoPromptRow = assetType === 'video_prompt'
 
   return (
     <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
@@ -819,6 +857,41 @@ function AssetCard({
       <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">
         {previewBody(asset.body)}
       </p>
+      {imageUrl && (
+        <div className="mt-2">
+          {/* Use plain <img> so existing Supabase Storage / Pexels URLs render without
+              configuring next/image remote patterns for new hosts. Capped at h-32 so
+              the preview stays compact in the asset list. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt="Asset preview"
+            className="max-h-32 rounded border border-gray-200 object-cover"
+          />
+        </div>
+      )}
+      {!imageUrl && isImagePromptRow && (
+        <p className="mt-2 text-xs text-gray-500 italic">
+          🖼️ No image generated yet. This row holds the prompt; the actual image will be created during the content-calendar push.
+        </p>
+      )}
+      {videoUrl && (
+        <p className="mt-2 text-xs">
+          <a
+            href={videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#FF6B35] underline hover:no-underline"
+          >
+            ▶ View generated video
+          </a>
+        </p>
+      )}
+      {!videoUrl && isVideoPromptRow && (
+        <p className="mt-2 text-xs text-gray-500 italic">
+          🎬 No video generated yet. This row holds the prompt; the actual video will be created during the video workflow.
+        </p>
+      )}
       {asset.hashtags && asset.hashtags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {asset.hashtags.map(tag => (

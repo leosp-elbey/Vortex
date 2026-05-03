@@ -1,6 +1,6 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14E timeout patch in working tree — type-aware dedup + 4-batch dashboard loop + skip_verifier; not deployed yet)
+**Last updated:** 2026-05-02 (Phase 14E.1 media-clarity patch in working tree on top of the timeout patch; tests pass; not deployed yet)
 **Last known good commit:** `b7fc8ad` — "Phase 14E: dashboard campaign planner UI and admin campaign asset routes"
 **Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D + 14E changes are NOT deployed yet by design)
 **Branch:** `main`
@@ -518,3 +518,37 @@ This patch keeps the existing route surface but makes the dashboard call it in 4
 **Pre-existing orphaned `ai_jobs` from the failed Art Basel attempt:** still in `running` state. Run the cleanup SQL from `SYSTEM_AUDIT_PHASE_14_STATUS.md` (line 11 of the "Recommended Cleanup" block) before retrying. Cosmetic only — does not block the retry.
 
 **Safe to retry Art Basel after deploy:** yes. The pre-deploy attempt inserted 0 `campaign_assets` rows (verified by code path; insert is a single batch at the very end of `generateCampaignAssets`). After deploy + cleanup-SQL, clicking Generate Asset Bundle again will run the 4-batch flow against Llama 3.3 70B with no verifier — each call fits in ~5-8s on the cheap model based on the weekly-content cron's measured ~5s for a 28-post bundle.
+
+---
+
+## Phase 14E.1 — Campaign Dashboard Media Clarity Patch (in working tree, 2026-05-02 — not yet committed/deployed)
+
+After the Phase 14E timeout patch landed, Art Basel Miami Beach 2026 generated 33 draft assets cleanly across the 4 batches. Operator confusion surfaced one residual UX gap: `image_prompt` and `video_prompt` rows are *prompts*, not generated media. The dashboard rendered just the prompt text with no indicator that no image/video had been produced yet, which read as "broken" rather than "expected for this phase."
+
+This patch is dashboard-only. No API change, no schema change, no Pexels / OpenAI / HeyGen calls.
+
+**Edited:**
+- `src/app/dashboard/campaigns/page.tsx`
+  - `AssetRow` interface gained optional `image_url?: string | null` and `video_url?: string | null`. The detail API does not currently select these columns, so they will be `undefined` at runtime; the UI degrades gracefully.
+  - `ASSET_TYPE_LABELS.short_form_script` relabelled "Short-Form Video Scripts" (matches §6 wording).
+  - New `ASSET_TYPE_HELPER_TEXT` map keyed by asset type; `image_prompt` and `video_prompt` carry the operator-facing copy ("These are image generation/fetch instructions. Actual images are created later when assets are pushed to the content calendar." / "These are video generation instructions. Actual videos are created later through the video workflow.").
+  - `AssetGroup` accepts `assetType: string` and `helperText?: string`. The italic helper text renders under the group title when set; otherwise the group is unchanged.
+  - `AssetCard` accepts `assetType: string`. Body of the card now renders a media block:
+    - If `asset.image_url` is set: a `<img>` preview capped at `max-h-32`, rounded, with object-cover. Plain `<img>` (not `next/image`) so any future Pexels/Supabase Storage URL renders without a `next.config.js` remote-pattern change.
+    - Else, only when the asset type is `image_prompt`: a muted italic placeholder "🖼️ No image generated yet. This row holds the prompt; the actual image will be created during the content-calendar push."
+    - If `asset.video_url` is set: a `▶ View generated video` link in brand orange.
+    - Else, only when the asset type is `video_prompt`: muted italic "🎬 No video generated yet. This row holds the prompt; the actual video will be created during the video workflow."
+  - The placeholder is intentionally NOT shown on `social_post`, `email_body`, etc. — those types never expected a `image_url` at the campaign-asset stage; rendering the placeholder there would just be visual noise.
+
+**All asset-type sections present and labelled:** Social Posts, Short-Form Video Scripts, Email Subjects, Email Bodies, DM Replies, Hashtag Sets, Image Prompts, Video Prompts, Landing Headlines, Lead Magnets. Sections with zero rows are still hidden (existing behavior).
+
+**Tests run this session:**
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS (no new warnings, all routes register including the unchanged `ƒ /dashboard/campaigns`)
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated to this patch.
+
+**Behavioral guarantees preserved (re-verified):**
+- No `content_calendar` writes; no auto-publish; no schema change; no Pexels / OpenAI / HeyGen call.
+- Approve / reject / force-regenerate semantics from Phase 14E and the timeout patch are unchanged.
+- API response shape from `GET /api/admin/campaigns/[id]` is unchanged.
+- Existing assets, jobs, and verification logs are untouched.

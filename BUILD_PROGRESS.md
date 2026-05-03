@@ -1,6 +1,6 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14E timeout patch in working tree — type-aware dedup + 4-batch dashboard loop + skip_verifier; tests pass; not deployed yet)
+**Last updated:** 2026-05-02 (Phase 14E.1 media-clarity patch stacked on the timeout patch in working tree; tests pass; not deployed yet)
 **Last code-shipping commit:** `b7fc8ad` (Phase 14E dashboard campaign planner)
 **Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phases 14A-14E shipped through `b7fc8ad` and deployed; **Phase 14E Timeout Patch in working tree, awaiting commit + deploy**.
 
@@ -28,7 +28,38 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14E Timeout Patch (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14E.1 Campaign Dashboard Media Clarity Patch (in working tree, 2026-05-02 — typecheck + build pass; stacked on the Phase 14E timeout patch; awaiting commit + deploy).**
+
+After the timeout patch let Art Basel generate 33 draft assets, operator feedback surfaced one residual UX gap: `image_prompt` / `video_prompt` rows render only as text and look incomplete because no actual image/video file is attached yet. This patch makes the prompt-vs-finished-media distinction explicit in the UI without touching the API, schema, or any media generation pipeline.
+
+**Patch applied (single file: `src/app/dashboard/campaigns/page.tsx`):**
+- [x] `AssetRow` accepts optional `image_url?: string | null` / `video_url?: string | null` (forward-compat; API doesn't return them today).
+- [x] `short_form_script` group renamed "Short-Form Video Scripts" to match §6 wording.
+- [x] New `ASSET_TYPE_HELPER_TEXT` map. Helper text shown under the group title (italic, muted) for `image_prompt` and `video_prompt` only.
+- [x] `AssetGroup` extended with `assetType` + `helperText?`. Renders helper text below the title when present.
+- [x] `AssetCard` extended with `assetType`. New media block:
+  - `image_url` set → `<img>` preview, max-h-32, rounded.
+  - No `image_url` AND row is `image_prompt` → italic muted placeholder "🖼️ No image generated yet."
+  - `video_url` set → "▶ View generated video" link.
+  - No `video_url` AND row is `video_prompt` → italic muted placeholder "🎬 No video generated yet."
+- [x] Placeholder is NOT shown on non-prompt asset types — avoids visual noise on social posts, emails, DMs, etc.
+- [x] All 10 asset groups remain visible when they have rows: Social Posts · Short-Form Video Scripts · Email Subjects · Email Bodies · DM Replies · Hashtag Sets · Image Prompts · Video Prompts · Landing Headlines · Lead Magnets.
+
+**Forbidden actions confirmed not taken:** no Pexels, no OpenAI image gen, no HeyGen, no `content_calendar` insert, no schema change, no auto-publish.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — compiles cleanly; route table unchanged
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Leo to do:**
+- [ ] Commit + push Phase 14E timeout patch + 14E.1 media-clarity patch (combined) per the session response.
+- [ ] Re-deploy to Vercel prod.
+- [ ] Reload `/dashboard/campaigns` → Art Basel → confirm Image Prompts and Video Prompts groups show helper text and per-row "No image/video generated yet" placeholders.
+
+---
+
+## Phase 14E Timeout Patch (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy).**
 
 The dashboard campaign planner returned a 504 on `POST /api/admin/campaigns/generate-assets` for Art Basel because Vercel Hobby's hard 10s function timeout cannot accommodate a single Sonnet 4.6 + Claude verifier call generating the full ~33-asset bundle. The route's `maxDuration = 60` declaration is silently ignored on Hobby. See `SYSTEM_AUDIT_PHASE_14_STATUS.md` for the full diagnosis.
 
