@@ -44,7 +44,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid input', issues: parsed.error.issues }, { status: 400 })
   }
 
-  const actor = { user_id: auth.user.id }
+  // Phase 14J.1 — denormalize email onto the audit row so attribution survives
+  // user deletion. `auth.user.email` is populated by Supabase auth.
+  const actor = { user_id: auth.user.id, user_email: auth.user.email ?? null }
 
   try {
     const result =
@@ -66,8 +68,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
+          action: parsed.data.action,
           content_calendar_id: parsed.data.content_calendar_id,
           reason: result.reason,
+          posting_status: result.row?.posting_status ?? null,
+          posting_gate_approved: result.row?.posting_gate_approved ?? false,
+          posting_block_reason: result.row?.posting_block_reason ?? result.reason ?? null,
+          // Phase 14J.1 — blocked-attempt audit may have been written; surface it
+          // so operators can confirm the refusal was logged.
+          audit_written: result.audit_written,
+          audit_warning: result.audit_warning,
         },
         { status },
       )
@@ -75,11 +85,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      action: parsed.data.action,
       content_calendar_id: parsed.data.content_calendar_id,
       posting_status: result.row?.posting_status ?? null,
       posting_gate_approved: result.row?.posting_gate_approved ?? false,
       posting_block_reason: result.row?.posting_block_reason ?? null,
       queued_for_posting_at: result.row?.queued_for_posting_at ?? null,
+      // Phase 14J.1 — audit insert outcome. False on idempotent no-ops AND on
+      // audit-failure-after-successful-gate-action; the latter surfaces a warning
+      // so the dashboard can flag missing attribution without blocking the user.
+      audit_written: result.audit_written,
+      audit_warning: result.audit_warning,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Posting gate action failed'

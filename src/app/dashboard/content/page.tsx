@@ -119,6 +119,9 @@ export default function ContentPage() {
   // Phase 14J — Toggle a row's posting-gate state. Pure POST to the new admin
   // route; never touches platform APIs. The toast surfaces the API's reason
   // string when the row is ineligible.
+  // Phase 14J.1 — when the API returns audit_warning (gate action succeeded but
+  // the audit insert failed), show a non-blocking info toast so the operator
+  // knows attribution may be missing for this row.
   const togglePostingGate = async (item: ExtendedContentItem, action: 'queue' | 'unqueue') => {
     try {
       const res = await fetch('/api/admin/content-calendar/posting-gate', {
@@ -136,7 +139,12 @@ export default function ContentPage() {
           ? { ...c, posting_status: json.posting_status, posting_gate_approved: json.posting_gate_approved, posting_block_reason: json.posting_block_reason ?? null }
           : c
       )))
-      show(action === 'queue' ? 'Marked ready for posting' : 'Removed from queue')
+      show(action === 'queue' ? 'Ready for Posting' : 'Removed from queue')
+      // Phase 14J.1 — surface audit-write failures separately so they don't
+      // mask the success of the gate action itself.
+      if (typeof json.audit_warning === 'string' && json.audit_warning) {
+        show(`Audit log warning: ${json.audit_warning}`, 'info')
+      }
     } catch (err) {
       show(err instanceof Error ? err.message : 'Posting gate update failed', 'error')
     }

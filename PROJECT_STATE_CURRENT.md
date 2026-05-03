@@ -1,10 +1,215 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14I deployed and prod-verified — synthetic click round-tripped: contact_events row landed with FK + UTM, view counts 1 click, dashboard reflects Art Basel page_view=1. Phase 14J starting — safe posting gate / manual publish controls.)
-**Last known good commit:** `c9956f5` — "Phase 14I: click attribution via track-event UTM capture"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14I deployed and verified**; Supabase migrations 017-028 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14J deployed and prod-verified — posting gate columns live, diagnostic clean: 143 idle / 0 ready / 0 blocked. Phase 14J.1 starting — posting gate audit trail.)
+**Last known good commit:** `0b3896a` — "Phase 14J: safe posting gate manual publish controls"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14J deployed and verified**; Supabase migrations 017-029 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · **Phase 14J starting** (safe posting gate / manual publish controls)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
+
+---
+
+## Phase 14J Production Smoke Test (PASSED 2026-05-03)
+
+End-to-end verification on prod after migration 029 was applied + Phase 14J was deployed:
+- ✅ Migration 029 applied: `content_calendar` gained 8 gate columns + 3 partial indexes + CHECK constraint + auth.users FK.
+- ✅ `node scripts/diagnose-posting-gate.js` reported: schema check passed; **143 idle / 0 ready / 0 blocked / 0 null**; **0 gate-approved rows**; **0 anomalies** (no campaign-originated ready rows missing tracking_url); **0 posted-after-queued** entries.
+- ✅ `/dashboard/content` renders the new header note "🟢 Mark Ready is a manual gate only…".
+- ✅ Approved rows show the new `🟢 Mark Ready` button alongside the existing manual Post buttons.
+- ✅ Existing manual posting flow (Post to IG / FB / X / Mark Posted) untouched.
+- ✅ No auto-posting occurred. The gate is dormant until a future autoposter respects it.
+
+**Phase 14J.1 is now safe to start.** No blockers. The gate columns work; what's missing is an accountability trail. Phase 14J.1 adds an audit table so every Mark Ready / Remove from Queue / blocked-attempt is recorded before any autoposter is introduced.
+
+---
+
+## Phase 14J.1 — Posting Gate UI Smoke Test + Audit Trail (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 030 apply + deploy)
+
+Adds an append-only `posting_gate_audit` table that records every queue / unqueue / blocked-attempt action on `content_calendar` rows. **No posting. No platform API calls. No AI calls.** Pure accountability layer.
+
+### Existing schema/code inspected
+
+- `ai_actions_log` (migration 003) — existing log table; UUID PK, JSONB payload, created_at index. RLS not enabled (predates the convention).
+- `ai_verification_logs` (migration 015) — newer log table; RLS enabled with `Admins full access` policy gated on `admin_users`. Used as the template for migration 030's policy.
+- `posting-gate.ts` (Phase 14J) — helper exports `markReadyForPosting` / `removeFromPostingQueue`. Both already idempotent. No audit insert today.
+- `posting-gate/route.ts` (Phase 14J) — admin POST; returns `ok / posting_status / posting_gate_approved / posting_block_reason / queued_for_posting_at`.
+- `dashboard/content/page.tsx` (Phase 14J) — toggles via `togglePostingGate(item, action)`; surfaces success / error toasts.
+
+### Created
+
+- `supabase/migrations/030_create_posting_gate_audit.sql` — new `posting_gate_audit` table + 4 indexes + RLS policy. Idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `DROP POLICY IF EXISTS`).
+- `scripts/diagnose-posting-gate-audit.js` — read-only diagnostic. Schema check, action counts, last 10 audit rows, ready-rows ↔ queue-audits cross-check, no-auto-post sanity (queue audit followed by `status='posted'` within 60s).
+
+### Updated
+
+- `src/lib/posting-gate.ts`:
+  - `ActorContext.user_email` (optional) — denormalized into the audit row so attribution survives user deletion.
+  - `GateActionResult.audit_written: boolean` and `audit_warning: string | null` — surfaced on every return path.
+  - New private `writeAudit({ supabase, contentCalendarId, action, prev/new state, actor, notes, blockReason, metadata? })` — best-effort INSERT with caught throws + console.error logging. Failure of the audit insert NEVER propagates to the gate action; it just sets `audit_warning`.
+  - `markReadyForPosting`:
+    - Idempotent already-ready short-circuit → `audit_written=false`, `audit_warning=null`.
+    - Eligibility failure → writes `action='blocked'` audit (best-effort) → returns `ok=false` with the eligibility reason + audit fields.
+    - Successful queue → writes `action='queue'` audit → returns `ok=true` with audit fields.
+  - `removeFromPostingQueue`:
+    - Idempotent already-idle short-circuit → `audit_written=false`.
+    - Successful unqueue → writes `action='unqueue'` audit (using `opts.reason` as both `notes` and `block_reason`) → returns `ok=true` with audit fields.
+  - New private `bareResult(ok, reason, row)` helper for early-error paths where no audit was attempted.
+- `src/app/api/admin/content-calendar/posting-gate/route.ts`:
+  - Actor context now carries `user_email: auth.user.email`.
+  - Both 200 and 4xx response shapes include `action`, `audit_written`, `audit_warning`.
+  - 4xx responses additionally surface `posting_status`, `posting_gate_approved`, `posting_block_reason` from the row snapshot so the dashboard can display the unchanged state alongside the rejection reason.
+- `src/app/dashboard/content/page.tsx`:
+  - `togglePostingGate` success path now reads `json.audit_warning`. When present, fires a second info-level toast `Audit log warning: <message>` so the operator sees the warning without it overriding the primary success toast.
+  - Success toast text refined: `'Ready for Posting'` (was `'Marked ready for posting'`) — matches the badge label and the user spec.
+  - `'Removed from queue'` text unchanged.
+
+### Migration 030 details
+
+```sql
+CREATE TABLE IF NOT EXISTS posting_gate_audit (
+  id                       UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  content_calendar_id      UUID NOT NULL REFERENCES content_calendar(id) ON DELETE CASCADE,
+  action                   TEXT NOT NULL CHECK (action IN ('queue', 'unqueue', 'blocked')),
+  previous_posting_status  TEXT,
+  new_posting_status       TEXT,
+  previous_gate_approved   BOOLEAN,
+  new_gate_approved        BOOLEAN,
+  actor_id                 UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  actor_email              TEXT,
+  notes                    TEXT,
+  block_reason             TEXT,
+  metadata                 JSONB DEFAULT '{}'::jsonb,
+  created_at               TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Four indexes: `(content_calendar_id)`, `(action)`, `(created_at DESC)`, partial `(actor_id) WHERE actor_id IS NOT NULL`. RLS enabled with `Admins full access posting_gate_audit` policy gated on `admin_users` — same pattern as migration 015.
+
+### Audit table columns and indexes
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | gen_random_uuid() |
+| `content_calendar_id` | UUID | FK `content_calendar(id) ON DELETE CASCADE` (cascades audit cleanup if calendar row is deleted) |
+| `action` | TEXT | CHECK `IN ('queue','unqueue','blocked')` |
+| `previous_posting_status` | TEXT | nullable; pre-action snapshot |
+| `new_posting_status` | TEXT | nullable; post-action snapshot |
+| `previous_gate_approved` | BOOLEAN | nullable |
+| `new_gate_approved` | BOOLEAN | nullable |
+| `actor_id` | UUID | FK `auth.users(id) ON DELETE SET NULL` |
+| `actor_email` | TEXT | denormalized for survival |
+| `notes` | TEXT | operator-supplied notes / unqueue reason |
+| `block_reason` | TEXT | populated on `action='blocked'` and on unqueue (mirrors notes) |
+| `metadata` | JSONB | default `{}` — open slot for future fields |
+| `created_at` | TIMESTAMPTZ | default `NOW()` |
+
+Indexes: `idx_posting_gate_audit_calendar`, `idx_posting_gate_audit_action`, `idx_posting_gate_audit_created` (DESC), partial `idx_posting_gate_audit_actor WHERE actor_id IS NOT NULL`.
+
+### RLS / admin access decision
+
+- **RLS enabled.** Policy `Admins full access posting_gate_audit` mirrors migration 015's pattern — `auth.uid() IN (SELECT id FROM admin_users)`.
+- **Writes via the helper use `createAdminClient()` (service role)** which bypasses RLS, so the API route writes succeed without an admin user being signed in to the DB session.
+- **Dashboard reads** are not implemented in this phase — the user spec is "Do not add a full audit timeline yet unless easy and low-risk." When a future phase adds an audit timeline UI, it should go through an admin API endpoint (GET `/api/admin/content-calendar/posting-gate/audit?content_calendar_id=…`), not direct client-side `supabase.from('posting_gate_audit').select(…)` calls — that ensures the RLS policy is enforced at the right boundary.
+
+### Helper behavior for queue / unqueue / blocked
+
+| Path | State change | Audit row | `audit_written` | `audit_warning` |
+|---|---|---|---|---|
+| Queue, fully eligible | idle → ready | `action='queue'` written | `true` | `null` (or error msg if insert failed) |
+| Queue, eligibility failure | none | `action='blocked'` written (best-effort) | `true` if insert succeeded | `null` (or error msg) |
+| Queue, idempotent (already ready) | none | not written (state unchanged) | `false` | `null` |
+| Queue, content_calendar update fails | none | not written | `false` | `null` |
+| Unqueue, fully effective | ready → idle | `action='unqueue'` written | `true` | `null` (or error msg) |
+| Unqueue, idempotent (already idle) | none | not written | `false` | `null` |
+| Unqueue, content_calendar update fails | none | not written | `false` | `null` |
+
+**Idempotency contract preserved.** Re-running queue on a ready row OR unqueue on an idle row produces no new audit row — the audit table doesn't fill with no-op duplicates.
+
+**Audit-failure contract.** When the audit insert fails after a successful gate state change, the gate action still stands (`ok=true`) and `audit_warning` carries the error message. The dashboard surfaces this as a non-blocking info toast.
+
+### API response changes
+
+- 200 (success): `{ ok, action, content_calendar_id, posting_status, posting_gate_approved, posting_block_reason, queued_for_posting_at, audit_written, audit_warning }`
+- 4xx (eligibility / not found): `{ ok:false, action, content_calendar_id, reason, posting_status, posting_gate_approved, posting_block_reason, audit_written, audit_warning }`. Status `400` for eligibility / validation, `404` for not-found.
+- 500 (DB / unexpected): `{ error: <message> }`.
+
+`action` is added at the top level so audit consumers can correlate the response shape with the request without digging into the URL path.
+
+### Dashboard changes
+
+- Success toast for queue: `'Ready for Posting'` (matches the badge text).
+- Success toast for unqueue: `'Removed from queue'` (unchanged).
+- When the API returns a non-empty `audit_warning`, a second `info` toast fires: `Audit log warning: <message>`. Doesn't replace the success toast.
+- No full audit timeline UI added (per spec). When an operator wants a row's history, they can run `node scripts/diagnose-posting-gate-audit.js` or query directly.
+- Existing manual posting buttons remain unchanged — gate flips don't affect them.
+
+### Diagnostic script behavior
+
+`node scripts/diagnose-posting-gate-audit.js`:
+
+1. Schema check — selects all 13 columns; reports the migration to apply if any are missing.
+2. Counts rows by action (queue / unqueue / blocked / other).
+3. Lists last 10 audit rows: timestamp, action, previous → new status, actor email, content_calendar_id prefix, and either `block_reason` or `notes`.
+4. Cross-check: every `posting_status='ready' AND posting_gate_approved=true` row should have at least one `action='queue'` audit entry. Reports any gaps (those would be pre-Phase-14J.1 rows queued before the audit table existed — acceptable and labeled).
+5. No-auto-post sanity: looks for any row that transitioned to `status='posted'` within 60 seconds of its earliest queue audit. Expected count: 0 (the gate doesn't auto-post). Non-zero hits surface for manual review.
+
+Read-only — never writes.
+
+### Tests run this session
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 23.9s`. `ƒ /api/admin/content-calendar/posting-gate` still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migration 030 must be applied before deploy.** Without it, the helper's INSERT into `posting_gate_audit` fails on every gate action. The error is caught in `writeAudit`, so the gate state still changes — but `audit_warning` will fire on every click. Operators would see a warning toast for each action until the migration lands. Apply migration first.
+- **No audit reads via the dashboard yet.** The spec explicitly defers a full audit timeline UI. Operators wanting per-row history must use the diagnostic script or query Supabase directly. A future phase can add `GET /api/admin/content-calendar/posting-gate/audit?content_calendar_id=…`.
+- **Ready-rows cross-check tolerates pre-existing rows.** Any rows that became ready before migration 030 was applied won't have a queue audit. The diagnostic flags them informational, not as errors.
+- **`actor_email` denormalization.** Captured at write time. If an operator updates their email later, historical audit rows show the OLD email. Accepted trade-off — the audit row's purpose is "who did this when," not "who is this user now."
+- **Audit-write failure is silent at the DB layer.** `console.error` logs from a serverless function don't always surface in the Supabase Studio. Vercel Functions logs catch them. If audit failures become a real concern, route them through `ai_actions_log` as a fallback.
+- **No admin-level rate limit on the audit table.** A pathologically-quick admin could spam queue/unqueue and bloat the table. Acceptable for an internal admin surface; revisit if it becomes an issue.
+
+### Leo to do (per Mandatory End-of-Phase Save Protocol)
+
+- [ ] Commit + push.
+- [ ] **Apply migration 030 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT table_name FROM information_schema.tables
+  WHERE table_schema = 'public' AND table_name = 'posting_gate_audit';
+  -- Expect: 1 row.
+
+  SELECT column_name FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'posting_gate_audit'
+  ORDER BY column_name;
+  -- Expect: 13 rows.
+
+  SELECT indexname FROM pg_indexes
+  WHERE tablename = 'posting_gate_audit'
+  ORDER BY indexname;
+  -- Expect at least: idx_posting_gate_audit_action, idx_posting_gate_audit_actor, idx_posting_gate_audit_calendar, idx_posting_gate_audit_created.
+
+  SELECT polname FROM pg_policy WHERE polrelid = 'posting_gate_audit'::regclass;
+  -- Expect: "Admins full access posting_gate_audit".
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test (post-deploy):
+  - [ ] Open `/dashboard/content` → click `🟢 Mark Ready` on an approved row → toast reads `Ready for Posting`. No audit warning toast appears.
+  - [ ] Click `↩ Remove from Queue` → toast reads `Removed from queue`.
+  - [ ] (Optional) Try Mark Ready on a rejected/posted row → 400 toast with the eligibility reason. Confirm no platform API was called.
+- [ ] Run `node scripts/diagnose-posting-gate-audit.js` post-deploy:
+  - [ ] Step 1 reports `✓ All Phase 14J.1 columns present`.
+  - [ ] Step 2 shows non-zero queue + unqueue counts (depends on smoke-test clicks).
+  - [ ] Step 3 lists the smoke-test audits.
+  - [ ] Step 4 reports `✓ Every ready row has a matching queue audit.` (assuming the smoke test left one ready row).
+  - [ ] Step 5 reports `✓ No row was posted within 60s of being queued.`.
+
+### Recommended next phase
+
+**Phase 14K — Autoposter cron that honors the gate AND writes to the audit table.** Now that the audit trail exists, the autoposter has somewhere to record `action='auto_posted'` (would need a CHECK-constraint expansion) or `action='auto_skipped'` for rows it considered but didn't post. Scope: daily cron reading rows where `posting_status='ready' AND posting_gate_approved=true AND manual_posting_only=true AND status='approved' AND posted_at IS NULL`, calling the appropriate platform poster route per row, marking `status='posted'` on success. Each platform call wrapped in try/catch + rate-limited; failures clear `posting_gate_approved` and write a `block_reason` so an operator must re-mark before retry. Hobby cron limit is at 4 — would replace one of the existing crons (the underused `score-and-branch` is the strongest candidate to merge into another).
+
+Alternative: **Phase 14J.2 — Audit timeline UI.** Adds `GET /api/admin/content-calendar/posting-gate/audit?content_calendar_id=…` and surfaces a small per-row history panel on `/dashboard/content`. Lower risk than 14K (no new platform calls), higher operator value than the diagnostic script. Doesn't move publishing forward but tightens accountability for the existing manual flow.
+
+I'd lean **14K next** since the gate exists specifically as autoposter infrastructure, but **14J.2 first** is defensible if you want operators to see audit history in-dashboard before any autoposter ships.
 
 ---
 

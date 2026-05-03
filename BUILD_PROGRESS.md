@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14I deployed and prod-verified — synthetic click round-tripped, Art Basel attributed page_view = 1. Phase 14J starting — safe posting gate / manual publish controls.)
-**Last code-shipping commit:** `c9956f5` (Phase 14I click attribution)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14I deployed and verified on prod** · **Phase 14J starting** (safe posting gate / manual publish controls — content_calendar gate fields + posting-gate route + dashboard ready/queue UI)
+**Last updated:** 2026-05-03 (Phase 14J deployed and prod-verified — gate columns live, diagnostic clean. Phase 14J.1 starting — posting gate audit trail.)
+**Last code-shipping commit:** `0b3896a` (Phase 14J posting gate)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J deployed and verified on prod** · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail — `posting_gate_audit` table + helper writes + dashboard warning)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,47 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14J — Safe Posting Gate / Manual Publish Controls (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 029 apply + deploy).**
+**Phase 14J.1 — Posting Gate UI Smoke Test + Audit Trail (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 030 apply + deploy).**
+
+Phase 14J shipped (`0b3896a`), prod-verified — gate columns live, diagnostic clean (143 idle / 0 ready). Phase 14J.1 adds the accountability layer: every Mark Ready / Remove from Queue / blocked-attempt is now recorded in a new `posting_gate_audit` table.
+
+**Patch applied:**
+- [x] `supabase/migrations/030_create_posting_gate_audit.sql` — new table + 4 indexes + RLS policy mirroring migration 015. Idempotent.
+- [x] `src/lib/posting-gate.ts` — added `writeAudit` helper; both `markReadyForPosting` and `removeFromPostingQueue` now insert audit rows on real state changes (NOT on idempotent no-ops). Added `audit_written` and `audit_warning` to `GateActionResult`. Added `bareResult()` convenience for early-error paths.
+- [x] `src/app/api/admin/content-calendar/posting-gate/route.ts` — actor context now includes `user_email`. Both 200 and 4xx responses surface `action`, `audit_written`, `audit_warning`. 4xx also returns the unchanged row state.
+- [x] `src/app/dashboard/content/page.tsx` — success toast for queue says `Ready for Posting`. When API returns `audit_warning`, fires a second info-level toast `Audit log warning: …`.
+- [x] `scripts/diagnose-posting-gate-audit.js` — read-only diagnostic. Schema check, action counts, last 10 audits, ready-row ↔ queue-audit cross-check, no-auto-post sanity (queue audit followed by `status='posted'` within 60s).
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 23.9s`; `ƒ /api/admin/content-calendar/posting-gate` registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No new posting routes. No platform API calls. No AI calls. No media generation.
+- `content_calendar.status` still flips only via the existing `/api/content` PATCH; the audit table only records gate actions.
+- Existing manual posting flow on `/dashboard/content` is unchanged.
+- Idempotent no-ops do NOT write audit rows (no audit-table noise from re-clicks).
+- Audit-insert failures NEVER propagate to the gate action — `audit_warning` flag carries the error message instead. Gate state still changes.
+- Migration 030 is fully append-only — no existing data is touched.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 030 to Supabase prod.** Verification:
+  ```sql
+  SELECT table_name FROM information_schema.tables WHERE table_name = 'posting_gate_audit';
+  SELECT count(*) FROM information_schema.columns WHERE table_name = 'posting_gate_audit';
+  -- Expect: 1 row from the first; 13 from the second.
+  SELECT polname FROM pg_policy WHERE polrelid = 'posting_gate_audit'::regclass;
+  -- Expect: "Admins full access posting_gate_audit".
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test on `/dashboard/content`: Mark Ready → Remove from Queue → confirm no `audit_warning` toast appears.
+- [ ] Run `node scripts/diagnose-posting-gate-audit.js` to confirm queue/unqueue audit rows landed.
+
+---
+
+## Phase 14J — Safe Posting Gate / Manual Publish Controls (shipped commit `0b3896a`, migration 029 applied, prod-verified 2026-05-03).**
 
 Phase 14I shipped (`c9956f5`), prod-verified — synthetic click validated, Art Basel attributed page_view = 1. Phase 14J adds an explicit human gate to `content_calendar` so future autoposters require an admin's explicit approval before publishing. **This phase does NOT post.**
 
