@@ -22,7 +22,17 @@ import { createAdminClient } from '@/lib/supabase/admin'
  */
 const LIVE_POSTING_ENABLED = false as const
 
-/** Shape pulled from content_calendar — only fields the eligibility check reads. */
+/** Shape pulled from content_calendar — only fields the eligibility check reads.
+ *
+ * NOTE (Phase 14K patch): `content_calendar` does NOT have an `updated_at`
+ * column (verified against migration 004: only `id, week_of, platform,
+ * caption, hashtags, image_prompt, status, posted_at, created_at` were
+ * defined; subsequent migrations 022/024/029 added FK / tracking_url / gate
+ * columns but never `updated_at`). Selecting `updated_at` returns Postgres
+ * error 42703 ("column does not exist"), which surfaced as HTTP 500 on the
+ * dry-run cron during Phase 14K's first smoke test. The interface and the
+ * `ROW_SELECT` constant below are stripped to columns that actually exist.
+ */
 export interface ContentCalendarRow {
   id: string
   platform: string | null
@@ -38,7 +48,6 @@ export interface ContentCalendarRow {
   posted_at: string | null
   week_of: string | null
   created_at: string
-  updated_at: string | null
 }
 
 export interface AutoposterEligibleRow {
@@ -81,7 +90,7 @@ interface GetEligibleOptions {
 }
 
 const ROW_SELECT =
-  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, updated_at'
+  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at'
 
 /**
  * Walk through content_calendar candidates and split them into eligible vs.
@@ -116,7 +125,16 @@ export async function getAutoposterEligibleRows(
     // happen in JS so each skipped row carries a specific reason instead of
     // an opaque "didn't match the WHERE clause".
     .eq('status', 'approved')
+    // Phase 14K patch — three-key stable ordering using only columns that
+    // actually exist on `content_calendar`:
+    //   1) queued_for_posting_at ASC NULLS LAST  → next-due eligible row first
+    //   2) created_at DESC                       → newer authored rows next
+    //   3) id ASC                                → final tiebreaker for stability
+    // (`updated_at` was the original tiebreaker but doesn't exist on this
+    // table — see ContentCalendarRow comment.)
     .order('queued_for_posting_at', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
     .limit(limit)
 
   if (opts.platform) query = query.eq('platform', opts.platform)

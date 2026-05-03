@@ -510,6 +510,114 @@ SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL;
 Phase 14K's `hardBlockLivePosting` and `LIVE_POSTING_ENABLED` constants are the explicit handoff points — 14K.1 starts by removing the dry-run guards intentionally, not accidentally.
 
 A safer intermediate alternative: **Phase 14K.0.5 — Posting gate consistency.** Add `posting_gate_approved=true` requirement to the 3 manual platform routes BEFORE introducing autoposting. Closes the existing gap where manual posting bypasses the gate. Trades operator convenience for consistency. Probably not worth doing on its own; pair it with 14K.1.
+
+---
+
+## Phase 14K Patch — Remove `updated_at` Dependency from Dry-Run Eligibility Query (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy)
+
+Phase 14K shipped (`0faf4ff`) and deployed. First smoke test surfaced one bug:
+
+- **Diagnostic script + direct SQL agreed**: 0 eligible rows / 53 approved-but-skipped rows / `posting_status='idle'` reason — expected behavior.
+- **Dry-run endpoint returned HTTP 500**: `{"success": false, "error": "autoposter eligibility query failed: column content_calendar.updated_at does not exist"}`.
+
+### Root cause
+
+`src/lib/autoposter-gate.ts` declared `updated_at: string | null` on `ContentCalendarRow` and included `updated_at` in the SELECT projection (`ROW_SELECT` constant). `content_calendar` does NOT have that column — verified against migration 004 (`id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, created_at`) and migrations 022 / 024 / 029 which added FK / tracking_url / gate columns but never `updated_at`. Postgres returned error `42703` ("column does not exist"); Supabase surfaced it as a query failure; the route mapped it to HTTP 500.
+
+The diagnostic script does NOT touch this column (its SELECT lists are explicit and don't include `updated_at`), which is why it ran clean while the cron route 500'd.
+
+### Files changed
+
+- `src/lib/autoposter-gate.ts`:
+  - Dropped `updated_at: string | null` from `ContentCalendarRow`.
+  - Dropped `updated_at` from `ROW_SELECT`.
+  - Added a header comment on `ContentCalendarRow` documenting the audit (migration 004 + 022/024/029) so a future engineer doesn't re-add the column.
+  - Strengthened the candidate `.order(...)` chain to a three-key stable sort using only columns that exist:
+    1. `queued_for_posting_at ASC NULLS LAST` (next-due eligible row first)
+    2. `created_at DESC` (newer authored rows next)
+    3. `id ASC` (final tiebreaker for stability)
+
+### Files NOT changed
+
+- `src/app/api/cron/autoposter-dry-run/route.ts` — never referenced `updated_at`. Untouched.
+- `scripts/diagnose-autoposter-dry-run.js` — never referenced `updated_at`. Untouched.
+- All Phase 14K behavioral guarantees preserved: `dry_run: true`, `live_posting_blocked: true`, `hardBlockLivePosting()` tripwire active, `markAutoposterDryRunInspected` no-op stub, zero mutations to `content_calendar`.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 9.4s`. `ƒ /api/cron/autoposter-dry-run` still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **No new migration.** No `updated_at` column added — preferred fix per spec ("Do not add updated_at column unless there is a strong reason"). If a future phase wants update-time tracking on `content_calendar`, that's a deliberate schema decision, not implicit in the autoposter helper.
+- **Three-key ORDER BY may marginally change row order** vs. Phase 14K's single-key sort, but only as a tiebreaker (when `queued_for_posting_at` is identical or both null). With current data (all 53 approved rows have `posting_status='idle'`, no eligible rows), this is moot.
+- **No changes to behavioral contract.** `live_posting_blocked` still `true`, `hardBlockLivePosting` still throws, no mutations.
+
+### Exact git commands
+
+```bash
+git status
+git add src/lib/autoposter-gate.ts PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14K patch: remove non-existent updated_at column from dry-run eligibility query"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` intentionally **not** in the `git add` list (cache file, save-protocol Rule 5).
+
+### Deploy instructions
+
+1. `git push origin main` (×2 for verification).
+2. `npx vercel --prod --yes`.
+3. Run the PowerShell verification commands below.
+
+### PowerShell verification (after deploy)
+
+Cleaner native form (recommended):
+
+```powershell
+$CRON_SECRET = (Select-String -Path .env.local -Pattern '^CRON_SECRET=' | Select-Object -First 1).Line -replace '^CRON_SECRET=', ''
+Invoke-RestMethod -Method GET `
+  -Uri "https://www.vortextrips.com/api/cron/autoposter-dry-run" `
+  -Headers @{ Authorization = "Bearer $CRON_SECRET" }
+```
+
+If you want to see the HTTP status code explicitly:
+
+```powershell
+$CRON_SECRET = (Select-String -Path .env.local -Pattern '^CRON_SECRET=' | Select-Object -First 1).Line -replace '^CRON_SECRET=', ''
+curl.exe -sS -w "`n---HTTP %{http_code}---`n" `
+  -H "Authorization: Bearer $CRON_SECRET" `
+  "https://www.vortextrips.com/api/cron/autoposter-dry-run"
+```
+
+Expected response shape:
+- HTTP 200 (no longer 500)
+- `success: true`
+- `dry_run: true`
+- `live_posting_blocked: true`
+- `eligible_count: 0` (current state — all 53 approved rows are `posting_status='idle'`)
+- `skipped_count: 53` (or close — every approved row is currently in the skipped set with reason `posting_status is 'idle', need 'ready'`)
+- `inspected.written: false`
+- `summary.skipped_by_reason["posting_status is 'idle', need 'ready'"]: 53`
+
+After running, also re-run the no-mutation cross-check:
+
+```sql
+SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL;
+```
+
+Expect: still **22** (unchanged from pre-curl). Any deviation means a row was accidentally mutated, which would be a serious regression — the dry-run guarantees zero writes.
+
+Or use the diagnostic for a richer view:
+
+```bash
+node scripts/diagnose-autoposter-dry-run.js
+```
+
+The script's "no-mutation cross-check" snapshots `posted_at` count before AND after the curl, and reports green only when they match.
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
 

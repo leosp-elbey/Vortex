@@ -28,7 +28,39 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14K — Autoposter Cron, DRY-RUN ONLY (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14K Patch — Remove `updated_at` from dry-run eligibility query (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+Phase 14K shipped (`0faf4ff`) and deployed. First smoke test surfaced one bug: dry-run endpoint returned HTTP 500 with `column content_calendar.updated_at does not exist`. The diagnostic script + direct SQL agreed on 0 eligible / 53 skipped (`posting_status='idle'`), but the cron route's helper SELECTed a non-existent column.
+
+**Patch applied:**
+- [x] `src/lib/autoposter-gate.ts` — dropped `updated_at` from both the `ContentCalendarRow` interface and the `ROW_SELECT` constant. Added header comment documenting that `content_calendar` has no such column (verified against migrations 004 / 022 / 024 / 029). Strengthened ORDER BY to three keys using only existing columns: `queued_for_posting_at ASC NULLS LAST`, then `created_at DESC`, then `id ASC` as final tiebreaker.
+
+**NOT changed:**
+- `src/app/api/cron/autoposter-dry-run/route.ts` — already didn't reference `updated_at`.
+- `scripts/diagnose-autoposter-dry-run.js` — already didn't reference `updated_at`.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 9.4s`; `ƒ /api/cron/autoposter-dry-run` still registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees preserved:**
+- No new migration. No new column added (preferred fix per spec).
+- `dry_run: true`, `live_posting_blocked: true` runtime contract unchanged.
+- `hardBlockLivePosting()` tripwire still throws; `LIVE_POSTING_ENABLED = false as const`.
+- `markAutoposterDryRunInspected` still a no-op stub.
+- Zero mutations on `content_calendar`. The diagnostic's before/after snapshot of `posted_at` count is the cross-check.
+- Eligibility rules unchanged.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run the PowerShell curl command (see PROJECT_STATE_CURRENT.md Phase 14K Patch entry) — expect HTTP 200 with `success=true`, `dry_run=true`, `live_posting_blocked=true`, `eligible_count=0`, `skipped_count=53` (or current count of approved-but-idle rows).
+- [ ] Confirm `SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL` is still 22 (unchanged).
+
+---
+
+## Phase 14K — Autoposter Cron, DRY-RUN ONLY (shipped commit `0faf4ff`, prod-deployed; HTTP 500 fixed by Phase 14K patch above).**
 
 First piece of autoposter infrastructure. Selects content_calendar rows that WOULD be posted, but never posts. Manually invoked via curl during this phase — Hobby plan is at the 4-cron limit, so no `vercel.json` registration. Future Phase 14K.1 ships live posting.
 
