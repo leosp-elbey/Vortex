@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14H.1 closed — helper hardening + diagnostic committed and deployed; diagnostic confirmed 0 bad rows. Phase 14H.2 starting — persist event_slug on event_campaigns.)
-**Last code-shipping commit:** `dc56330` (scripts: Phase 14H.1 tracking URL diagnostic helper)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H.1 deployed and verified on prod** · **Phase 14H.2 starting** (persist event_slug on event_campaigns — migration 025 + generator update + helper update + migration 026 view rewrite)
+**Last updated:** 2026-05-03 (Phase 14H.2 deployed and prod-verified — event_slug persisted, Art Basel slug confirmed `art-basel-miami-beach`, attribution view rewritten. Phase 14I starting — click attribution via track-event.)
+**Last code-shipping commit:** `783803e` (Phase 14H.2: persist event slugs)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H.2 deployed and verified on prod** · **Phase 14I starting** (click attribution via track-event — UTM capture on contact_events + view click_count column)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,53 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14H.2 — Persist event_slug on event_campaigns (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 025 & 026 apply + deploy).**
+**Phase 14I — Click Attribution via track-event (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 027 & 028 apply + deploy).**
+
+Phase 14H.2 shipped (`783803e`), prod-verified — Art Basel slug confirmed, attribution view rewritten. Phase 14I closes the click loop: extends `contact_events` with UTM + campaign FK columns, rewrites `track-event` to capture campaign UTM (anonymous visits included), updates the attribution view to count clicks deterministically, threads click_count through the helper + dashboard.
+
+**Patch applied:**
+- [x] `supabase/migrations/027_add_utm_fields_to_contact_events.sql` — adds `utm_source/medium/campaign/content` + `event_campaign_id/campaign_asset_id/content_calendar_id` (UUID FK with `ON DELETE SET NULL`) + 5 partial indexes. Idempotent.
+- [x] `supabase/migrations/028_update_event_campaign_attribution_view_for_clicks.sql` — `CREATE OR REPLACE VIEW` extends migration 026 with FOUR tail columns (`campaign_click_count`, `campaign_page_view_count`, `campaign_first_click_at`, `campaign_latest_click_at`). New `click_match` CTE prefers FK match, falls back to UTM substring.
+- [x] `src/app/api/webhooks/track-event/route.ts` — `extractUtm` (body / metadata / query / referrer), `parseUtmCampaign`, `parseUtmContent`, `resolveCampaignFromUtm` resolves `(event_campaign_id, campaign_asset_id, content_calendar_id)`. Bail logic loosened to log anonymous events when campaign UTM is present. Lead score / tags still gated on resolved contact.
+- [x] `src/lib/event-campaign-attribution.ts` — `AttributionRow` + `VIEW_COLUMNS` extended; `CampaignRollup.click_count` is real (was always-zero); adds `page_view_count`, `first_click_at`, `latest_click_at`; `latest_activity_at` now considers click activity.
+- [x] `src/app/dashboard/campaigns/page.tsx` — `AttributionRollup` mirrors helper; Performance Metric grid shows real clicks + page_views (4 cells in row 1, 4 cells in row 2); deferred subtext removed; new empty-state copy "No campaign clicks captured yet. Tracking URLs are ready." when posted rows exist but no clicks; footer note rewritten.
+- [x] `scripts/diagnose-campaign-click-attribution.js` — read-only diagnostic verifying migration 027 columns, listing campaign UTM events in last 30 days, grouping by utm_campaign, Art Basel-specific check.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 11.1s`; `ƒ /api/webhooks/track-event` still registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No new posting routes. No AI calls. No media generation.
+- Existing track-event behavior for known contacts is preserved (lead score / tags update on every event).
+- Anonymous events without campaign UTM are still ignored (no schema noise).
+- Migration 027 is FK-safe (`ON DELETE SET NULL` on all three FKs — never blocks deletion of the parent campaign / asset / calendar row).
+- View remains backwards compatible with rows lacking `event_campaign_id` (substring fallback).
+- Migration apply order: 027 → 028 (028 references columns added in 027).
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 027 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'contact_events'
+    AND column_name IN ('utm_source','utm_medium','utm_campaign','utm_content','event_campaign_id','campaign_asset_id','content_calendar_id')
+  ORDER BY column_name;
+  -- Expect: 7 rows.
+  ```
+- [ ] **Apply migration 028 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT position('campaign_click_count' IN pg_get_viewdef('event_campaign_attribution_summary', true)) > 0;
+  -- Expect: true.
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run `node scripts/diagnose-campaign-click-attribution.js` to confirm post-deploy schema.
+- [ ] Smoke test: open `/dashboard/campaigns` → Art Basel → confirm Performance panel renders Clicks/Page views (both 0 today), no "deferred" subtext, footer note rewritten.
+
+---
+
+## Phase 14H.2 — Persist event_slug on event_campaigns (shipped commit `783803e`, migrations 025-026 applied, prod-verified 2026-05-03).**
 
 Phase 14H.1 closed (helper hardening + diagnostic, commits `8582680` / `dc56330`; diagnostic confirmed 0 bad rows). Phase 14H.2 adds a persisted `event_campaigns.event_slug` column so attribution survives future `event_name` edits — addresses the slug-drift risk noted in Phases 14H + 14H.1.
 

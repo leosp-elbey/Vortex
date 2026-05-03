@@ -183,10 +183,13 @@ interface AttributionRollup {
   lead_count: number
   member_count: number
   click_count: number
+  page_view_count: number
   click_to_lead_rate: number | null
   lead_to_conversion_rate: number | null
   latest_activity_at: string | null
   first_lead_at: string | null
+  first_click_at: string | null
+  latest_click_at: string | null
   performance_score: number
   by_platform: Record<string, BreakdownEntry>
   by_wave: Record<string, BreakdownEntry>
@@ -875,7 +878,14 @@ function PerformancePanel({
     attribution.lead_count > 0 ||
     attribution.member_count > 0 ||
     attribution.posted_count > 0 ||
-    attribution.click_count > 0
+    attribution.click_count > 0 ||
+    attribution.page_view_count > 0
+
+  // Phase 14I — distinguish "no traffic at all" from "no campaign clicks but
+  // tracking URLs are now ready". The latter is the expected state for newly
+  // pushed assets that haven't been clicked yet.
+  const hasPostedRows = attribution.posted_count > 0
+  const noClickSignal = attribution.click_count === 0 && attribution.page_view_count === 0
 
   const pct = (n: number | null) => (n === null ? '—' : `${Math.round(n * 1000) / 10}%`)
 
@@ -897,12 +907,17 @@ function PerformancePanel({
           No conversion data yet. Campaign assets are now trackable once links receive traffic.
         </p>
       )}
+      {hasAnySignal && noClickSignal && hasPostedRows && (
+        <p className="text-sm text-gray-400 mb-4">
+          No campaign clicks captured yet. Tracking URLs are ready.
+        </p>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-        <Metric label="Clicks" value={attribution.click_count} subtext="deferred" />
+        <Metric label="Clicks" value={attribution.click_count} />
+        <Metric label="Page views" value={attribution.page_view_count} />
         <Metric label="Leads" value={attribution.lead_count} />
         <Metric label="Conversions" value={attribution.member_count} />
-        <Metric label="Posted" value={attribution.posted_count} />
         <Metric label="Click → Lead" value={pct(attribution.click_to_lead_rate)} />
         <Metric label="Lead → Member" value={pct(attribution.lead_to_conversion_rate)} />
         <Metric label="Approved assets" value={attribution.approved_asset_count} />
@@ -923,8 +938,9 @@ function PerformancePanel({
       )}
 
       <p className="mt-3 text-[11px] text-gray-400">
-        Click attribution is deferred until track-event captures UTM. Lead/member counts use UTM substring match
-        on contacts (best-effort) and will start counting once campaign tracking URLs are materialized in posts.
+        Clicks are captured by the track-event webhook when a visitor lands on a campaign tracking URL. Lead and
+        member counts use UTM matching on contacts (best-effort). Counts grow as traffic flows; expect 0 until
+        published posts start receiving clicks.
       </p>
     </section>
   )

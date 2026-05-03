@@ -48,6 +48,12 @@ export interface AttributionRow {
   campaign_member_count: number
   campaign_first_lead_at: string | null
   campaign_latest_lead_at: string | null
+
+  // Phase 14I — real click attribution from contact_events (migration 028).
+  campaign_click_count: number
+  campaign_page_view_count: number
+  campaign_first_click_at: string | null
+  campaign_latest_click_at: string | null
 }
 
 export interface CampaignBreakdownEntry {
@@ -74,21 +80,25 @@ export interface CampaignRollup {
   posted_count: number
   latest_posted_at: string | null
 
-  /** Distinct contacts attributed by UTM. 0 until tracking URLs are materialized. */
+  /** Distinct contacts attributed by UTM. */
   lead_count: number
   /** Distinct attributed contacts who became members. */
   member_count: number
-  /** Always 0 today — click attribution is deferred (see Phase 14H notes). */
+  /** Phase 14I — count of campaign-attributed contact_events (clicks). 0 until traffic flows. */
   click_count: number
+  /** Subset of click_count where event = 'page_view'. */
+  page_view_count: number
 
-  /** Null when click_count = 0 (deferred). */
+  /** Null when click_count = 0. Otherwise leads / clicks in [0, 1]. */
   click_to_lead_rate: number | null
   /** Null when lead_count = 0. Otherwise members / leads in [0, 1]. */
   lead_to_conversion_rate: number | null
 
-  /** Latest signal of activity — most recent of latest_posted_at and latest_lead_at. */
+  /** Latest signal of activity — most recent of latest_posted_at, latest_lead_at, latest_click_at. */
   latest_activity_at: string | null
   first_lead_at: string | null
+  first_click_at: string | null
+  latest_click_at: string | null
 
   /** Composite 0-100 score. See calculateCampaignPerformanceScore for weights. */
   performance_score: number
@@ -98,7 +108,7 @@ export interface CampaignRollup {
 }
 
 const VIEW_COLUMNS =
-  'campaign_id, campaign_name, event_name, event_year, destination_city, destination_country, destination_region, categories, event_start_date, campaign_score, campaign_status, campaign_asset_id, asset_type, platform, wave, asset_status, asset_scheduled_for, content_calendar_id, calendar_status, calendar_posted_at, calendar_week_of, campaign_lead_count, campaign_member_count, campaign_first_lead_at, campaign_latest_lead_at'
+  'campaign_id, campaign_name, event_name, event_year, destination_city, destination_country, destination_region, categories, event_start_date, campaign_score, campaign_status, campaign_asset_id, asset_type, platform, wave, asset_status, asset_scheduled_for, content_calendar_id, calendar_status, calendar_posted_at, calendar_week_of, campaign_lead_count, campaign_member_count, campaign_first_lead_at, campaign_latest_lead_at, campaign_click_count, campaign_page_view_count, campaign_first_click_at, campaign_latest_click_at'
 
 /**
  * Read raw rows from `event_campaign_attribution_summary`. One row per
@@ -257,10 +267,15 @@ export function rollupCampaign(rows: AttributionRow[]): CampaignRollup | null {
 
   const lead_count = head.campaign_lead_count
   const member_count = head.campaign_member_count
-  const click_count = 0 // deferred — see Phase 14H notes
+  const click_count = head.campaign_click_count            // Phase 14I — real clicks now
+  const page_view_count = head.campaign_page_view_count
   const click_to_lead_rate = click_count > 0 ? lead_count / click_count : null
   const lead_to_conversion_rate = lead_count > 0 ? member_count / lead_count : null
-  const latest_activity_at = pickLatestIso(latestPostedAt, head.campaign_latest_lead_at)
+  const latest_activity_at = pickLatestIso(
+    latestPostedAt,
+    head.campaign_latest_lead_at,
+    head.campaign_latest_click_at,
+  )
 
   return {
     campaign_id: head.campaign_id,
@@ -283,11 +298,14 @@ export function rollupCampaign(rows: AttributionRow[]): CampaignRollup | null {
     lead_count,
     member_count,
     click_count,
+    page_view_count,
     click_to_lead_rate,
     lead_to_conversion_rate,
 
     latest_activity_at,
     first_lead_at: head.campaign_first_lead_at,
+    first_click_at: head.campaign_first_click_at,
+    latest_click_at: head.campaign_latest_click_at,
 
     performance_score: calculateCampaignPerformanceScore({
       asset_count: assetIds.size,

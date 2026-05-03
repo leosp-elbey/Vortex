@@ -1,10 +1,157 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14H.1 fully closed — tracking URL helper hardening + diagnostic script committed; diagnostic confirmed 0 bad rows. Phase 14H.2 starting — persist event_slug on event_campaigns.)
-**Last known good commit:** `dc56330` — "scripts: add Phase 14H.1 tracking URL diagnostic helper"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14H.1 deployed and verified**; Supabase migrations 017-024 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14H.2 deployed and prod-verified — event_slug persisted, attribution view rewritten, Art Basel slug confirmed `art-basel-miami-beach`. Phase 14I starting — click attribution via track-event.)
+**Last known good commit:** `783803e` — "Phase 14H.2: persist event slugs for stable campaign attribution"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14H.2 deployed and verified**; Supabase migrations 017-026 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · **Phase 14H.2 starting** (persist event_slug on event_campaigns)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · **Phase 14I starting** (click attribution via track-event)
+
+---
+
+## Phase 14H.2 Production Smoke Test (PASSED 2026-05-03)
+
+End-to-end verification on prod after migrations 025 & 026 were applied + Phase 14H.2 was deployed:
+- ✅ Migration 025 applied: `event_campaigns.event_slug` column exists; `idx_event_campaigns_event_slug` partial index exists; backfill complete (every campaign has a non-null slug).
+- ✅ Migration 026 applied: `event_campaign_attribution_summary` recreated; `pg_get_viewdef` confirms the WITH-CTE references `event_slug`.
+- ✅ Art Basel slug verified: `art-basel-miami-beach` (matches `slugifyEventName('Art Basel Miami Beach')`).
+- ✅ Performance panel still loads on `/dashboard/campaigns`; column shape unchanged so no regression.
+- ✅ Re-pushed an Art Basel asset → new tracking URL uses persisted slug from the column (not derived from event_name).
+- ✅ Attribution view backwards compatible: campaigns with NULL `event_slug` (none currently in prod) would fall through to the legacy regex.
+- ✅ Cron continues to backfill `event_slug` only when currently NULL (operator edits preserved).
+- ✅ No auto-posting occurred.
+
+**Phase 14I is now safe to start.** No blockers. The `event_slug` column gives click attribution a stable foreign-key-like anchor so the next phase can resolve UTM hits to specific campaigns deterministically.
+
+---
+
+## Phase 14I — Click Attribution via track-event (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 027 & 028 apply + deploy)
+
+Replaces the always-zero `click_count` slot on the Performance panel with real data sourced from `contact_events`. **Read-mostly, additive, schema-only-where-needed.** No posting, no AI calls, no media generation, no campaign-generation logic change.
+
+### Existing schema/code inspected
+
+- `contact_events` (migration 008) — `id, contact_id (nullable), event, metadata JSONB, score_delta, created_at`. Already supports anonymous logging because `contact_id` has no NOT NULL constraint.
+- `track-event` route — accepted `{ contact_id, email, event, metadata }`. Bailed early when no contact could be resolved (`return ok` with no insert), so anonymous campaign visits were dropped. Required surgery to log them.
+- `contacts.custom_fields` JSONB — already powers lead-side UTM matching (Phases 14H + 14H.2). No change needed here.
+- `event_campaigns.event_slug` (migration 025) — Phase 14H.2's stable slug column; click-side matching now anchors against this same column.
+- `campaign_assets.id` UUID — first 8 chars (dashes-stripped) is the canonical short used in `utm_content`.
+
+### Created
+
+- `supabase/migrations/027_add_utm_fields_to_contact_events.sql` — adds `utm_source`, `utm_medium`, `utm_campaign`, `utm_content` (TEXT NULL) plus `event_campaign_id`, `campaign_asset_id`, `content_calendar_id` (UUID NULL with `REFERENCES … ON DELETE SET NULL`) to `contact_events`. Five partial indexes (skip-NULLs) for fast lookups by utm_campaign / utm_medium / event_campaign_id / campaign_asset_id / content_calendar_id. Idempotent.
+- `supabase/migrations/028_update_event_campaign_attribution_view_for_clicks.sql` — `CREATE OR REPLACE VIEW event_campaign_attribution_summary` extends migration 026 with FOUR new columns at the tail: `campaign_click_count`, `campaign_page_view_count`, `campaign_first_click_at`, `campaign_latest_click_at`. New `click_match` CTE counts `contact_events` matched by `(event_campaign_id = ec.id) OR (event_campaign_id IS NULL AND utm_medium='event_campaign' AND utm_campaign ~* '<slug>_<year>(_|$)')` — primary FK match for new traffic, regex fallback for any rows that predate the deploy.
+- `scripts/diagnose-campaign-click-attribution.js` — read-only diagnostic. Verifies migration 027 columns exist, counts campaign clicks in the last 30 days, groups by utm_campaign with FK-resolved vs. UTM-only counts, and runs an Art Basel-specific spot check.
+
+### Updated
+
+- `src/app/api/webhooks/track-event/route.ts`
+  - New `extractUtm(body, request)` pulls UTM from body top-level, `body.metadata`, query params, and `referrer`/`referer` URL — first non-empty wins per key. Lower-cases `utm_source`.
+  - New `parseUtmCampaign(value)` → `{ slug, year, wave }` parser using regex `^([a-z0-9-]+)_(\d{4})(?:_(W[1-8]))?$`.
+  - New `parseUtmContent(value)` → `{ assetType, assetIdShort }` parser using regex `^([a-z][a-z0-9_]*)_([a-z0-9]{8})$`.
+  - New `resolveCampaignFromUtm(supabase, utm)` resolves to `{ event_campaign_id, campaign_asset_id, content_calendar_id }`. Matches campaign by `event_slug + event_year`. Matches asset by pulling all (campaign × asset_type) candidates and finding one whose `id.replace(/-/g, '').slice(0,8) === assetIdShort`. Asset's `content_calendar_id` is read directly from the matched row.
+  - **Bail logic loosened** — the route now logs anonymous events when campaign UTM is present (`utm_medium='event_campaign'` OR `event_campaign_id` resolved). Bails only when there's no contact AND no campaign UTM.
+  - Lead-score / tag updates remain gated on `resolvedId` (no change for organic traffic).
+  - INSERT into `contact_events` always carries the seven new columns (NULL when not resolved).
+- `src/lib/event-campaign-attribution.ts`
+  - `AttributionRow` gains `campaign_click_count`, `campaign_page_view_count`, `campaign_first_click_at`, `campaign_latest_click_at`.
+  - `VIEW_COLUMNS` updated to read the 4 new fields.
+  - `CampaignRollup`: replaces always-zero `click_count` with real value; adds `page_view_count`, `first_click_at`, `latest_click_at`. `click_to_lead_rate` now actually computes when clicks > 0.
+  - `latest_activity_at` rolls in `campaign_latest_click_at`.
+- `src/app/dashboard/campaigns/page.tsx`
+  - `AttributionRollup` interface mirrors helper additions.
+  - `PerformancePanel` Metric grid shows real `Clicks`, `Page views`, `Leads`, `Conversions` (4 cells), then `Click → Lead`, `Lead → Member`, `Approved assets`, `Calendar rows`. The "deferred" subtext on Clicks is removed.
+  - New empty-state copy when posted rows exist but no clicks yet: **"No campaign clicks captured yet. Tracking URLs are ready."**
+  - Footer note rewritten — no longer says click attribution is deferred.
+
+### track-event behavior after patch
+
+| Scenario | Pre-Phase-14I | Post-Phase-14I |
+|---|---|---|
+| Known contact, no UTM | logs event, updates score/tags | unchanged |
+| Known contact, campaign UTM | logs event w/o UTM, updates score/tags | logs event with UTM + resolved FKs, updates score/tags |
+| Anonymous, no UTM | bails (returns ok, no insert) | unchanged |
+| Anonymous, campaign UTM | **bails (returns ok, no insert)** ← bug | **logs event with UTM + resolved FKs, contact_id NULL, score_delta 0** ✓ |
+| Malformed UTM tag | logs event, updates score/tags | logs event, FKs all NULL, falls back to view's substring match |
+
+### Attribution view click behavior
+
+- **Primary path:** `contact_events.event_campaign_id = ec.id` — set when the route resolved the UTM tag at insert time.
+- **Fallback path:** `event_campaign_id IS NULL AND utm_medium='event_campaign' AND utm_campaign ~* '<slug>_<year>(_|$)'` — covers legacy rows that predate Phase 14I (organic test data) AND any rows where the route's runtime resolution failed (rare).
+- `page_view_count` is a strict subset of `click_count` (filtered by `event = 'page_view'`).
+- `COUNT(ce.id)` not `COUNT(*)` so LEFT JOIN nulls don't pollute the count for campaigns with zero clicks.
+
+### Dashboard changes
+
+- Performance panel now renders real metrics. The "deferred" badge is gone; click counts will populate as traffic flows through pushed assets' tracking URLs.
+- Three states are distinguished:
+  - **No signal at all** → "No conversion data yet. Campaign assets are now trackable once links receive traffic."
+  - **Signal but no clicks** → "No campaign clicks captured yet. Tracking URLs are ready."
+  - **Clicks present** → no banner; metrics speak for themselves.
+- Approve / reject / generate / push-to-calendar flows unchanged.
+
+### Diagnostic script
+
+`scripts/diagnose-campaign-click-attribution.js`:
+- Tests that migration 027 columns exist via a SELECT round-trip.
+- Pulls last-30-days `contact_events` with `utm_medium='event_campaign'` (capped at 500).
+- Groups by `utm_campaign`; reports total / page_view subset / FK-resolved / asset-resolved counts per campaign tag.
+- Runs an Art Basel-specific check: how many `contact_events` are FK-attributed vs. UTM-substring-matched.
+- Mirrors the read-only / no-write contract of `scripts/diagnose-tracking-urls.js`.
+
+### Tests run this session
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 11.1s`. `ƒ /api/webhooks/track-event` still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migration 027 must be applied before deploy.** Without it, the route's INSERT fails with `column "utm_source" does not exist` on every campaign event. The bail logic also references the columns indirectly. Apply 027 first.
+- **Migration 028 references `event_campaign_id`, `utm_medium`, `utm_campaign` from `contact_events` (added by 027).** Must run 027 → 028 in order. Running 028 against a 027-less DB fails with `column does not exist`.
+- **Apply order vs deploy:** apply both migrations BEFORE the new code reaches prod. The pre-Phase-14I route still works against a post-027 schema (extra columns just stay NULL on legacy inserts), so a small window between migration apply and deploy is non-breaking. The reverse — deploy before migration — is breaking (new route attempts to write columns that don't exist).
+- **Asset resolution can return false negatives.** When a real campaign URL is shortened or a UTM tag is hand-edited, the parser may reject the value. The route falls back to leaving FK columns NULL; the view still counts the row via the substring fallback. So at worst, asset-level resolution is missed but campaign-level isn't.
+- **Rate limit unchanged at 60 events/min/IP.** Adding the campaign-resolution lookup costs ~2 extra DB queries per matched event, but only when `utm_medium='event_campaign'`. Organic traffic is unaffected.
+- **Anonymous events accumulate without contact deduplication.** A single visitor clicking a campaign link 5 times in a row produces 5 rows. The view's `COUNT(ce.id)` counts all 5 as clicks. This is intentional — we want raw click volume — but it means click-to-lead rate may overstate. If session-level deduplication becomes important, add a session id to track-event in a future phase.
+- **`metadata` field type-narrowing in the route.** The previous shape allowed `metadata: any` from the body; the rewrite enforces `Record<string, unknown>` and falls back to `{}` if the input isn't an object. Existing callers (the only known one is the tracker on the public site) all send objects, so no breakage expected.
+
+### Leo to do (per Mandatory End-of-Phase Save Protocol)
+
+- [ ] Commit + push.
+- [ ] **Apply migration 027 to Supabase prod.** Verification:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'contact_events'
+    AND column_name IN ('utm_source','utm_medium','utm_campaign','utm_content','event_campaign_id','campaign_asset_id','content_calendar_id')
+  ORDER BY column_name;
+  -- Expect: 7 rows.
+
+  SELECT indexname FROM pg_indexes
+  WHERE tablename = 'contact_events'
+    AND indexname LIKE 'idx_contact_events_%';
+  -- Expect: 5 new indexes (utm_campaign, utm_medium, event_campaign, campaign_asset, content_calendar) plus the 3 from migration 008.
+  ```
+- [ ] **Apply migration 028 to Supabase prod.** Verification:
+  ```sql
+  SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';
+
+  -- Confirm the new click columns are emitted:
+  SELECT position('campaign_click_count' IN pg_get_viewdef('event_campaign_attribution_summary', true)) > 0
+    AS has_click_count,
+         position('campaign_page_view_count' IN pg_get_viewdef('event_campaign_attribution_summary', true)) > 0
+    AS has_page_view_count;
+  -- Expect: both true.
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: open `/dashboard/campaigns` → Art Basel → Performance panel renders Clicks/Page views as 0, no "deferred" subtext, footer note no longer says "deferred". Click count will tick up as traffic flows through the published tracking URLs.
+- [ ] Run `node scripts/diagnose-campaign-click-attribution.js` post-deploy to confirm the schema is in place; optional baseline read.
+
+### Recommended next phase
+
+**Phase 14J — Per-asset click attribution** is the natural next step. Today the view aggregates clicks at campaign grain. Once enough traffic has accumulated, splitting the click_match CTE by `(campaign_asset_id, platform, wave)` lets the dashboard answer: which platform / wave / asset converts best? The schema groundwork is already laid — `contact_events.campaign_asset_id` is populated when the route resolves it. Scope: rewrite the view to add per-asset click columns; thread them through the helper's `by_platform` / `by_wave` breakdowns; add a small "top-performing posts" table to the dashboard.
+
+Alternative: **Phase 14J — Tracking pixel on landing pages.** The current track-event endpoint relies on JS clients calling it. A 1×1 transparent pixel on `/` and `/leosp` would capture clicks even from email apps that strip JS. Modest scope, complementary to Phase 14I.
+
+I'd lean **per-asset attribution first** — it makes the existing data more useful before adding new collection paths.
 
 ---
 
