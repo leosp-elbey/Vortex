@@ -36,6 +36,9 @@ const RequestSchema = z.object({
   model_override: z.string().trim().min(1).max(200).optional(),
   asset_types: z.array(z.enum(ALL_ASSET_TYPES as readonly [AssetType, ...AssetType[]])).optional(),
   force_regenerate: z.boolean().optional(),
+  /** Skip the Claude verifier pass — used by the dashboard's batched generation on Vercel Hobby
+   * to keep each call under the 10s function timeout. */
+  skip_verifier: z.boolean().optional(),
 })
 
 export async function POST(request: NextRequest) {
@@ -57,6 +60,7 @@ export async function POST(request: NextRequest) {
       model_override: parsed.data.model_override,
       asset_types: parsed.data.asset_types,
       force_regenerate: parsed.data.force_regenerate,
+      skip_verifier: parsed.data.skip_verifier,
       createdBy: auth.user.id,
     })
 

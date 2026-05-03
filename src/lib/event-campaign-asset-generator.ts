@@ -106,6 +106,8 @@ export interface GenerateAssetsOptions {
   model_override?: string
   asset_types?: AssetType[]
   force_regenerate?: boolean
+  /** Skip the Claude verifier pass. Useful when batching on Hobby (10s) where the verifier pushes total runtime over the limit. */
+  skip_verifier?: boolean
   createdBy: string | null
 }
 
@@ -342,12 +344,32 @@ function parseBundle(raw: string): GeneratedBundle | null {
   return out
 }
 
-function buildSystemPrompt(): string {
+// Schema fragments per asset type. Used to build a *targeted* JSON schema in the system prompt
+// so a batched call only asks the model for the types being generated. This is the core
+// runtime defense against the Vercel Hobby 10s timeout: smaller batch = smaller output = fits in 10s.
+const SCHEMA_FRAGMENTS: Record<AssetType, string> = {
+  social_post: `  "social_posts": [{"platform":"instagram|facebook|tiktok|twitter","wave":"W1..W8","body":"...","hashtags":["..."]}, x10]`,
+  short_form_script: `  "short_form_scripts": [{"platform":"tiktok|instagram","wave":"W1..W8","body":"HOOK / BODY / CTA"}, x3]`,
+  email_subject: `  "email_subjects": [{"wave":"W1..W8","body":"≤60 chars"}, x3]`,
+  email_body: `  "email_bodies": [{"wave":"W1..W8","body":"200-400 words ending in CTA"}, x3]`,
+  dm_reply: `  "dm_replies": [{"body":"≤220 chars, ends in a question"}, x5]`,
+  hashtag_set: `  "hashtags": ["string", x10]`,
+  image_prompt: `  "image_prompts": [{"body":"1-2 sentence Pexels search or AI image prompt"}, x3]`,
+  video_prompt: `  "video_prompts": [{"body":"1-2 sentence short-form video concept"}, x3]`,
+  landing_headline: `  "landing_headline": "≤80 chars"`,
+  lead_magnet: `  "lead_magnet": "1-2 sentence opt-in hook"`,
+}
+
+function buildSystemPrompt(typesToGenerate: AssetType[]): string {
+  const fragments = typesToGenerate
+    .map(t => SCHEMA_FRAGMENTS[t])
+    .filter(Boolean)
+  const schema = `{\n${fragments.join(',\n')}\n}`
+
   return `You are the campaign asset generator for VortexTrips, a travel-membership and affiliate program brand.
 
 Follow VORTEX_EVENT_CAMPAIGN_SKILL.md strictly:
 - Six-part formula: Destination + Event + Audience + Travel Window + Savings Angle + CTA.
-- Output the full asset bundle (10 posts / 3 scripts / 3 subjects / 3 bodies / 5 DMs / 10 hashtags / 3 image prompts / 3 video prompts / 1 headline / 1 lead magnet).
 - Cruise campaigns must reference port city and pre/post-cruise hotel angle when applicable.
 
 HARD compliance rules — never violate:
@@ -368,25 +390,14 @@ Platform voice norms:
 - DM: short, natural, end with a question.
 
 Output format: a single JSON object. No prose before or after. No markdown fences.
+Produce ONLY the keys listed in the schema below. Do not invent additional keys.
 Schema:
-{
-  "social_posts": [{"platform":"instagram|facebook|tiktok|twitter","wave":"W1..W8","body":"...","hashtags":["..."]}, x10],
-  "short_form_scripts": [{"platform":"tiktok|instagram","wave":"W1..W8","body":"HOOK / BODY / CTA"}, x3],
-  "email_subjects": [{"wave":"W1..W8","body":"≤60 chars"}, x3],
-  "email_bodies": [{"wave":"W1..W8","body":"200-400 words ending in CTA"}, x3],
-  "dm_replies": [{"body":"≤220 chars, ends in a question"}, x5],
-  "hashtags": ["string", x10],
-  "image_prompts": [{"body":"1-2 sentence Pexels search or AI image prompt"}, x3],
-  "video_prompts": [{"body":"1-2 sentence short-form video concept"}, x3],
-  "landing_headline": "≤80 chars",
-  "lead_magnet": "1-2 sentence opt-in hook",
-  "schedule_notes": "1-3 sentences explaining wave timing"
-}
+${schema}
 
 Ground every asset in the campaign data the user provides. Never invent attendance numbers, savings percentages, or prices.`
 }
 
-function buildUserPrompt(campaign: EventCampaignRow): string {
+function buildUserPrompt(campaign: EventCampaignRow, typesToGenerate: AssetType[]): string {
   const lines: string[] = []
   lines.push(`Campaign: ${campaign.campaign_name}`)
   lines.push(`Event: ${campaign.event_name} ${campaign.event_year}`)
@@ -439,6 +450,9 @@ function buildUserPrompt(campaign: EventCampaignRow): string {
   lines.push('- W8 (post-event): next-year early-bird waitlist')
 
   lines.push('')
+  lines.push(`Asset types to generate this call: ${typesToGenerate.join(', ')}.`)
+  lines.push('Produce ONLY the JSON keys that correspond to those types. Omit all other keys.')
+  lines.push('')
   lines.push('Return ONLY the JSON object described in the system prompt. No markdown fences, no preamble.')
   return lines.join('\n')
 }
@@ -456,8 +470,12 @@ async function loadCampaign(supabase: SupabaseAdmin, id: string): Promise<EventC
 }
 
 interface ExistingAssetCheck {
-  liveCount: number
-  draftIdsToArchive: string[]
+  /** Asset types that have at least one non-archived, non-rejected row. */
+  liveTypes: Set<AssetType>
+  /** For each asset type, the IDs of its current `draft` rows (force-regenerate archive targets). */
+  draftIdsByType: Map<AssetType, string[]>
+  /** Total non-archived, non-rejected count across all types — for the already_exists message. */
+  totalLiveCount: number
 }
 
 async function inspectExistingAssets(
@@ -466,16 +484,48 @@ async function inspectExistingAssets(
 ): Promise<ExistingAssetCheck> {
   const { data, error } = await supabase
     .from('campaign_assets')
-    .select('id, status')
+    .select('id, status, asset_type')
     .eq('campaign_id', campaignId)
   if (error) throw new Error(`campaign_assets inspect failed: ${error.message}`)
-  const rows = (data ?? []) as Array<{ id: string; status: string }>
-  const live = rows.filter(r => r.status !== 'archived' && r.status !== 'rejected')
-  const draftIds = rows.filter(r => r.status === 'draft').map(r => r.id)
-  return { liveCount: live.length, draftIdsToArchive: draftIds }
+  const rows = (data ?? []) as Array<{ id: string; status: string; asset_type: string }>
+
+  const liveTypes = new Set<AssetType>()
+  const draftIdsByType = new Map<AssetType, string[]>()
+  let totalLiveCount = 0
+
+  for (const r of rows) {
+    if (!(ALL_ASSET_TYPES as readonly string[]).includes(r.asset_type)) continue
+    const at = r.asset_type as AssetType
+
+    const isLive = r.status !== 'archived' && r.status !== 'rejected'
+    if (isLive) {
+      liveTypes.add(at)
+      totalLiveCount++
+    }
+    if (r.status === 'draft') {
+      const list = draftIdsByType.get(at) ?? []
+      list.push(r.id)
+      draftIdsByType.set(at, list)
+    }
+  }
+
+  return { liveTypes, draftIdsByType, totalLiveCount }
 }
 
-async function archiveDrafts(supabase: SupabaseAdmin, ids: string[]): Promise<number> {
+/**
+ * Archive only `status='draft'` rows for the explicitly requested asset types.
+ * Posted, scheduled, approved, idea, rejected rows are never touched, regardless of type.
+ */
+async function archiveDraftsForTypes(
+  supabase: SupabaseAdmin,
+  draftIdsByType: Map<AssetType, string[]>,
+  requestedTypes: AssetType[],
+): Promise<number> {
+  const ids: string[] = []
+  for (const t of requestedTypes) {
+    const list = draftIdsByType.get(t)
+    if (list) ids.push(...list)
+  }
   if (ids.length === 0) return 0
   const { error, count } = await supabase
     .from('campaign_assets')
@@ -672,7 +722,6 @@ export async function generateCampaignAssets(opts: GenerateAssetsOptions): Promi
   if (requestedTypes.length === 0) {
     throw new Error('asset_types must contain at least one valid asset type')
   }
-  const selectedTypes = new Set<AssetType>(requestedTypes)
 
   const supabase = createAdminClient()
 
@@ -694,38 +743,53 @@ export async function generateCampaignAssets(opts: GenerateAssetsOptions): Promi
   }
 
   const existing = await inspectExistingAssets(supabase, campaign.id)
-  if (existing.liveCount > 0 && !opts.force_regenerate) {
-    return {
-      ok: true,
-      campaign_id: campaign.id,
-      campaign_name: campaign.campaign_name,
-      generation_job_id: null,
-      asset_count: 0,
-      asset_breakdown: zeroBreakdown(),
-      schedule: [],
-      archived_count: 0,
-      verification: { status: null, score: null, skipped: true, reason: 'assets already exist' },
-      warnings: [],
-      already_exists: true,
-      existing_count: existing.liveCount,
-      message: `Campaign already has ${existing.liveCount} non-archived assets. Re-run with force_regenerate=true to replace drafts.`,
+
+  // Asset-type-aware dedup so the dashboard can call this route in batches.
+  // Without force: only generate types that don't already have a live (non-archived/non-rejected) row.
+  // With force: archive draft rows for the requested types only, then generate all requested types.
+  let typesToGenerate: AssetType[]
+  let archivedCount = 0
+
+  if (opts.force_regenerate) {
+    archivedCount = await archiveDraftsForTypes(supabase, existing.draftIdsByType, requestedTypes)
+    typesToGenerate = requestedTypes
+  } else {
+    typesToGenerate = requestedTypes.filter(t => !existing.liveTypes.has(t))
+    if (typesToGenerate.length === 0) {
+      return {
+        ok: true,
+        campaign_id: campaign.id,
+        campaign_name: campaign.campaign_name,
+        generation_job_id: null,
+        asset_count: 0,
+        asset_breakdown: zeroBreakdown(),
+        schedule: [],
+        archived_count: 0,
+        verification: { status: null, score: null, skipped: true, reason: 'assets already exist' },
+        warnings: [],
+        already_exists: true,
+        existing_count: existing.totalLiveCount,
+        message: `Requested asset types already have non-archived assets for this campaign. Use force_regenerate=true to replace drafts.`,
+      }
     }
   }
 
-  let archivedCount = 0
-  if (opts.force_regenerate && existing.draftIdsToArchive.length > 0) {
-    archivedCount = await archiveDrafts(supabase, existing.draftIdsToArchive)
-  }
+  // The set used by buildInsertRows MUST track typesToGenerate (post-filter), not the
+  // original requestedTypes — otherwise on a non-force batch we'd insert duplicates of
+  // already-live types if the model echoes them back.
+  const generatedTypes = new Set<AssetType>(typesToGenerate)
 
   const job = await runAIJob({
     jobType: 'social-pack',
     title: `Event campaign assets: ${campaign.campaign_name}`.slice(0, 200),
-    prompt: buildUserPrompt(campaign),
-    systemPrompt: buildSystemPrompt(),
+    prompt: buildUserPrompt(campaign, typesToGenerate),
+    systemPrompt: buildSystemPrompt(typesToGenerate),
     inputPayload: {
       event_campaign_id: campaign.id,
-      asset_types: requestedTypes,
+      asset_types_requested: requestedTypes,
+      asset_types_generated: typesToGenerate,
       force_regenerate: !!opts.force_regenerate,
+      skip_verifier: !!opts.skip_verifier,
     },
     modelOverride: opts.model_override?.trim() || undefined,
     createdBy: opts.createdBy,
@@ -764,9 +828,11 @@ export async function generateCampaignAssets(opts: GenerateAssetsOptions): Promi
     }
   }
 
-  const { rows, warnings } = buildInsertRows(campaign, bundle, job.jobId, job.modelUsed, selectedTypes)
+  const { rows, warnings } = buildInsertRows(campaign, bundle, job.jobId, job.modelUsed, generatedTypes)
   const inserted = await insertAssets(supabase, rows)
-  const verification = await tryVerifier(job.jobId, bundle)
+  const verification = opts.skip_verifier
+    ? { status: null as string | null, score: null as number | null, skipped: true, reason: 'verifier skipped by caller (batched generation on Hobby)' }
+    : await tryVerifier(job.jobId, bundle)
 
   const breakdown = zeroBreakdown()
   for (const row of inserted) breakdown[row.asset_type] = (breakdown[row.asset_type] ?? 0) + 1

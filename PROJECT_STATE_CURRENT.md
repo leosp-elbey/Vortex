@@ -1,6 +1,6 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (post-audit — read-only system audit complete; SYSTEM_AUDIT_PHASE_14_STATUS.md added to repo)
+**Last updated:** 2026-05-02 (Phase 14E timeout patch in working tree — type-aware dedup + 4-batch dashboard loop + skip_verifier; not deployed yet)
 **Last known good commit:** `b7fc8ad` — "Phase 14E: dashboard campaign planner UI and admin campaign asset routes"
 **Production:** vortextrips.com (LIVE; last prod deploy 2026-04-30; Phase 13 + 14A + 14B + 14C + 14D + 14E changes are NOT deployed yet by design)
 **Branch:** `main`
@@ -489,3 +489,32 @@ Once all three are green, Phase 14F is a low-risk session: one schema migration 
 - No Vercel env audit has been run since Phase 11; Phase 13 follow-up `vercel env ls production` still pending.
 
 The audit confirmed: 4-cron Hobby cap respected, no NEXT_PUBLIC env leaks, service-role key server-only, admin routes uniformly gated by `requireAdminUser()`, Surge365 path-based `/leosp` URLs correct in code (still on old `?wa=leosp` in prod until next deploy), Phase 14B-14E code internally consistent and matches the spec in `VORTEX_EVENT_CAMPAIGN_SKILL.md`.
+
+---
+
+## Phase 14E Timeout Patch (in working tree, 2026-05-02 — not yet committed/deployed)
+
+A 504 was observed on `POST /api/admin/campaigns/generate-assets` for Art Basel Miami Beach 2026 (`7ca6bc3f-5cb2-4bdf-9883-1470a31c8a8f`). Root cause: Vercel Hobby's hard 10s function timeout vs. a monolithic Sonnet 4.6 + Claude verifier round-trip needing ~30-60s. The route's `export const maxDuration = 60` declaration is silently ignored on Hobby.
+
+This patch keeps the existing route surface but makes the dashboard call it in 4 sequential, asset-type-targeted batches against the cheap model with the verifier skipped — every batch fits comfortably under 10s.
+
+**Edited:**
+- `src/lib/event-campaign-asset-generator.ts` — `inspectExistingAssets` now returns `{ liveTypes: Set<AssetType>, draftIdsByType: Map<AssetType, string[]>, totalLiveCount }`. New `archiveDraftsForTypes` archives only `status='draft'` rows for the **requested** asset types — posted/approved/scheduled/idea/rejected and drafts of other types are untouched. `generateCampaignAssets` now: (a) without `force_regenerate`, filters `requestedTypes` down to `typesToGenerate = requestedTypes − liveTypes` and short-circuits with `already_exists=true` only when ALL requested types are already covered; (b) with `force_regenerate=true`, archives draft rows of the requested types only and regenerates all of them. Added `skip_verifier?: boolean` option that bypasses the Claude verifier pass (used by the dashboard batch flow). `buildSystemPrompt` and `buildUserPrompt` now take `typesToGenerate` and emit a targeted JSON schema so the model only generates what was asked. `buildInsertRows` filters on the post-dedup `generatedTypes` set so non-force batches can never insert duplicates of already-live types.
+- `src/app/api/admin/campaigns/generate-assets/route.ts` — Zod `RequestSchema` extended with optional `skip_verifier: boolean`; passed through to `generateCampaignAssets`.
+- `src/app/dashboard/campaigns/page.tsx` — `handleGenerate` rewritten as a sequential 4-batch loop. Batches: `['social_post']`, `['short_form_script','email_subject','email_body']`, `['dm_reply','hashtag_set']`, `['image_prompt','video_prompt','landing_headline','lead_magnet']`. Every batch sends `model_override: 'meta-llama/llama-3.3-70b-instruct'` and `skip_verifier: true`. New `generationProgress` state drives a "Generating batch N of 4 — <label>…" button label. On a batch failure the loop stops and the error toast names the failing batch. After success, the detail panel and list refresh.
+
+**Behavioral guarantees preserved:**
+- Every inserted asset is still `status='draft'`, `requires_human_approval=true`, `generation_job_id` linked to `ai_jobs`.
+- No `content_calendar` writes. No auto-publish. No schema changes.
+- Force regenerate confirm dialog wording unchanged: "This archives existing draft assets only. Posted, approved, scheduled, and rejected assets are not overwritten."
+- Posted, scheduled, approved, idea, rejected assets are never modified by this code path. Drafts of asset types not in the current batch are also untouched.
+- Banned-term `compliance_flag` still tagged on individual rows in `verification_metadata`. Verifier skip is reported in the bundle-level `verification.skipped=true` with `reason: 'verifier skipped by caller (batched generation on Hobby)'`.
+
+**Tests run this session:**
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS; all routes register; no warnings introduced.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated to this patch.
+
+**Pre-existing orphaned `ai_jobs` from the failed Art Basel attempt:** still in `running` state. Run the cleanup SQL from `SYSTEM_AUDIT_PHASE_14_STATUS.md` (line 11 of the "Recommended Cleanup" block) before retrying. Cosmetic only — does not block the retry.
+
+**Safe to retry Art Basel after deploy:** yes. The pre-deploy attempt inserted 0 `campaign_assets` rows (verified by code path; insert is a single batch at the very end of `generateCampaignAssets`). After deploy + cleanup-SQL, clicking Generate Asset Bundle again will run the 4-batch flow against Llama 3.3 70B with no verifier — each call fits in ~5-8s on the cheap model based on the weekly-content cron's measured ~5s for a 28-post bundle.

@@ -37,6 +37,19 @@ const ASSET_TYPE_ORDER = [
   'lead_magnet',
 ]
 
+// Phase 14E timeout patch — Vercel Hobby caps function execution at 10s, and a single
+// monolithic LLM call for the full ~33-asset bundle (Sonnet 4.6 + Claude verifier) blows
+// past that. The dashboard splits generation into 4 sequential batches against the cheap
+// model with the verifier skipped. Each call carries asset_types so the API only generates
+// — and only dedup-blocks — the requested slice. See SYSTEM_AUDIT_PHASE_14_STATUS.md.
+const GENERATION_BATCHES: Array<{ label: string; types: string[] }> = [
+  { label: 'Social posts', types: ['social_post'] },
+  { label: 'Scripts & emails', types: ['short_form_script', 'email_subject', 'email_body'] },
+  { label: 'DMs & hashtags', types: ['dm_reply', 'hashtag_set'] },
+  { label: 'Prompts, headline & lead magnet', types: ['image_prompt', 'video_prompt', 'landing_headline', 'lead_magnet'] },
+]
+const BATCH_MODEL_OVERRIDE = 'meta-llama/llama-3.3-70b-instruct'
+
 interface CampaignListRow {
   id: string
   campaign_name: string
@@ -139,6 +152,7 @@ export default function CampaignsPage() {
   const [detail, setDetail] = useState<DetailResponse | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number; label: string } | null>(null)
   const [actionInFlight, setActionInFlight] = useState<string | null>(null)
   const { toasts, show } = useToast()
 
@@ -203,23 +217,48 @@ export default function CampaignsPage() {
       if (!ok) return
     }
     setGenerating(true)
+    setGenerationProgress({ current: 0, total: GENERATION_BATCHES.length, label: '' })
+
+    let totalAssets = 0
+    let totalArchived = 0
+    let skippedBatches = 0
+
     try {
-      const res = await fetch('/api/admin/campaigns/generate-assets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event_campaign_id: campaignId, force_regenerate: force }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        throw new Error(json.error || json.message || 'Generation failed')
+      for (let i = 0; i < GENERATION_BATCHES.length; i++) {
+        const batch = GENERATION_BATCHES[i]
+        setGenerationProgress({ current: i + 1, total: GENERATION_BATCHES.length, label: batch.label })
+
+        const res = await fetch('/api/admin/campaigns/generate-assets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_campaign_id: campaignId,
+            asset_types: batch.types,
+            model_override: BATCH_MODEL_OVERRIDE,
+            force_regenerate: force,
+            skip_verifier: true,
+          }),
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          throw new Error(`Batch ${i + 1}/${GENERATION_BATCHES.length} (${batch.label}): ${json.error || json.message || 'failed'}`)
+        }
+        if (json.already_exists) {
+          skippedBatches++
+        } else if (!json.ok) {
+          throw new Error(`Batch ${i + 1}/${GENERATION_BATCHES.length} (${batch.label}): ${json.message || 'generation failed'}`)
+        } else {
+          totalAssets += json.asset_count ?? 0
+          totalArchived += json.archived_count ?? 0
+        }
       }
-      if (json.already_exists) {
-        show(`Already has ${json.existing_count} assets — use Force Regenerate to replace drafts`, 'info')
-      } else if (!json.ok) {
-        throw new Error(json.message || 'Generation failed')
+
+      const arch = totalArchived > 0 ? ` (archived ${totalArchived} drafts)` : ''
+      const skipped = skippedBatches > 0 ? `, ${skippedBatches} batch${skippedBatches === 1 ? '' : 'es'} skipped (already exist)` : ''
+      if (totalAssets === 0 && skippedBatches > 0) {
+        show(`All requested asset types already exist for this campaign — use Force Regenerate to replace drafts`, 'info')
       } else {
-        const arch = json.archived_count ? ` (archived ${json.archived_count} drafts)` : ''
-        show(`Generated ${json.asset_count} assets${arch}`)
+        show(`Generated ${totalAssets} assets across ${GENERATION_BATCHES.length} batches${arch}${skipped}`)
       }
       await loadDetail(campaignId)
       await loadList()
@@ -227,6 +266,7 @@ export default function CampaignsPage() {
       show(err instanceof Error ? err.message : 'Generation failed', 'error')
     } finally {
       setGenerating(false)
+      setGenerationProgress(null)
     }
   }
 
@@ -306,6 +346,7 @@ export default function CampaignsPage() {
             detail={detail}
             loading={detailLoading}
             generating={generating}
+            generationProgress={generationProgress}
             actionInFlight={actionInFlight}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
@@ -474,6 +515,7 @@ function CampaignDetailPanel({
   detail,
   loading,
   generating,
+  generationProgress,
   actionInFlight,
   onGenerate,
   onApprove,
@@ -482,6 +524,7 @@ function CampaignDetailPanel({
   detail: DetailResponse | null
   loading: boolean
   generating: boolean
+  generationProgress: { current: number; total: number; label: string } | null
   actionInFlight: string | null
   onGenerate: (id: string, force: boolean) => void
   onApprove: (assetId: string) => void
@@ -540,7 +583,11 @@ function CampaignDetailPanel({
               disabled={generating}
               className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] disabled:opacity-60"
             >
-              {generating ? 'Generating…' : '✨ Generate Asset Bundle'}
+              {generating
+                ? generationProgress
+                  ? `Generating batch ${generationProgress.current} of ${generationProgress.total}${generationProgress.label ? ` — ${generationProgress.label}` : ''}…`
+                  : 'Generating…'
+                : '✨ Generate Asset Bundle'}
             </button>
             {showForceButton && (
               <button

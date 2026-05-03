@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (post-audit — `SYSTEM_AUDIT_PHASE_14_STATUS.md` added; tests run but no code modified)
+**Last updated:** 2026-05-02 (Phase 14E timeout patch in working tree — type-aware dedup + 4-batch dashboard loop + skip_verifier; tests pass; not deployed yet)
 **Last code-shipping commit:** `b7fc8ad` (Phase 14E dashboard campaign planner)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phases 14A-14E shipped to `main` (not deployed) · **Read-only audit complete** — see `SYSTEM_AUDIT_PHASE_14_STATUS.md`
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phases 14A-14E shipped through `b7fc8ad` and deployed; **Phase 14E Timeout Patch in working tree, awaiting commit + deploy**.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,41 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14F-Prep (3 manual gates) before Phase 14F can start.**
+**Phase 14E Timeout Patch (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy).**
+
+The dashboard campaign planner returned a 504 on `POST /api/admin/campaigns/generate-assets` for Art Basel because Vercel Hobby's hard 10s function timeout cannot accommodate a single Sonnet 4.6 + Claude verifier call generating the full ~33-asset bundle. The route's `maxDuration = 60` declaration is silently ignored on Hobby. See `SYSTEM_AUDIT_PHASE_14_STATUS.md` for the full diagnosis.
+
+**Patch applied:**
+- [x] `src/lib/event-campaign-asset-generator.ts` — `inspectExistingAssets` is now asset-type-aware (`liveTypes` set + `draftIdsByType` map). New `archiveDraftsForTypes` archives only `status='draft'` rows for the requested asset types. `generateCampaignAssets` filters `requestedTypes − liveTypes` for non-force calls (returns `already_exists=true` only when all requested types are already covered) and archives drafts of the requested types only on `force_regenerate=true`. Added `skip_verifier?: boolean` option that bypasses the Claude verifier pass. `buildSystemPrompt(typesToGenerate)` and `buildUserPrompt(campaign, typesToGenerate)` emit a targeted JSON schema so the model only generates what's asked. `buildInsertRows` filters on the post-dedup `generatedTypes` set, preventing duplicate inserts even if the model echoes back already-live types.
+- [x] `src/app/api/admin/campaigns/generate-assets/route.ts` — Zod schema accepts optional `skip_verifier: boolean`; passed through.
+- [x] `src/app/dashboard/campaigns/page.tsx` — `handleGenerate` rewritten as sequential 4-batch loop. Batches:
+  - Batch 1: `['social_post']`
+  - Batch 2: `['short_form_script','email_subject','email_body']`
+  - Batch 3: `['dm_reply','hashtag_set']`
+  - Batch 4: `['image_prompt','video_prompt','landing_headline','lead_magnet']`
+  Every batch sends `model_override: 'meta-llama/llama-3.3-70b-instruct'` and `skip_verifier: true`. New `generationProgress` state drives a "Generating batch N of 4 — <label>…" button label. Loop stops on first batch failure with named-batch error toast. Detail and list refresh after success.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — compiles cleanly; all routes register; no new warnings
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees preserved:**
+- All inserted assets stay `status='draft'`, `requires_human_approval=true`.
+- No `content_calendar` writes. No auto-publish. No schema changes.
+- Posted, scheduled, approved, idea, rejected assets never modified by this code path.
+- Drafts of asset types outside the current batch are untouched.
+- Force regenerate confirm dialog wording unchanged.
+
+**Leo to do:**
+- [ ] Commit + push the patch (commands in the session response).
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run the cleanup SQL from `SYSTEM_AUDIT_PHASE_14_STATUS.md` to flip orphaned `running` `ai_jobs` rows from the failed Art Basel attempt to `failed`.
+- [ ] Retry Generate Asset Bundle on Art Basel; expect 4 sequential ~5-8s calls, ~33 draft assets total, no 504.
+
+---
+
+## Phase 14F-Prep (3 manual gates) before Phase 14F can start.**
 
 The 2026-05-02 read-only system audit confirmed Phases 14A-14E are committed cleanly to `main` (typecheck + build pass; lint pre-broken from Phase 13). Phase 14F is **not safe to start yet** because three prerequisites are still open:
 
