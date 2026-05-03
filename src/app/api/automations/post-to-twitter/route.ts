@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { TwitterApi } from 'twitter-api-v2'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { validateManualPostingGate } from '@/lib/posting-gate'
 
 const TWITTER_MAX_LENGTH = 280
 
@@ -63,8 +64,18 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (fetchErr || !post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
-  if (post.status !== 'approved') return NextResponse.json({ error: 'Post must be approved before publishing' }, { status: 400 })
-  if (post.platform !== 'twitter') return NextResponse.json({ error: 'This endpoint is for Twitter posts only' }, { status: 400 })
+
+  // Phase 14K.0.5 — manual-posting gate. Must pass BEFORE any platform call
+  // or status mutation. Subsumes the legacy `status === 'approved'` check.
+  // Returns 403 with structured reasons; route never touches the platform if
+  // the gate refuses.
+  const gate = validateManualPostingGate(post, { supportedPlatforms: ['twitter'] })
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { success: false, blocked_by_gate: true, reasons: gate.reasons },
+      { status: 403 },
+    )
+  }
 
   try {
     const client = new TwitterApi({

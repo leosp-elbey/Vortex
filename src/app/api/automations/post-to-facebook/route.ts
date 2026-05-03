@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { validateManualPostingGate } from '@/lib/posting-gate'
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID
 const PAGE_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
@@ -26,8 +27,16 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (fetchErr || !post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
-  if (post.status !== 'approved') return NextResponse.json({ error: 'Post must be approved before publishing' }, { status: 400 })
-  if (post.platform !== 'facebook') return NextResponse.json({ error: 'This endpoint is for Facebook posts only' }, { status: 400 })
+
+  // Phase 14K.0.5 — manual-posting gate. Must pass BEFORE any platform call
+  // or status mutation. Subsumes the legacy `status === 'approved'` check.
+  const gate = validateManualPostingGate(post, { supportedPlatforms: ['facebook'] })
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { success: false, blocked_by_gate: true, reasons: gate.reasons },
+      { status: 403 },
+    )
+  }
 
   try {
     const hashtags = post.hashtags?.map((h: string) => `#${h}`).join(' ') ?? ''

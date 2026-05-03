@@ -1,8 +1,8 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14J.2 + 14J.2.1 closed and prod-verified — branded /t/<slug> redirect routes through campaign_cta_url with full FK + UTM logging. Phase 14K starting in DRY-RUN ONLY mode — autoposter eligibility surfacing, no live posts.)
-**Last known good commit:** `dec7bb3` — "Phase 14J.2.1: harden branded tracking redirect"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14J.2.1 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14K dry-run + patch closed and prod-verified. Phase 14K.0.5 in working tree — manual posting gate consistency; typecheck + build pass; awaiting commit + deploy.)
+**Last known good commit:** `63bb4ba` — "Phase 14K patch: remove updated_at dependency from dry-run query"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14K (dry-run) deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
 
 ---
 
@@ -618,6 +618,156 @@ node scripts/diagnose-autoposter-dry-run.js
 ```
 
 The script's "no-mutation cross-check" snapshots `posted_at` count before AND after the curl, and reports green only when they match.
+
+---
+
+## Phase 14K.0.5 — Posting Gate Consistency for Manual Platform Routes (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy)
+
+Phase 14K dry-run respected the gate; the 3 manual platform-post routes still bypassed it (they only checked `status='approved'`). Phase 14K.0.5 closes that backdoor by adding a shared `validateManualPostingGate` helper and calling it in every manual route BEFORE any platform API call or row mutation.
+
+### Routes inspected
+
+| Route file | Type | Phase 14K.0.5 status |
+|---|---|---|
+| `src/app/api/automations/post-to-facebook/route.ts` | manual platform-post (Facebook Graph API) | **patched** — gate-checked |
+| `src/app/api/automations/post-to-instagram/route.ts` | manual platform-post (Instagram Graph API) | **patched** — gate-checked |
+| `src/app/api/automations/post-to-twitter/route.ts` | manual platform-post (Twitter v2 API) | **patched** — gate-checked |
+| `src/app/api/cron/autoposter-dry-run/route.ts` | dry-run cron (Phase 14K) | already gated — unchanged |
+| `src/app/api/admin/content-calendar/posting-gate/route.ts` | gate toggle endpoint (Phase 14J) | not a posting route — unchanged |
+| `src/app/api/content/route.ts` | generic status PATCH (used by Mark Posted bookkeeping) | **NOT modified** — see "Routes left unchanged" |
+
+The user's task description listed paths under `src/app/api/admin/content-calendar/post-to-*` that don't actually exist; the live posting routes are at `src/app/api/automations/post-to-*`. Phase 14K.0.5 patched the actual route files (spirit of the rule); the file-path discrepancy is documented here.
+
+### Routes patched
+
+All three platform routes follow an identical pattern. After fetching the row from `content_calendar`:
+
+1. Call `validateManualPostingGate(post, { supportedPlatforms: ['<platform>'] })`.
+2. If `!gate.allowed`, return `403` with `{ success: false, blocked_by_gate: true, reasons: gate.reasons }`.
+3. The legacy `if (post.status !== 'approved') ...` line is removed (subsumed by the gate's stricter check).
+4. The legacy `if (post.platform !== '<platform>') ...` line is removed (covered by `supportedPlatforms` constraint).
+
+Behaviorally: a row that was previously postable (`status='approved'` only) but isn't gate-ready (`posting_status='idle'` etc.) now gets refused with 403 instead of silently posting. A row that IS gate-ready posts exactly as before.
+
+### Routes left unchanged and why
+
+- **`src/app/api/content/route.ts`** (generic content PATCH, used by the dashboard's "Mark Posted" bookkeeping button): NOT in the user's allow-list. Server-side gap remains where a motivated operator could `curl -X PATCH /api/content -d '{"id":"<x>","status":"posted"}'` to flip a non-ready row to posted without going through a platform route. The dashboard now hides the Mark Posted button on non-ready rows, closing the GUI bypass — but the server-side curl-bypass persists. **Documented as a deferred gap** to be closed in a small follow-up phase (Phase 14K.0.6) when the user is ready to constrain `/api/content` to gate-aware status transitions.
+
+### Gate rules enforced
+
+`validateManualPostingGate` returns `{ allowed, reasons[], warnings[], mode: 'manual' }`. All rules below must pass for `allowed: true`:
+
+| Rule | Reason if violated |
+|---|---|
+| Row must exist | `content_calendar row not found` |
+| `status === 'approved'` | `row status is '<X>', need 'approved'` |
+| Not rejected | `row status is rejected` |
+| Not already posted | `row is already posted — refusing duplicate post` |
+| `posting_status !== 'blocked'` | `gate is blocked: <reason>` |
+| `posting_status === 'ready'` | `posting_status is '<X>', need 'ready' (Mark Ready first)` |
+| `posting_gate_approved === true` | `posting_gate_approved is not true — Mark Ready first` |
+| `queued_for_posting_at IS NOT NULL` | `queued_for_posting_at is null` |
+| `manual_posting_only === true` | `manual_posting_only is not true — gate refuses non-manual paths in this phase` |
+| `platform` non-empty (skipped in `bookkeepingOnly`) | `platform is missing` |
+| `platform ∈ supportedPlatforms` (when supplied) | `platform '<X>' is not supported by this route (expected one of: ...)` |
+| `caption` non-empty (skipped in `bookkeepingOnly`) | `caption/body is empty` |
+| Campaign rows: `tracking_url` non-empty | `campaign-originated row missing tracking_url — re-push from campaign dashboard` |
+| Campaign rows: `tracking_url` starts with branded host | `tracking_url must start with https://www.vortextrips.com/t/ (legacy URLs blocked)` |
+
+This gate matches the autoposter dry-run's eligibility rules from Phase 14K (single source of truth — manual and automated paths share enforcement).
+
+### UI changes
+
+`src/app/dashboard/content/page.tsx`:
+
+- For `status='approved'` rows, the four platform-Post buttons (Post to IG / FB / X / Upload to TikTok) AND the Mark Posted button now render **only when** `posting_status='ready' && posting_gate_approved=true`. Approved-but-idle rows show only the Mark Ready button.
+- Added a third gate-related copy line near the existing notes:
+  > 🟢 Mark Ready is a manual gate only. It does not post to social platforms.
+  > Autoposter dry-run only. Ready rows are inspected, not posted.
+  > **Posting buttons appear only after Mark Ready passes the gate.**
+- Added a `title` attribute on the Mark Posted button explaining it's bookkeeping ("Bookkeeping only — record that this row was posted (e.g. via the platform's web UI).").
+- Approve / Reject / generation flows untouched.
+- Existing posting-gate buttons (Mark Ready / Remove from Queue / Gate ineligible hint) untouched.
+
+### Diagnostic script
+
+`scripts/diagnose-manual-posting-gates.js`:
+
+1. **Source-code check.** For each of the 3 manual posting routes, verifies the file imports from `@/lib/posting-gate` AND contains `validateManualPostingGate`. Reports green / red per route.
+2. **Approved-row split.** Pulls all `status='approved'` rows; classifies by `posting_status` (idle / ready / blocked / other).
+3. **Idle ↔ blocked agreement.** Runs the validator (JS mirror) on every idle row; expects 0 to pass.
+4. **Ready validator pass/fail.** Runs the validator on every ready row; lists failing rows with reasons.
+5. **No-mutation cross-check.** Snapshots `count(*) WHERE posted_at IS NOT NULL` before AND after the diagnostic.
+6. **No platform calls.** The script never hits a `/api/automations/post-to-*` URL and never imports a platform SDK; the contract is read-only.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 14.9s`. All 4 relevant routes still register: `posting-gate`, `post-to-facebook`, `post-to-instagram`, `post-to-twitter`.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+- `node scripts/diagnose-manual-posting-gates.js` — to run **after** deploy. Expected: section 1 reports all 3 routes green; section 2 shows 53/0/0; section 3 confirms all 53 idle rows correctly blocked; section 5 reports `posted_at` unchanged at 22.
+
+### Database mutations / Platform API calls
+
+**Zero of both.** Phase 14K.0.5 is purely defensive code:
+- The validator is pure (no DB calls).
+- The 3 routes only ADD a 403 short-circuit BEFORE existing platform calls.
+- The dashboard hides buttons; clicking was the only mutation source, and they're only visible on already-gate-ready rows now.
+- The diagnostic is read-only.
+
+### Risks / deferred items
+
+- **`/api/content/route.ts` server-side gap.** Mark Posted via curl can still flip a non-ready row. Dashboard hides the button; API doesn't enforce. Deferred to Phase 14K.0.6.
+- **`automations/post-to-tiktok` and `automations/post-to-email` don't exist.** TikTok upload is a manual link to creator-center; no email-from-content_calendar route exists. If either ships in a future phase, they MUST call `validateManualPostingGate`.
+- **Dashboard JS mirror of the validator** in `diagnose-manual-posting-gates.js` can drift from `src/lib/posting-gate.ts`. Kept in sync by hand.
+- **`bookkeepingOnly` mode is exposed but unused** in this phase. Reserved for the future `/api/content` patch (Phase 14K.0.6).
+- **`manual_posting_only=true` is required by the gate.** When Phase 14K.1 introduces live autoposting (operators flipping `manual_posting_only=false`), the manual routes will refuse those rows — which is correct. Manual and autoposter are mutually exclusive.
+
+### Exact git commands
+
+```bash
+git status
+git add src/lib/posting-gate.ts src/app/api/automations/post-to-twitter/route.ts src/app/api/automations/post-to-facebook/route.ts src/app/api/automations/post-to-instagram/route.ts src/app/dashboard/content/page.tsx scripts/diagnose-manual-posting-gates.js PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14K.0.5: gate manual platform-post routes — validateManualPostingGate + dashboard UI gate"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` intentionally **not** in the `git add` list (cache file, save-protocol Rule 5).
+
+### Deploy instructions
+
+1. `git push origin main` (×2 for verification).
+2. `npx vercel --prod --yes`.
+3. Smoke-test (below).
+
+No migration. No `vercel.json` change.
+
+### Smoke-test checklist
+
+- [ ] `git push` confirmed `Everything up-to-date` on the second push.
+- [ ] `npx vercel --prod --yes` finished cleanly.
+- [ ] Open `/dashboard/content` → confirm a `status='approved'` row that is `posting_status='idle'` shows ONLY the `🟢 Mark Ready` button — no platform-Post buttons, no Mark Posted button.
+- [ ] Click `🟢 Mark Ready` → confirm the badge flips to `✅ Ready for Posting` AND the platform-Post + Mark Posted buttons now appear.
+- [ ] Click `↩ Remove from Queue` → confirm those buttons disappear again.
+- [ ] (Optional, requires admin auth) `curl -X POST /api/automations/post-to-twitter -d '{"content_id": "<id of an idle approved row>"}'` → expect HTTP 403 with `{ success: false, blocked_by_gate: true, reasons: [...] }`.
+- [ ] Run `node scripts/diagnose-manual-posting-gates.js`:
+  - [ ] Section 1: ✓ for all 3 routes
+  - [ ] Section 2: counts match Supabase reality
+  - [ ] Section 3: 0 idle rows leaked through validator
+  - [ ] Section 5: `posted_at` count unchanged
+- [ ] `SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL` is still 22.
+
+### Recommended next phase
+
+**Phase 14K.0.6 — Close the `/api/content` PATCH bypass.** Small follow-up. Add a guard: when the PATCH body sets `status='posted'`, run `validateManualPostingGate(row, { bookkeepingOnly: true })` first; refuse with 403 if not allowed. Other transitions unchanged. Closes the last server-side curl-bypass.
+
+Or jump straight to **Phase 14K.1 — Live autoposter cron.** Removes the `LIVE_POSTING_ENABLED` guard, wires per-platform poster modules, replaces one of the 4 existing crons or upgrades to Vercel Pro, and extends `posting_gate_audit.action` CHECK to include `auto_posted` / `auto_skipped`.
+
+I'd lean **14K.0.6 first** — small and closes a real gap that exists today. 14K.1 then ships with a clean defensive perimeter.
+
+---
+
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
 

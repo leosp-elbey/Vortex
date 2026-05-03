@@ -189,6 +189,9 @@ export default function ContentPage() {
           <p className="text-[11px] text-gray-400">
             Autoposter dry-run only. Ready rows are inspected, not posted.
           </p>
+          <p className="text-[11px] text-gray-400">
+            Posting buttons appear only after Mark Ready passes the gate.
+          </p>
         </div>
         <button
           onClick={handleGenerate}
@@ -300,46 +303,54 @@ export default function ContentPage() {
 
                     {item.status === 'approved' && (
                       <>
-                        {item.platform === 'instagram' && (
-                          <button
-                            onClick={() => postToInstagram(item)}
-                            className="text-xs bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg hover:bg-pink-200 transition-colors font-medium"
-                          >
-                            📸 Post to IG
-                          </button>
+                        {/* Phase 14K.0.5 — gate platform-Post + Mark Posted buttons.
+                            Approved-but-idle rows show ONLY Mark Ready; platform
+                            posting buttons appear after Mark Ready passes the gate. */}
+                        {item.posting_status === 'ready' && item.posting_gate_approved === true && (
+                          <>
+                            {item.platform === 'instagram' && (
+                              <button
+                                onClick={() => postToInstagram(item)}
+                                className="text-xs bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg hover:bg-pink-200 transition-colors font-medium"
+                              >
+                                📸 Post to IG
+                              </button>
+                            )}
+                            {item.platform === 'facebook' && (
+                              <button
+                                onClick={() => postToFacebook(item)}
+                                className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors font-medium"
+                              >
+                                👥 Post to FB
+                              </button>
+                            )}
+                            {item.platform === 'tiktok' && (
+                              <a
+                                href="https://www.tiktok.com/creator-center/upload"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors font-medium text-center"
+                              >
+                                🎵 Upload to TikTok
+                              </a>
+                            )}
+                            {item.platform === 'twitter' && (
+                              <button
+                                onClick={() => postToTwitter(item)}
+                                className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium"
+                              >
+                                🐦 Post to X
+                              </button>
+                            )}
+                            <button
+                              onClick={() => updateStatus(item.id, 'posted')}
+                              title="Bookkeeping only — record that this row was posted (e.g. via the platform's web UI)."
+                              className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors font-medium"
+                            >
+                              ✓ Mark Posted
+                            </button>
+                          </>
                         )}
-                        {item.platform === 'facebook' && (
-                          <button
-                            onClick={() => postToFacebook(item)}
-                            className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors font-medium"
-                          >
-                            👥 Post to FB
-                          </button>
-                        )}
-                        {item.platform === 'tiktok' && (
-                          <a
-                            href="https://www.tiktok.com/creator-center/upload"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors font-medium text-center"
-                          >
-                            🎵 Upload to TikTok
-                          </a>
-                        )}
-                        {item.platform === 'twitter' && (
-                          <button
-                            onClick={() => postToTwitter(item)}
-                            className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium"
-                          >
-                            🐦 Post to X
-                          </button>
-                        )}
-                        <button
-                          onClick={() => updateStatus(item.id, 'posted')}
-                          className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors font-medium"
-                        >
-                          ✓ Mark Posted
-                        </button>
 
                         {/* Phase 14J — Posting gate controls. Render only when row is approved. */}
                         {(() => {

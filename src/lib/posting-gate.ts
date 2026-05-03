@@ -94,6 +94,138 @@ export function canEnterPostingQueue(row: PostingGateRow): EligibilityResult {
   return { ok: reason === null, reason }
 }
 
+// ============================================================================
+// Phase 14K.0.5 — Manual posting gate validator.
+//
+// This is the gate the manual platform-post routes (post-to-facebook,
+// post-to-instagram, post-to-twitter) must run BEFORE calling any platform
+// API. It is intentionally STRICTER than `getPostingGateBlockReason` (which
+// covers the queue-entry rules in Phase 14J) — it ALSO requires:
+//   - posting_status = 'ready'
+//   - posting_gate_approved = true
+//   - queued_for_posting_at non-null
+//   - posted_at is null
+//   - tracking_url starts with https://www.vortextrips.com/t/  (campaign rows)
+//
+// This matches the autoposter dry-run's eligibility rules from Phase 14K so
+// manual and automated paths share one source of truth. Phase 14K.0.5 closes
+// the backdoor where /api/automations/post-to-* routes only checked
+// `status='approved'` without verifying the gate.
+// ============================================================================
+
+export interface ManualPostingGateOptions {
+  /**
+   * When true, skip platform/caption checks. Used by routes that ONLY mark
+   * a row as posted (bookkeeping) without calling a platform API. The gate
+   * still requires status='approved' + posting_status='ready' +
+   * posting_gate_approved=true + queued_for_posting_at; only the platform-
+   * payload checks are skipped.
+   */
+  bookkeepingOnly?: boolean
+  /**
+   * Restrict supported platforms. When provided, the row's platform must be
+   * in this list. Used by per-platform routes (e.g. post-to-twitter passes
+   * `['twitter']`) to defend against operators sending a Facebook row to
+   * the Twitter route. Defaults to undefined (no restriction beyond non-empty).
+   */
+  supportedPlatforms?: readonly string[]
+}
+
+export interface ManualPostingGateResult {
+  /** True ONLY when reasons[] is empty. False otherwise. */
+  allowed: boolean
+  /** Human-readable strings explaining why the gate refused. Empty when allowed. */
+  reasons: string[]
+  /** Soft warnings — surfaced to the operator but don't block. Reserved for future use. */
+  warnings: string[]
+  /** Always 'manual' for this validator. The autoposter has its own helper. */
+  mode: 'manual'
+}
+
+/**
+ * Phase 14K.0.5 — gate enforcer for manual platform-posting routes.
+ *
+ * Returns `{ allowed: false, reasons: [...] }` when ANY rule fails. Routes MUST
+ * check `result.allowed` and return 403 with the result before calling a
+ * platform API or mutating the row.
+ *
+ * Pure: no DB calls, no platform calls, no side effects. Just rule evaluation.
+ */
+export function validateManualPostingGate(
+  row: PostingGateRow | null,
+  options: ManualPostingGateOptions = {},
+): ManualPostingGateResult {
+  const reasons: string[] = []
+  const warnings: string[] = []
+  const mode = 'manual' as const
+
+  if (!row) {
+    reasons.push('content_calendar row not found')
+    return { allowed: false, reasons, warnings, mode }
+  }
+
+  // Lifecycle gates — short-circuit with explicit messages.
+  if (row.status === 'rejected') {
+    reasons.push('row status is rejected')
+  } else if (row.status === 'posted' || row.posted_at) {
+    reasons.push('row is already posted — refusing duplicate post')
+  } else if (row.status !== 'approved') {
+    reasons.push(`row status is '${row.status}', need 'approved'`)
+  }
+
+  // Posting-gate state.
+  if (row.posting_status === 'blocked') {
+    const detail = row.posting_block_reason ? `: ${row.posting_block_reason}` : ''
+    reasons.push(`gate is blocked${detail}`)
+  } else if (row.posting_status !== 'ready') {
+    reasons.push(`posting_status is '${row.posting_status ?? 'null'}', need 'ready' (Mark Ready first)`)
+  }
+  if (row.posting_gate_approved !== true) {
+    reasons.push('posting_gate_approved is not true — Mark Ready first')
+  }
+  if (!row.queued_for_posting_at) {
+    reasons.push('queued_for_posting_at is null')
+  }
+  if (row.manual_posting_only !== true) {
+    reasons.push('manual_posting_only is not true — gate refuses non-manual paths in this phase')
+  }
+
+  // Platform / caption checks (skip for pure bookkeeping mode).
+  if (!options.bookkeepingOnly) {
+    if (!row.platform || !row.platform.trim()) {
+      reasons.push('platform is missing')
+    } else if (
+      options.supportedPlatforms &&
+      !options.supportedPlatforms.includes(row.platform)
+    ) {
+      reasons.push(
+        `platform '${row.platform}' is not supported by this route (expected one of: ${options.supportedPlatforms.join(', ')})`,
+      )
+    }
+    if (!row.caption || !row.caption.trim()) {
+      reasons.push('caption/body is empty')
+    }
+  }
+
+  // Tracking URL — campaign-originated rows must use the branded domain
+  // (Phase 14J.2). Legacy myvortex365.com URLs are explicitly blocked here so
+  // a misconfigured row can't post a non-branded link.
+  if (row.campaign_asset_id) {
+    if (!row.tracking_url || !row.tracking_url.trim()) {
+      reasons.push('campaign-originated row missing tracking_url — re-push from campaign dashboard')
+    } else if (!row.tracking_url.startsWith('https://www.vortextrips.com/t/')) {
+      reasons.push('tracking_url must start with https://www.vortextrips.com/t/ (legacy URLs blocked)')
+    }
+  }
+
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+    warnings,
+    mode,
+  }
+}
+
 interface ActorContext {
   /** auth.users.id of the admin performing the action. NULL is allowed but discouraged. */
   user_id: string | null

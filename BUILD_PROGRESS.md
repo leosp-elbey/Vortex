@@ -28,7 +28,43 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14K Patch — Remove `updated_at` from dry-run eligibility query (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14K.0.5 — Posting Gate Consistency for Manual Platform Routes (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+Phase 14K (dry-run) shipped (`63bb4ba`) and prod-verified (HTTP 200, `dry_run=true`, `live_posting_blocked=true`, `posted_at` count 22 unchanged). Phase 14K.0.5 closes the manual-route bypass: every `/api/automations/post-to-{facebook,instagram,twitter}` route now calls a shared `validateManualPostingGate` helper before any platform API call.
+
+**Patch applied:**
+- [x] `src/lib/posting-gate.ts` — added `validateManualPostingGate(row, options)` returning `{ allowed, reasons[], warnings[], mode: 'manual' }`. Same eligibility rules as Phase 14K dry-run + branded `tracking_url` enforcement for campaign rows. `bookkeepingOnly` and `supportedPlatforms` options reserved.
+- [x] `src/app/api/automations/post-to-twitter/route.ts` — calls `validateManualPostingGate(post, { supportedPlatforms: ['twitter'] })` before any tweet. Returns 403 with `{ success:false, blocked_by_gate:true, reasons }` if refused. Legacy `status==='approved'` and `platform==='twitter'` checks removed (subsumed by gate).
+- [x] `src/app/api/automations/post-to-facebook/route.ts` — same pattern, `supportedPlatforms: ['facebook']`.
+- [x] `src/app/api/automations/post-to-instagram/route.ts` — same pattern, `supportedPlatforms: ['instagram']`.
+- [x] `src/app/dashboard/content/page.tsx` — for `status='approved'` rows, the four platform-Post buttons + Mark Posted are now hidden until `posting_status='ready' && posting_gate_approved=true`. Approved-but-idle rows show only Mark Ready. New copy: "Posting buttons appear only after Mark Ready passes the gate." Mark Posted button gains a tooltip clarifying it's bookkeeping.
+- [x] `scripts/diagnose-manual-posting-gates.js` — verifies each platform route imports + calls the helper; runs the validator against current approved rows; snapshots `posted_at` count before/after; never hits a platform API.
+
+**NOT modified:**
+- `src/app/api/content/route.ts` (generic status PATCH used by Mark Posted bookkeeping) — not in user's allow-list. Server-side curl bypass remains; UI hides the button. Deferred to Phase 14K.0.6.
+- `src/app/api/cron/autoposter-dry-run/route.ts` — already gates correctly via Phase 14K.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 14.9s`. All 4 relevant routes still register.
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated.
+
+**Behavioral guarantees:**
+- No new migration. No `vercel.json` change. No new platform integrations.
+- Zero database mutations from this phase's code paths.
+- Zero platform API calls from this phase's code paths.
+- Approved-and-ready rows continue to post exactly as before — only the path to "ready" is now stricter.
+- Existing manual approval flow (Approve / Reject / Reset) unchanged.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Open `/dashboard/content` → verify approved-but-idle rows show only Mark Ready (no platform-Post buttons).
+- [ ] Run `node scripts/diagnose-manual-posting-gates.js` → confirm all 3 routes green, idle rows correctly blocked, `posted_at` unchanged.
+
+---
+
+## Phase 14K Patch — Remove `updated_at` from dry-run eligibility query (shipped commit `63bb4ba`, prod-verified 2026-05-03).**
 
 Phase 14K shipped (`0faf4ff`) and deployed. First smoke test surfaced one bug: dry-run endpoint returned HTTP 500 with `column content_calendar.updated_at does not exist`. The diagnostic script + direct SQL agreed on 0 eligible / 53 skipped (`posting_status='idle'`), but the cron route's helper SELECTed a non-existent column.
 
