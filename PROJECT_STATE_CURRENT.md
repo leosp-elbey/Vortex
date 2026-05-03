@@ -150,6 +150,127 @@ Order matters: deploy BEFORE migration is also safe (the new code emits branded 
 ### Recommended next phase
 
 Resume **Phase 14K — Autoposter cron that honors the gate**. The branded social-link cleanup is done; future autoposted content will carry the branded URL automatically (because `buildCampaignTrackingUrl` now produces it).
+
+---
+
+## Phase 14J.2.1 — Harden Branded Tracking Redirect Route (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy)
+
+Phase 14J.2 shipped (`2abb1cf`), migration 031 applied — content_calendar / campaign_assets `tracking_url` rewrites worked, `contact_events` rows logged with full FK + UTM resolution. **However** the visible `/t/<slug>?...` link returned a VortexTrips 404 in the browser even though the route logged the click correctly.
+
+### Root cause
+
+Two contributing factors, fixed together:
+
+1. **Brittle redirect call shape.** `NextResponse.redirect(url, { status: 302 })` was the original — `ResponseInit`-style status. Switching to the bare-number form `NextResponse.redirect(new URL(target), 302)` is the most broadly-compatible call shape across Next.js / Vercel runtimes. Wrapping in `new URL(...)` is required by some runtimes; passing a string can cause silent rejection.
+2. **Insufficient fallback chain.** When `cleanedSlug` was empty OR the campaign lookup returned no row OR `event_campaigns.cta_url` was malformed, the original code fell back unconditionally to `https://myvortex365.com/leosp`. If that URL itself were rejected by the redirect call (or simply 404'd in the destination platform), the visitor would hit a fallback page. The hardened version uses an explicit three-tier chain so every reachable code path produces a known-valid `redirect_target`.
+
+A defensive `try/catch` around the redirect call adds a final manual `Response(null, { status: 302, headers: { Location: FINAL_FALLBACK } })` belt-and-suspenders. The route can now never produce a 404 short of complete server failure.
+
+### Files changed
+
+- `src/app/t/[slug]/route.ts` — full rewrite. Now uses a `chooseRedirect()` helper that returns `{ target, reason }`. Redirect call switched to `NextResponse.redirect(new URL(target), 302)`. Catch-block fallback to plain `Response` with manual `Location` header. `safeUrl()` helper validates URLs at every tier so each fallback is objectively known-valid before commit.
+- `scripts/diagnose-branded-redirect.js` (new) — reads recent `branded_redirect` rows from `contact_events`, surfaces `route_slug` / `redirect_target` / `redirect_reason` / resolved IDs / UTM tags, distributes by reason, spot-checks a known-good slug (default Art Basel, override via CLI arg). Mirrors the read-only / no-write contract of the other diagnostics.
+
+### Three-tier fallback chain
+
+| Tier | Reason code | Target | Triggered when |
+|---|---|---|---|
+| 1 | `campaign_cta_url` | `event_campaigns.cta_url` (validated via URL parse) | normal happy path — slug matched a campaign with a parseable cta_url |
+| 2 | `portal_fallback` | `https://myvortex365.com/leosp` (`PORTAL_FALLBACK`) | campaign matched but cta_url was blank/malformed |
+| 2 | `slug_unmatched` | `https://myvortex365.com/leosp` (`PORTAL_FALLBACK`) | slug didn't match any campaign — visitor still gets to the portal |
+| 3 | `empty_slug` | `https://www.vortextrips.com` (`FINAL_FALLBACK`) | slug param was empty (shouldn't happen via the dynamic route, defensive) |
+| 3 | `final_fallback` | `https://www.vortextrips.com` (`FINAL_FALLBACK`) | even `PORTAL_FALLBACK` failed URL validation (should never happen) |
+
+### Click-logging contract preserved
+
+Every redirect — including unmatched-slug and malformed-cta_url paths — still produces a `contact_events` row with:
+- `event = 'page_view'`
+- All four UTM params from the query string
+- `event_campaign_id`, `campaign_asset_id`, `content_calendar_id` resolved when possible
+- New metadata fields (Phase 14J.2.1):
+  - `metadata.source = 'branded_redirect'`
+  - `metadata.route_slug` — the slug param the route received (lowercased / trimmed)
+  - `metadata.redirect_target` — the actual URL the visitor was sent to
+  - `metadata.redirect_reason` — one of the five reason codes above
+
+The diagnostic script reads these debug fields directly so any future redirect failure can be triaged from `contact_events` alone.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 11.3s`. `ƒ /t/[slug]` still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **No new migration needed.** `contact_events.metadata` is JSONB; the new debug fields are additive and require no schema change.
+- **Existing rows in `contact_events.metadata` lack the debug fields.** Pre-Phase-14J.2.1 rows have `metadata.source='branded_redirect'` but no `route_slug` / `redirect_target` / `redirect_reason`. The diagnostic script handles this via `??' (missing)'` fallbacks — no errors, just empty cells.
+- **Fallback chain commits us to never returning 404 from this route.** If the campaign system is wholly broken (DB unreachable, etc.), the worst-case response is now `Response(null, { status: 302, headers: { Location: 'https://www.vortextrips.com' }})` — a redirect to our homepage. Acceptable.
+- **Slug is still case-insensitive** (we lowercase before lookup). Operators who hand-type a slug with capital letters still hit the right campaign.
+- **No behavior change to the `/t/` URL contract.** Browser bookmarks pointing at `/t/<slug>?utm_*=…` continue to work the same way — the redirect target may differ (now guaranteed valid) but the visible URL on social posts is unchanged.
+
+### Exact git commands
+
+```bash
+git status
+git add "src/app/t/[slug]/route.ts" scripts/diagnose-branded-redirect.js PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14J.2.1: harden branded /t/<slug> redirect — robust call shape + 3-tier fallback + debug metadata"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` intentionally **not** in the `git add` list (cache file, save-protocol Rule 5).
+
+### Whether new migration is needed
+
+**No.** Schema is unchanged — the new debug fields go into the existing JSONB `metadata` column.
+
+### Deploy instructions
+
+1. `git push origin main` (×2 for verification).
+2. `npx vercel --prod --yes`.
+3. Smoke test below.
+
+No migration step. No order constraints with other phases.
+
+### Smoke test URL to click
+
+```
+https://www.vortextrips.com/t/art-basel-miami-beach?utm_source=facebook&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W2&utm_content=social_post_fca9a0dd
+```
+
+Expected: browser briefly shows a 302 in devtools network panel, then lands on `myvortex365.com/leosp` (the portal). NO VortexTrips 404 page.
+
+### SQL verification query
+
+After clicking the smoke test URL once:
+
+```sql
+SELECT
+  created_at,
+  metadata ->> 'route_slug'      AS route_slug,
+  metadata ->> 'redirect_reason' AS redirect_reason,
+  metadata ->> 'redirect_target' AS redirect_target,
+  utm_source, utm_medium, utm_campaign, utm_content,
+  event_campaign_id IS NOT NULL  AS campaign_resolved,
+  campaign_asset_id IS NOT NULL  AS asset_resolved,
+  content_calendar_id IS NOT NULL AS calendar_resolved
+FROM contact_events
+WHERE metadata ->> 'source' = 'branded_redirect'
+  AND created_at > now() - interval '5 minutes'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+For the smoke test click, expect a row with:
+- `route_slug = 'art-basel-miami-beach'`
+- `redirect_reason = 'campaign_cta_url'` ✓ (NOT `slug_unmatched` or `final_fallback`)
+- `redirect_target = 'https://myvortex365.com/leosp'`
+- All three resolved booleans = `true`
+
+Or run `node scripts/diagnose-branded-redirect.js` for the same data formatted nicely + a reason-distribution histogram + the known-good slug spot check.
+
+If `redirect_reason` shows `slug_unmatched` for `art-basel-miami-beach`, that means the campaign was deleted from `event_campaigns` — re-seed via the next weekly-content cron tick or manually re-insert via the dashboard.
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
 

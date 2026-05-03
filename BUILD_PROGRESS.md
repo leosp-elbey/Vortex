@@ -28,7 +28,36 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14J.2 — Replace Legacy CTA Links on Social Posts (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 031 + deploy).**
+**Phase 14J.2.1 — Harden Branded Tracking Redirect Route (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+Phase 14J.2 shipped (`2abb1cf`), migration 031 applied. Smoke test surfaced one issue: clicking the branded `/t/<slug>?...` link logged the click correctly but returned a VortexTrips 404 to the browser. Phase 14J.2.1 hardens the redirect call shape, adds a three-tier fallback chain so the route can never produce a 404, and adds debug metadata (`route_slug`, `redirect_target`, `redirect_reason`) to every logged click for post-mortem.
+
+**Patch applied:**
+- [x] `src/app/t/[slug]/route.ts` — rewritten with `chooseRedirect()` helper returning `{ target, reason }`. Five reason codes: `campaign_cta_url`, `portal_fallback`, `slug_unmatched`, `empty_slug`, `final_fallback`. Three-tier fallback chain (campaign cta_url → myvortex365.com/leosp → vortextrips.com). Redirect call switched to `NextResponse.redirect(new URL(target), 302)` (most broadly compatible). Try/catch belt-and-suspenders falls back to manual `Response` with `Location` header so the route can never 404.
+- [x] `scripts/diagnose-branded-redirect.js` — new read-only diagnostic. Lists recent `branded_redirect` events with route_slug / redirect_target / redirect_reason / resolved IDs / UTMs. Distributes by reason. Spot-checks a known-good slug (default `art-basel-miami-beach`, override via CLI arg).
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 11.3s`; `ƒ /t/[slug]` registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No new migration. `contact_events.metadata` is JSONB; new debug fields are additive.
+- Click-logging contract preserved (every redirect still logs to `contact_events` with full UTM + FK resolution).
+- Public `/t/<slug>` URL contract unchanged — bookmarks / social posts continue to work.
+- No platform API calls. No AI calls. No auto-posting.
+- Existing manual posting flow unchanged.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Click the smoke test URL once: `https://www.vortextrips.com/t/art-basel-miami-beach?utm_source=facebook&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W2&utm_content=social_post_fca9a0dd`. Expected: browser lands on `myvortex365.com/leosp`, NOT a VortexTrips 404.
+- [ ] Run `node scripts/diagnose-branded-redirect.js` → confirm the latest entry shows `redirect_reason='campaign_cta_url'` for the Art Basel slug.
+- [ ] Or run the SQL verification query in PROJECT_STATE_CURRENT.md Phase 14J.2.1 entry.
+
+---
+
+## Phase 14J.2 — Replace Legacy CTA Links on Social Posts (shipped commit `2abb1cf`, migration 031 applied 2026-05-03).**
 
 Pre-Phase-14K corrective: campaign-attributed tracking URLs were being emitted with the legacy `myvortex365.com/leosp` host as the visible social link. Phase 14J.2 swaps the visible link to a branded `https://www.vortextrips.com/t/<event_slug>?utm_*=…` form. The `/t/<slug>` route logs the click via `contact_events` (mirrors Phase 14I) then 302-redirects to the campaign's `cta_url`.
 
