@@ -1,10 +1,10 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14G deployed and prod-verified. Phase 14H starting in this session — conversion tracking by event campaign.)
-**Last known good commit:** `2e3869d` — "Phase 14H: conversion tracking by event campaign — attribution view, helper, admin endpoint, dashboard performance panel"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14G deployed and verified**; Supabase migrations 017-022 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14H committed and pushed to `origin/main`; migration 023 applied and verified in Supabase prod; Vercel prod deploy + Performance-panel smoke test still pending. Session-skill mandatory save protocol added.)
+**Last known good commit:** `4323250` — "Phase 14H: update last-known-good commit hash"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14G deployed and verified**; Phase 14H code on `main` and migration 023 applied to Supabase, but **Phase 14H not yet deployed to Vercel**; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · **Phase 14H starting** (conversion tracking — attribution view + admin endpoint + dashboard performance panel)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · **Phase 14H committed** (`2e3869d` + hash-update `4323250`, migration 023 applied; awaiting Vercel deploy + smoke test)
 
 ---
 
@@ -794,7 +794,41 @@ The push-to-calendar route was **not** patched in this phase because:
 
 ### Leo to do
 
-- [ ] Commit + push the patch (commands at end of session response).
-- [ ] **Apply migration 023 to Supabase prod** (`supabase db push` or paste the SQL into the SQL Editor). Required before the endpoint or dashboard panel returns data.
-- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
-- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → confirm the new Performance panel renders with the empty-state copy + composite performance score driven by intrinsic event-fit + production/distribution ratios.
+- [x] Commit + push the patch — **DONE** (`2e3869d` for the patch + `4323250` for the last-known-good hash refresh; both pushed to `origin/main`; verification push returned `Everything up-to-date`).
+- [x] **Apply migration 023 to Supabase prod** — **DONE.** Verified via `SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';` returning the view row.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`). **Still pending.**
+- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → confirm the new Performance panel renders with the empty-state copy + composite performance score driven by intrinsic event-fit + production/distribution ratios. **Still pending.**
+
+### Phase 14H save state (2026-05-03)
+
+| Step | Hash | Status |
+|---|---|---|
+| Phase 14H code commit | `2e3869d` | ✅ pushed |
+| Last-known-good hash bump | `4323250` | ✅ pushed |
+| `git push origin main` verification | — | ✅ `Everything up-to-date` |
+| Migration 023 applied to Supabase prod | — | ✅ verified (`pg_views` row exists) |
+| Vercel prod deploy | — | ⏳ pending |
+| Performance-panel smoke test | — | ⏳ pending (depends on deploy) |
+
+### Recommended next phase
+
+**Phase 14H.1 — Tracking URL Materialization** is the natural next session, but **only after** the two pending items above are complete. The 14H Performance panel returns mostly empty / zero-lead data until URLs are resolved into post bodies (or a `content_calendar.tracking_url` column lands), so 14H.1 is what makes 14H operationally useful. See `BUILD_PROGRESS.md` for the scoped task list.
+
+---
+
+## Mandatory End-of-Phase Save Protocol — added 2026-05-03 to `CLAUDE_SESSION_SKILL.md`
+
+A 10-rule protocol now governs the end of every phase, patch, smoke test, audit, migration, and deployment. Highlights:
+
+1. Both tracking files (`PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md`) must be updated.
+2. Phase-specific docs (audit reports, roadmaps, skill files, continuation files) must be on the save list.
+3. A six-item phase-completion checklist (tracking docs · tests · migration · deploy · smoke test · git commands) must be ticked off before any phase is called complete.
+4. The end-of-phase report must enumerate ten fields in fixed order, including the exact `git add`, commit message, and two-push verification.
+5. Cache / build / secret files (`tsconfig.tsbuildinfo`, `.next/`, `node_modules/`, `.env.local`, `.claude/settings.local.json`) are excluded from staging by default.
+6. Named-file staging only — never `git add .` without explicit authorization.
+7. Two-push verification (`git push origin main` twice; the second must return `Everything up-to-date`).
+8. Final state must be `nothing to commit, working tree clean` (with `tsconfig.tsbuildinfo` as the one acceptable straggler).
+9. Migration ordering must be stated explicitly + a Supabase SQL verification query supplied.
+10. Production-behavior changes require an explicit smoke-test checklist; purely-additive phases must declare "no smoke test required" in writing.
+
+See `CLAUDE_SESSION_SKILL.md` for the canonical text.

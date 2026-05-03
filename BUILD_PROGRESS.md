@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14G deployed and prod-verified — platform guidance lines render correctly per platform. Phase 14H starting.)
-**Last code-shipping commit:** `2e3869d` (Phase 14H conversion tracking)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14G deployed and verified on prod** · **Phase 14H starting** (conversion tracking by event campaign — attribution view + admin endpoint + dashboard performance panel)
+**Last updated:** 2026-05-03 (Phase 14H committed + pushed; migration 023 applied & verified; Vercel deploy + Performance-panel smoke test pending. Mandatory End-of-Phase Save Protocol added to `CLAUDE_SESSION_SKILL.md`.)
+**Last code-shipping commit:** `4323250` (Phase 14H last-known-good hash refresh on top of `2e3869d`)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14G deployed and verified on prod** · **Phase 14H code on `main` + migration 023 applied; Vercel deploy + smoke test pending**
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,33 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14H — Conversion Tracking by Event Campaign (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 023 apply + deploy).**
+**Phase 14H deploy + smoke test (2026-05-03) — pending. Mandatory End-of-Phase Save Protocol locked into `CLAUDE_SESSION_SKILL.md`.**
+
+Phase 14H is committed to `main` (`2e3869d` + last-known-good hash bump `4323250`) and migration 023 is applied to Supabase prod (`event_campaign_attribution_summary` confirmed in `pg_views`). The new Performance panel will render the empty-state copy in the dashboard until prod is redeployed and the panel is smoke-tested.
+
+**Leo to do (in order):**
+- [ ] `npx vercel --prod --yes` to deploy Phase 14H code.
+- [ ] Smoke test on `/dashboard/campaigns` → Art Basel → confirm Performance panel renders with the empty-state copy and a composite performance score derived from the intrinsic event-fit + production / distribution ratios.
+- [ ] Recommended next phase after smoke test: **Phase 14H.1 — Tracking URL Materialization** (small, focused phase; see "Recommended Next Phase" details below).
+
+**Mandatory End-of-Phase Save Protocol — checklist now permanent:**
+
+Every future phase must end with all of the following (full text in `CLAUDE_SESSION_SKILL.md` § Mandatory End-of-Phase Save Protocol):
+
+- [x] `PROJECT_STATE_CURRENT.md` updated
+- [x] `BUILD_PROGRESS.md` updated
+- [x] Tests run or explicitly deferred with reason
+- [x] Migration status documented (apply order + Supabase verification SQL)
+- [x] Deploy status documented
+- [x] Smoke-test status documented
+- [x] Exact git commands provided (named-file `git add`, exact commit message, two `git push origin main` lines)
+- [x] `tsconfig.tsbuildinfo` and other cache/build/secret files excluded by default
+- [x] Two-push verification — second push must return `Everything up-to-date`
+- [x] Final state confirmed `nothing to commit, working tree clean`
+
+---
+
+## Phase 14H — Conversion Tracking by Event Campaign (commits `2e3869d` + `4323250`, migration 023 applied 2026-05-03; deploy + smoke test pending).**
 
 Phase 14G shipped (`ca7c2e4`), prod-verified — platform guidance lines render correctly per platform on every approved `social_post` row. Phase 14H lays the attribution foundation: a SQL view joining `event_campaigns → campaign_assets → content_calendar` plus best-effort UTM lead matching against `contacts.custom_fields`, a server helper that rolls per-(asset × calendar_row) rows up to per-campaign metrics, an admin GET endpoint, and a Performance panel on the campaign dashboard.
 
