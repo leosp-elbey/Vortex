@@ -1,7 +1,7 @@
 # VortexTrips — Current Project State
 
 **Last updated:** 2026-05-02 (Phase 14G deployed and prod-verified. Phase 14H starting in this session — conversion tracking by event campaign.)
-**Last known good commit:** `ca7c2e4` — "Phase 14G: per-platform creative sizing and media rules"
+**Last known good commit:** `2e3869d` — "Phase 14H: conversion tracking by event campaign — attribution view, helper, admin endpoint, dashboard performance panel"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14G deployed and verified**; Supabase migrations 017-022 applied; Hobby plan)
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · **Phase 14H starting** (conversion tracking — attribution view + admin endpoint + dashboard performance panel)

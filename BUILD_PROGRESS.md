@@ -1,7 +1,7 @@
 # VortexTrips Build Progress
 
 **Last updated:** 2026-05-02 (Phase 14G deployed and prod-verified — platform guidance lines render correctly per platform. Phase 14H starting.)
-**Last code-shipping commit:** `ca7c2e4` (Phase 14G social-specs)
+**Last code-shipping commit:** `2e3869d` (Phase 14H conversion tracking)
 **Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14G deployed and verified on prod** · **Phase 14H starting** (conversion tracking by event campaign — attribution view + admin endpoint + dashboard performance panel)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
