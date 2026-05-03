@@ -28,7 +28,34 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14H.1 — Tracking URL Materialization (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 024 apply + deploy).**
+**Phase 14H.1 patch — `utm_content` placeholder defense (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+Smoke test of the just-deployed Phase 14H.1 surfaced a copied URL whose `utm_content` did not contain a real 8-char short id. `grep` confirmed there is no literal placeholder string in `src/`; the bug class is failure-mode permissiveness in `shortAssetId` + `buildCampaignTrackingUrl`. Patched both:
+
+- [x] `src/lib/campaign-tracking-url.ts` — `shortAssetId` now strips ALL non-alnum and requires the 8-char slice to match `^[a-z0-9]{8}$`. Real UUIDs pass; literal `<shortid>`, `{assetId}`, `{asset_id}`, `<asset_id>`, `<8 chars>`, etc. all fail and return `''`. `buildCampaignTrackingUrl` now requires BOTH a clean asset_type AND a real id-derived short before emitting `utm_content` — when either is missing, the param is omitted entirely.
+
+**Existing bad rows (if any):** SQL diagnostic + repair queries documented in `PROJECT_STATE_CURRENT.md` Phase 14H.1 patch section. Do NOT auto-run; Leo to inspect Step 1, then apply Step 2.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 7.8s`
+- [ ] `npm run lint` — not run (Phase 13 ESLint v8/v9 mismatch unrelated)
+
+**Behavioral guarantees:**
+- No new migration. `content_calendar.tracking_url` schema unchanged.
+- No new route call sites. Push-to-calendar route still passes `asset.id` (real UUID).
+- No dashboard wiring changes — copy button continues to read API-returned `tracking_url`.
+- No auto-posting. No AI calls. No media generation.
+
+**Leo to do:**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run SQL diagnostic Step 1; if rows return, apply Step 2 to repair existing tracking_urls.
+- [ ] Smoke test: push a fresh asset → confirm `utm_content` ends in eight hex characters.
+
+---
+
+## Phase 14H.1 — Tracking URL Materialization (shipped commits — see Phase 14H.1 entry below for original patch; this current focus block tracks the placeholder-defense follow-up).**
 
 Phase 14H shipped (`2e3869d` / `4323250`), prod-verified — Performance panel renders, metrics in expected zero/deferred state. Phase 14H.1 turns the placeholder tracking URL template into real URLs at push-to-calendar time so future click traffic with UTM params will be attributed back through the existing 14H view.
 

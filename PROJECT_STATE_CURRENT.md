@@ -95,7 +95,108 @@ The only reason to introduce migration 025 would be to read directly from `conte
   ```
   Should return one row.
 - [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
-- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → approve a `social_post` asset → click `📅 Push to Calendar` → confirm a new green `🔗 Tracking URL ready · copy` button appears next to the `✓ Added to Calendar` badge → click the button → confirm the URL is on the clipboard and matches `https://myvortex365.com/leosp?utm_source=instagram&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W1&utm_content=social_post_<8 chars>` (or similar).
+- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → approve a `social_post` asset → click `📅 Push to Calendar` → confirm a new green `🔗 Tracking URL ready · copy` button appears next to the `✓ Added to Calendar` badge → click the button → confirm the URL is on the clipboard and that `utm_content` ends in eight hex characters (e.g. `utm_content=social_post_7ca6bc3f`).
+
+---
+
+## Phase 14H.1 patch — `utm_content` placeholder defense (in working tree, 2026-05-03 — typecheck + build pass)
+
+Smoke test of Phase 14H.1 surfaced a copied tracking URL whose `utm_content` did not contain a real 8-char short asset ID. Investigation:
+
+- `grep` across `src/` returned **0 matches** for any literal placeholder string (`<shortid>`, `{assetId>`, `<asset_id>`, `{asset_id}`, `<8 chars>`).
+- The push-to-calendar route correctly passes `asset.id` (a real Supabase UUID) into `buildCampaignTrackingUrl`.
+- The dashboard copy button correctly reads `tracking_url` from the API response (no client-side URL building).
+
+Therefore the bug class is **failure-mode permissiveness**, not a literal placeholder leak: when `assetId` is missing or malformed, the prior helper code silently emitted `utm_content=<asset_type>` (with no id suffix), leaving a half-formed param in the URL. The new code omits `utm_content` entirely in that case, per the Phase 14H.1 patch spec.
+
+### Edited
+
+- `src/lib/campaign-tracking-url.ts`
+  - `shortAssetId` rewritten to be **placeholder-rejecting**: strips ALL non-alphanumerics (not just dashes), requires the resulting first-8-char slice to fully match `^[a-z0-9]{8}$`, and returns `''` otherwise. A real Supabase UUID like `7ca6bc3f-5cb2-4bdf-9883-1470a31c8a8f` produces `7ca6bc3f`. A literal `<shortid>` collapses to `shortid` (7 chars), fails the length gate, and returns `''`. Same for `{assetId}`, `{asset_id}`, `<asset_id>`, `<8 chars>`, and any other ad-hoc placeholder shape.
+  - `buildCampaignTrackingUrl` now requires BOTH a clean `assetType` AND a real `idShort` before emitting `utm_content`. When either is missing, the URL contains `utm_source` / `utm_medium` / `utm_campaign` only — no half-formed `utm_content=social_post`. Comment in the source spells out the policy explicitly.
+  - Doc-comment failure-mode bullet added so the contract is visible at the call site.
+
+### Verified — no change needed
+
+- Route (`src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts`) — already passes `asset.id` (real UUID from `campaign_assets`).
+- Dashboard (`src/app/dashboard/campaigns/page.tsx`) — already reads `json.tracking_url` from the API response and copies it verbatim.
+
+### One-time SQL repair (DO NOT auto-run — Leo to approve)
+
+```sql
+-- Step 1: identify any content_calendar rows whose tracking_url contains a literal
+-- placeholder pattern (review before running step 2).
+SELECT cc.id, cc.platform, cc.tracking_url,
+       ca.id AS asset_id, ca.asset_type, ca.wave,
+       ec.event_name, ec.event_year, ec.cta_url
+FROM content_calendar cc
+JOIN campaign_assets ca ON ca.id = cc.campaign_asset_id
+JOIN event_campaigns ec ON ec.id = ca.campaign_id
+WHERE cc.tracking_url IS NOT NULL
+  AND (
+    cc.tracking_url LIKE '%<shortid>%' OR
+    cc.tracking_url LIKE '%<asset_id>%' OR
+    cc.tracking_url LIKE '%{assetId}%' OR
+    cc.tracking_url LIKE '%{asset_id}%' OR
+    cc.tracking_url LIKE '%<8 chars>%' OR
+    cc.tracking_url LIKE '%%3Cshortid%' OR
+    cc.tracking_url LIKE '%%7Bshortid%' OR
+    cc.tracking_url LIKE '%utm_content=' OR    -- bare equals (empty value)
+    cc.tracking_url ~* 'utm_content=[a-z_]+($|&)'  -- type-only, no _<8 chars>
+  );
+
+-- Step 2: rebuild tracking_url for affected rows from the linked campaign_asset_id.
+-- Mirrors the JS helper byte-for-byte:
+--   slug = lower(event_name) → non-alnum→dash → trim leading/trailing dashes
+--   utm_campaign = slug + '_' + year (+ '_' + wave when present)
+--   utm_content = asset_type + '_' + first 8 alnum chars of asset.id (lowercased)
+--   base = trim(cta_url) || fallback 'https://myvortex365.com/leosp'
+--   delimiter = '&' if base already has '?', else '?'
+UPDATE content_calendar cc
+SET tracking_url =
+  COALESCE(NULLIF(trim(ec.cta_url), ''), 'https://myvortex365.com/leosp')
+  || (CASE WHEN COALESCE(NULLIF(trim(ec.cta_url), ''), 'https://myvortex365.com/leosp') LIKE '%?%' THEN '&' ELSE '?' END)
+  || 'utm_source=' || lower(cc.platform)
+  || '&utm_medium=event_campaign'
+  || '&utm_campaign=' ||
+       regexp_replace(
+         regexp_replace(lower(ec.event_name), '[^a-z0-9]+', '-', 'g'),
+         '^-+|-+$', '', 'g'
+       )
+       || '_' || ec.event_year::text
+       || COALESCE('_' || ca.wave, '')
+  || '&utm_content=' || ca.asset_type || '_' ||
+       lower(substring(regexp_replace(ca.id::text, '[^a-z0-9]', '', 'gi') from 1 for 8))
+FROM campaign_assets ca, event_campaigns ec
+WHERE cc.campaign_asset_id = ca.id
+  AND ca.campaign_id = ec.id
+  AND cc.tracking_url IS NOT NULL
+  AND (
+    cc.tracking_url LIKE '%<shortid>%' OR
+    cc.tracking_url LIKE '%<asset_id>%' OR
+    cc.tracking_url LIKE '%{assetId}%' OR
+    cc.tracking_url LIKE '%{asset_id}%' OR
+    cc.tracking_url LIKE '%<8 chars>%' OR
+    cc.tracking_url LIKE '%%3Cshortid%' OR
+    cc.tracking_url LIKE '%%7Bshortid%' OR
+    cc.tracking_url LIKE '%utm_content=' OR
+    cc.tracking_url ~* 'utm_content=[a-z_]+($|&)'
+  );
+```
+
+The repair query rebuilds inline from DB columns — no role-elevation, no app-server round-trip, no row deletion, no insert. Run Step 1 first to confirm the affected count, then Step 2 to repair.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 7.8s`
+- `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated.
+
+### Migration / deploy / smoke test
+
+- **No new migration.** `content_calendar.tracking_url` (migration 024) is unchanged.
+- **Deploy required.** Helper change is in `src/lib/`; without redeploy, prod still emits the half-formed URL.
+- **Smoke test (post-deploy):** push a fresh asset, confirm `utm_content=<asset_type>_<8 hex chars>`, then push an asset with a deliberately corrupted state (won't happen organically) and confirm the URL has no `utm_content` param at all.
 
 ---
 

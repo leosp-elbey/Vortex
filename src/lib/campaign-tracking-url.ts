@@ -53,10 +53,25 @@ export function buildCampaignUtmCampaign(opts: {
   return parts.join('_')
 }
 
-/** Truncate a long ID to a stable short form for `utm_content`. */
+/**
+ * Truncate a long ID to a stable short form for `utm_content`.
+ *
+ * Returns `''` when the input is missing OR when the cleaned input does not produce
+ * exactly 8 alphanumeric characters. Real Supabase UUIDs always satisfy the
+ * requirement; literal placeholder strings (`<shortid>`, `{assetId}`, `<asset_id>`,
+ * etc.) get stripped to fewer-than-8 chars or to a non-hex slice and are rejected.
+ *
+ * Defense-in-depth — even if a placeholder string somehow reaches this function,
+ * it can never be emitted into a URL.
+ */
 function shortAssetId(assetId: string | null | undefined): string {
   if (!assetId || typeof assetId !== 'string') return ''
-  return assetId.replace(/-/g, '').slice(0, 8)
+  // Strip ALL non-alphanumerics (dashes, braces, angle brackets, underscores, etc.)
+  // before slicing, so placeholders like `<shortid>` collapse to `shortid` (7 chars,
+  // fails the length gate below) rather than `<shorti` (which would round-trip).
+  const cleaned = assetId.replace(/[^a-z0-9]/gi, '').slice(0, 8)
+  if (!/^[a-z0-9]{8}$/i.test(cleaned)) return ''
+  return cleaned.toLowerCase()
 }
 
 interface BuildTrackingUrlOptions {
@@ -81,7 +96,11 @@ interface BuildTrackingUrlOptions {
  *   - Preserves existing query params on the base URL.
  *   - Existing UTM params on the base URL are overwritten with campaign values.
  *   - When a value cannot be resolved (e.g. blank event name), the corresponding
- *     UTM is omitted rather than emitted with an empty value.
+ *     UTM is omitted rather than emitted with an empty or placeholder value.
+ *   - `utm_content` requires BOTH a clean asset_type AND an asset-id that yields
+ *     a real 8-char short (see `shortAssetId`). A placeholder-shaped assetId like
+ *     `<shortid>` or `{assetId}` is rejected by the length+charset gate and the
+ *     `utm_content` param is dropped entirely — never round-tripped to the URL.
  *   - Returns the resolved URL string. Throws only on a fundamentally malformed
  *     base URL (which should never happen in practice).
  *
@@ -121,8 +140,15 @@ export function buildCampaignTrackingUrl(opts: BuildTrackingUrlOptions): string 
 
   const assetType = (opts.assetType ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '-')
   const idShort = shortAssetId(opts.assetId)
-  const utmContent = [assetType, idShort].filter(Boolean).join('_')
-  if (utmContent) url.searchParams.set('utm_content', utmContent)
+  // Policy: utm_content is emitted only when BOTH a clean asset_type AND a real
+  // asset-id-derived 8-char short are available. If either is missing — including
+  // the case where shortAssetId rejects a placeholder-shaped input — the param is
+  // dropped entirely rather than emitted half-formed (e.g. `social_post` alone or
+  // `social_post_<shortid>`). This matches the Phase 14H.1 spec: "If assetId is
+  // missing, omit utm_content entirely rather than using a placeholder."
+  if (assetType && idShort) {
+    url.searchParams.set('utm_content', `${assetType}_${idShort}`)
+  }
 
   return url.toString()
 }
