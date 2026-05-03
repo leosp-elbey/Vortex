@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14J deployed and prod-verified — gate columns live, diagnostic clean. Phase 14J.1 starting — posting gate audit trail.)
-**Last code-shipping commit:** `0b3896a` (Phase 14J posting gate)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J deployed and verified on prod** · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail — `posting_gate_audit` table + helper writes + dashboard warning)
+**Last updated:** 2026-05-03 (Phase 14J.1 closed — audit trail live. Phase 14J.2 starting — replace legacy `myvortex365.com/leosp` social CTAs with branded `vortextrips.com/t/<slug>` tracking links.)
+**Last code-shipping commit:** `764a6db` (Phase 14J.1 audit trail)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J.1 deployed and verified on prod** · **Phase 14J.2 starting** (corrective: branded social tracking URLs + redirect route + data backfill for unposted rows)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,44 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14J.1 — Posting Gate UI Smoke Test + Audit Trail (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 030 apply + deploy).**
+**Phase 14J.2 — Replace Legacy CTA Links on Social Posts (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 031 + deploy).**
+
+Pre-Phase-14K corrective: campaign-attributed tracking URLs were being emitted with the legacy `myvortex365.com/leosp` host as the visible social link. Phase 14J.2 swaps the visible link to a branded `https://www.vortextrips.com/t/<event_slug>?utm_*=…` form. The `/t/<slug>` route logs the click via `contact_events` (mirrors Phase 14I) then 302-redirects to the campaign's `cta_url`.
+
+**Patch applied:**
+- [x] `supabase/migrations/031_rewrite_legacy_tracking_urls.sql` — diagnostic SELECTs + two scoped UPDATE statements (content_calendar unposted, campaign_assets non-archived/non-rejected) + verification SELECTs. Idempotent.
+- [x] `src/lib/campaign-tracking-url.ts` — new `BRAND_TRACKING_BASE_URL = 'https://www.vortextrips.com/t'`. `buildCampaignTrackingUrl` emits `<brand>/<slug>?utm_*=…` whenever a slug is resolvable; falls back to `DEFAULT_BASE_URL` only when no slug can be produced.
+- [x] `src/lib/event-campaign-asset-generator.ts` — `EventCampaignRow` + `loadCampaign` now read `event_slug`. Prompt's CTA-targets block points the LLM at `https://www.vortextrips.com/t/<event_slug>` with explicit "use the branded URL, not myvortex365.com/leosp" instruction.
+- [x] `src/app/t/[slug]/route.ts` — public branded redirect. Resolves campaign by `event_slug` (latest year first), parses utm_content for asset+calendar FK resolution, logs `page_view` to contact_events (best-effort, never blocks), 302-redirects to `event_campaigns.cta_url` or to `DEFAULT_REDIRECT='https://myvortex365.com/leosp'`.
+
+**Kept on purpose:**
+- `event-seeds.json` `cta_url` (×31): final destination behind the redirect, not the visible link.
+- `next.config.js /free → myvortex365.com/leosp`: site lead-capture, not a social link.
+- `src/app/page.tsx`, `/thank-you`, `/join` CTAs: operator-facing on our domain.
+- `src/lib/twilio.ts` SMS templates: separate channel.
+- `VORTEX_EVENT_CAMPAIGN_SKILL.md`, `PROJECT-STATUS.md`, `SYSTEM_AUDIT_PHASE_14_STATUS.md`: docs.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 7.8s`; `ƒ /t/[slug]` registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No platform API calls. No AI calls. No auto-posting. No new content generation.
+- Site-internal CTAs unchanged — operators' lead-capture flow on the homepage is untouched.
+- Posted/rejected/archived rows are preserved as historical record.
+- Branded redirect logs clicks; failure of the log NEVER blocks the redirect.
+- Existing manual posting flow unchanged.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 031.** Run Step 0 diagnostics first (preview affected rows), then the two UPDATEs together, then Step 3 verification.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: re-display the Art Basel tracking URL on `/dashboard/campaigns` → confirm branded host → click → confirm 302 to myvortex365.com/leosp + a fresh `contact_events` row with FK attribution.
+
+---
+
+## Phase 14J.1 — Posting Gate UI Smoke Test + Audit Trail (shipped commit `764a6db`, migration 030 applied, prod-verified 2026-05-03).**
 
 Phase 14J shipped (`0b3896a`), prod-verified — gate columns live, diagnostic clean (143 idle / 0 ready). Phase 14J.1 adds the accountability layer: every Mark Ready / Remove from Queue / blocked-attempt is now recorded in a new `posting_gate_audit` table.
 

@@ -1,8 +1,155 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14J deployed and prod-verified — posting gate columns live, diagnostic clean: 143 idle / 0 ready / 0 blocked. Phase 14J.1 starting — posting gate audit trail.)
-**Last known good commit:** `0b3896a` — "Phase 14J: safe posting gate manual publish controls"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14J deployed and verified**; Supabase migrations 017-029 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14J.1 closed — posting gate audit trail live. Phase 14J.2 in working tree — corrective fix for legacy CTA links on social posts; typecheck + build pass; awaiting commit + migration 031 + deploy.)
+**Last known good commit:** `764a6db` — "Phase 14J.1: posting gate audit trail"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14J.1 deployed and verified**; Supabase migrations 017-030 applied; Hobby plan)
+
+---
+
+## Phase 14J.2 — Replace Legacy CTA Links on Social Posts (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 031 + deploy)
+
+A campaign-link audit found that every campaign-attributed tracking URL was emitting `https://myvortex365.com/leosp?utm_*=…` as the visible social link. Phase 14J.2 swaps the visible link to a branded `https://www.vortextrips.com/t/<event_slug>?utm_*=…` form. The destination behind the redirect (still `myvortex365.com/leosp` by default) is unchanged.
+
+### Where the legacy link was found
+
+| Layer | File / Source | Action |
+|---|---|---|
+| Helper output | `src/lib/campaign-tracking-url.ts` `DEFAULT_BASE_URL` | **changed** — branded `/t/<slug>` is now the visible base |
+| Asset generator prompt | `src/lib/event-campaign-asset-generator.ts` (CTA-targets block) | **changed** — points the LLM at `https://www.vortextrips.com/t/<slug>` |
+| Seed file `cta_url` (×31) | `src/lib/event-seeds.json` | **kept** — `cta_url` is the redirect destination, not the visible link |
+| Prod `event_campaigns.cta_url` (×6 rows) | DB | **kept** — same reason (now read by the `/t/<slug>` route) |
+| Prod `content_calendar.tracking_url` (1 row, Art Basel `posting_status='ready'`) | DB | **rewrites if unposted** (migration 031 step 1) |
+| `campaign_assets.tracking_url` (any non-NULL row) | DB | **rewrites if not posted/rejected/archived** (migration 031 step 2) |
+| `next.config.js` `/free → myvortex365.com/leosp` | code (site redirect) | **kept** — site's own lead-capture, not a social link |
+| `src/app/page.tsx` / `/thank-you` / `/join` CTAs | code (site UI) | **kept** — operator-facing CTAs on our domain |
+| `src/lib/twilio.ts` SMS templates | code (SMS channel) | **kept** — separate channel, user spec called out social only |
+| `VORTEX_EVENT_CAMPAIGN_SKILL.md`, `PROJECT-STATUS.md`, `SYSTEM_AUDIT_PHASE_14_STATUS.md` | docs | **kept** — historical record |
+
+### Whether code, data, or both
+
+**Both.** Code emitted the legacy link via `DEFAULT_BASE_URL` (helper) and the prompt's CTA list. Data (`content_calendar.tracking_url`, `campaign_assets.tracking_url`) was rewritten with the legacy host on every push since Phase 14H.1. Migration 031 backfills the data for unposted rows.
+
+### New canonical VortexTrips link strategy
+
+| Surface | Visible URL | Final destination |
+|---|---|---|
+| Social posts (campaign-attributed) | `https://www.vortextrips.com/t/<event_slug>?utm_*=…` | `event_campaigns.cta_url` (typically `myvortex365.com/leosp`) — reached via 302 from `/t/<slug>` |
+| Site internal CTAs (homepage, thank-you, join) | direct `https://myvortex365.com/leosp` | unchanged — operator's lead-capture flow |
+| SMS templates | direct `myvortex365.com/leosp` (kept short) | unchanged — separate channel |
+| `/free` site redirect | unchanged 307 → `myvortex365.com/leosp` | unchanged |
+
+The branded `/t/<slug>` route logs every click to `contact_events` with full UTM + FK resolution (mirrors Phase 14I track-event), then 302-redirects to the campaign's `cta_url`. UTM params are stripped from the redirect target so the final landing page stays clean.
+
+### Files changed
+
+**Created:**
+- `supabase/migrations/031_rewrite_legacy_tracking_urls.sql` — read-only diagnostic SELECTs at the top + two scoped UPDATE statements + verification SELECTs at the bottom. Idempotent (`ILIKE '%myvortex365.com/leosp%'` filter excludes already-rewritten rows).
+- `src/app/t/[slug]/route.ts` — branded redirect route. Server-side click logging via `contact_events` insert (best-effort, never blocks the redirect). Resolves campaign by `event_slug` (latest year first). Resolves `campaign_asset_id` + `content_calendar_id` from `utm_content` using the same UUID-prefix match as Phase 14I track-event. 302 to `event_campaigns.cta_url` or to `DEFAULT_REDIRECT='https://myvortex365.com/leosp'`.
+
+**Updated:**
+- `src/lib/campaign-tracking-url.ts` — added `BRAND_TRACKING_BASE_URL = 'https://www.vortextrips.com/t'`. `buildCampaignTrackingUrl` now constructs the visible URL from `BRAND_TRACKING_BASE_URL/<slug>` whenever a slug is resolvable (either supplied as `eventSlug` or derived via `slugifyEventName(eventName)`). Falls back to the legacy `DEFAULT_BASE_URL` only when no slug can be produced.
+- `src/lib/event-campaign-asset-generator.ts` — `EventCampaignRow` interface gains `event_slug: string | null`. `loadCampaign` SELECT extended to include `event_slug`. `buildUserPrompt` CTA-targets block now points the LLM at `https://www.vortextrips.com/t/<event_slug>` and includes an explicit "use the branded URL, not myvortex365.com/leosp" instruction.
+
+**Kept on purpose:** `event-seeds.json` (`cta_url` is the redirect destination), homepage / thank-you / join CTAs (site lead-capture), SMS templates (separate channel), all docs (historical record).
+
+### Migration / script created
+
+`supabase/migrations/031_rewrite_legacy_tracking_urls.sql`:
+
+- **Step 0 (commented):** diagnostic SELECTs that show exactly which rows will be rewritten and which will be skipped. Run these first to preview.
+- **Step 1:** UPDATE `content_calendar.tracking_url` where it contains `myvortex365.com/leosp` AND `status NOT IN ('posted','rejected')`. New value built inline from joined `event_campaigns` (slug, year) and `campaign_assets` (asset_type, wave, id-short).
+- **Step 2:** UPDATE `campaign_assets.tracking_url` where it contains `myvortex365.com/leosp` AND `status NOT IN ('posted','rejected','archived')`. Same URL formula.
+- **Step 3 (commented):** verification SELECTs that count remaining legacy URLs (should be 0 for unposted rows; posted/rejected rows are deliberately preserved).
+
+Idempotent: re-running the migration after rows are on the branded host is a no-op (the `ILIKE '%myvortex365.com/leosp%'` filter excludes them).
+
+### Verification SQL
+
+After applying migration 031:
+
+```sql
+-- Should return 0 — no unposted row should still carry the legacy host:
+SELECT count(*) FROM content_calendar
+WHERE tracking_url ILIKE '%myvortex365.com/leosp%'
+  AND status NOT IN ('posted', 'rejected');
+
+SELECT count(*) FROM campaign_assets
+WHERE tracking_url ILIKE '%myvortex365.com/leosp%'
+  AND status NOT IN ('posted', 'rejected', 'archived');
+
+-- Should show branded URLs for any rows that were rewritten:
+SELECT id, platform, status, tracking_url
+FROM content_calendar
+WHERE tracking_url IS NOT NULL
+ORDER BY updated_at DESC NULLS LAST, created_at DESC
+LIMIT 10;
+```
+
+The Art Basel row (the only existing prod tracking URL per the Phase 14H.1 smoke test) will end up with:
+```
+https://www.vortextrips.com/t/art-basel-miami-beach?utm_source=facebook&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W2&utm_content=social_post_fca9a0dd
+```
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 7.8s`. New route registered as `ƒ /t/[slug]`.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migration 031 must be applied for legacy data to be rewritten.** New URLs (any `Push to Calendar` after deploy) automatically use the branded form. Without 031, existing unposted rows still carry the legacy host. Both code-deploy + migration-apply are needed for full coverage.
+- **The `/t/<slug>` route depends on Phase 14H.2's `event_slug` column** (migration 025) being present. It is — applied 2026-05-03.
+- **Posted rows are preserved.** A row that was posted to a platform with the legacy URL is NOT rewritten — historical record. If the operator wants to update the live post, they'd do it manually on the platform.
+- **`utm_medium=event_campaign` mismatch warning is non-blocking.** A future caller with a different medium would still redirect successfully; only `console.warn` fires.
+- **Best-effort click logging.** A `contact_events` insert failure (e.g. transient DB) does NOT block the redirect — the user always reaches the destination. Attribution may be missing for that one click.
+- **Slug-collision edge case:** if two campaigns share an `event_slug` (different years), the route picks the latest year. The Phase 14I attribution view still reads `utm_campaign` substring (year-aware), so attribution stays accurate at the campaign-grain level even if the redirect lookup picks a non-current-year row.
+- **Public route, no rate limit.** `/t/<slug>` is intentionally public (anyone with the link can click). Vercel-level DDoS protection is the only rate limit. Acceptable for a redirect.
+- **Defensive `safeDestination` fallback** — if `event_campaigns.cta_url` is somehow malformed, the route falls back to `DEFAULT_REDIRECT` rather than 500ing.
+
+### Exact git commands
+
+```bash
+git status
+git add supabase/migrations/031_rewrite_legacy_tracking_urls.sql src/lib/campaign-tracking-url.ts src/lib/event-campaign-asset-generator.ts "src/app/t/[slug]/route.ts" PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14J.2: branded /t/<slug> tracking URL + redirect route + legacy data rewrite"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` is intentionally **not** in the `git add` list (cache file, save-protocol Rule 5).
+
+### Deploy instructions
+
+1. `git push` (above).
+2. **Apply migration 031** in Supabase SQL Editor. Step 0 diagnostics first (uncomment and run); confirm the row counts; then run the two UPDATEs together. Verification SELECTs at the bottom should report 0 remaining legacy URLs in unposted rows.
+3. `npx vercel --prod --yes` — deploy the new route + helper changes.
+4. Smoke test (below).
+
+Order matters: deploy BEFORE migration is also safe (the new code emits branded URLs for new pushes; existing data just stays legacy until the migration runs). Either order works.
+
+### Smoke-test checklist
+
+- [ ] Open `/dashboard/campaigns` → Art Basel → click on the existing tracking URL chip / re-push to refresh.
+- [ ] Confirm the displayed URL is `https://www.vortextrips.com/t/art-basel-miami-beach?utm_source=…&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W2&utm_content=social_post_<8 hex>`.
+- [ ] Click the URL → confirm the browser lands on `myvortex365.com/leosp` (the redirect target).
+- [ ] In Supabase SQL Editor, run:
+  ```sql
+  SELECT event, utm_source, utm_medium, utm_campaign, utm_content, event_campaign_id, campaign_asset_id, content_calendar_id, created_at
+  FROM contact_events
+  WHERE created_at > now() - interval '5 minutes'
+    AND metadata ->> 'source' = 'branded_redirect'
+  ORDER BY created_at DESC LIMIT 5;
+  ```
+  Confirm a `page_view` row landed with `event_campaign_id` and `campaign_asset_id` resolved to non-null UUIDs.
+- [ ] On `/dashboard/campaigns` → Art Basel → confirm the Performance panel's `Clicks` count incremented.
+- [ ] Run `node scripts/diagnose-campaign-click-attribution.js` → step 4 (Art Basel attribution) should now show ≥1 FK-attributed click.
+- [ ] Verify `next.config.js /free → myvortex365.com/leosp` still works (test by visiting `/free`).
+- [ ] Verify the homepage CTAs still link directly to `myvortex365.com/leosp` (Phase 14J.2 deliberately did NOT touch these).
+
+### Recommended next phase
+
+Resume **Phase 14K — Autoposter cron that honors the gate**. The branded social-link cleanup is done; future autoposted content will carry the branded URL automatically (because `buildCampaignTrackingUrl` now produces it).
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
 

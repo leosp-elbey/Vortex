@@ -7,8 +7,30 @@
 //
 // No side effects, no DB calls, no env reads. Safe to import from server or client.
 
-/** Default base URL when an event campaign has no per-campaign cta_url set. */
+/**
+ * Default base URL when an event campaign has no per-campaign cta_url set.
+ *
+ * Pre-Phase-14J.2: this was the visible social link (`myvortex365.com/leosp`).
+ * Phase 14J.2 introduced the branded `vortextrips.com/t/<slug>` redirect route,
+ * so this constant is now used ONLY as the fallback for non-campaign tracking
+ * URLs (when no `eventSlug` is provided to the helper). Campaign-attributed
+ * URLs route through `BRAND_TRACKING_BASE_URL` instead, even when `cta_url`
+ * still points at the legacy host.
+ */
 export const DEFAULT_BASE_URL = 'https://myvortex365.com/leosp'
+
+/**
+ * Phase 14J.2 — branded base for campaign tracking URLs visible on social posts.
+ * Resolves to `https://www.vortextrips.com/t/<event_slug>` and is what the helper
+ * emits whenever an `eventSlug` is supplied. The `/t/<slug>` route on the site
+ * (server-side) logs the click to `contact_events` with full UTM resolution and
+ * 302-redirects to the campaign's actual `cta_url` (typically the free portal).
+ *
+ * The destination URL behind the redirect (e.g. `myvortex365.com/leosp`) is
+ * intentionally still configurable per-campaign via `event_campaigns.cta_url` —
+ * it just isn't the visible social link anymore.
+ */
+export const BRAND_TRACKING_BASE_URL = 'https://www.vortextrips.com/t'
 
 /** UTM medium constant — the value that lets the attribution view match contacts back to a campaign. */
 export const CAMPAIGN_UTM_MEDIUM = 'event_campaign'
@@ -107,7 +129,18 @@ interface BuildTrackingUrlOptions {
 /**
  * Build the resolved campaign tracking URL.
  *
- * Behavior:
+ * Phase 14J.2 behavior change:
+ *   - When `eventSlug` is provided AND a usable slug results, the URL is built
+ *     against `BRAND_TRACKING_BASE_URL/<eventSlug>` rather than the supplied
+ *     `baseUrl`. This emits the branded `vortextrips.com/t/<slug>?utm_*=...`
+ *     visible link expected on social posts, regardless of what the campaign's
+ *     `cta_url` says (the cta_url remains the redirect destination, not the
+ *     visible URL).
+ *   - When `eventSlug` is missing/blank, falls back to the pre-14J.2 behavior:
+ *     base URL = `baseUrl ?? DEFAULT_BASE_URL`. Used for non-campaign tracking
+ *     URLs and as a defensive fallback during data migration.
+ *
+ * General behavior:
  *   - Preserves existing query params on the base URL.
  *   - Existing UTM params on the base URL are overwritten with campaign values.
  *   - When a value cannot be resolved (e.g. blank event name), the corresponding
@@ -133,12 +166,33 @@ interface BuildTrackingUrlOptions {
  *   'https://myvortex365.com/leosp?utm_source=instagram&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W1&utm_content=social_post_7ca6bc3f'
  */
 export function buildCampaignTrackingUrl(opts: BuildTrackingUrlOptions): string {
-  const base = opts.baseUrl?.trim() || DEFAULT_BASE_URL
+  // Phase 14J.2: prefer the branded `/t/<slug>` base whenever a usable slug is
+  // available. The slug must pass the same alnum+dash sanitization as the
+  // attribution view's regex so the visible URL matches what the view will
+  // attribute against on click.
+  const persistedSlug = opts.eventSlug && typeof opts.eventSlug === 'string' ? opts.eventSlug.trim() : ''
+  const resolvedSlug = persistedSlug || slugifyEventName(opts.eventName)
+
+  let base: string
+  if (resolvedSlug) {
+    // URL-encode the slug to defend against operator-set values that contain
+    // characters that would otherwise need escaping in a URL path. The slug
+    // produced by `slugifyEventName` is alnum+dash so encoding is a no-op,
+    // but persisted slugs from operator edits could be anything.
+    base = `${BRAND_TRACKING_BASE_URL}/${encodeURIComponent(resolvedSlug)}`
+  } else {
+    // No slug — fall back to the legacy behavior so non-campaign tracking
+    // URLs (organic, future use cases, defensive fallback during migrations)
+    // still work the same as pre-14J.2.
+    base = opts.baseUrl?.trim() || DEFAULT_BASE_URL
+  }
+
   let url: URL
   try {
     url = new URL(base)
   } catch {
-    // Defensive — malformed cta_url is treated as if cta_url was empty.
+    // Defensive — malformed base URL is treated as if cta_url was empty AND
+    // no slug was provided.
     url = new URL(DEFAULT_BASE_URL)
   }
 

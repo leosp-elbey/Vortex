@@ -99,6 +99,8 @@ interface EventCampaignRow {
   cta_text: string | null
   cta_url: string | null
   tracking_url_template: string | null
+  /** Phase 14H.2 — persisted slug used by the branded `/t/<slug>` redirect (Phase 14J.2). */
+  event_slug: string | null
 }
 
 export interface GenerateAssetsOptions {
@@ -429,14 +431,28 @@ function buildUserPrompt(campaign: EventCampaignRow, typesToGenerate: AssetType[
   if (campaign.lead_magnet_idea) lines.push(`- Suggested lead magnet hook: ${campaign.lead_magnet_idea}`)
   if (campaign.landing_page_headline) lines.push(`- Suggested landing headline: ${campaign.landing_page_headline}`)
 
+  // Phase 14J.2 — visible CTAs on social posts must use the branded
+  // vortextrips.com tracking domain. The branded `/t/<slug>` route logs the
+  // click via track-event and 302-redirects to the real destination (free
+  // portal, SBA signup, etc.), so the operator gets attribution AND the user
+  // never sees the legacy myvortex365 host on a social post.
+  const brandedSlug = campaign.event_slug && campaign.event_slug.trim() ? campaign.event_slug.trim() : null
+  const brandedTrackingUrl = brandedSlug
+    ? `https://www.vortextrips.com/t/${brandedSlug}`
+    : 'https://www.vortextrips.com'
+
   lines.push('')
   lines.push('CTA targets — pick the right one per asset:')
-  lines.push('- Free travel portal (default for top-of-funnel): https://myvortex365.com/leosp')
+  lines.push(`- Branded campaign tracking link (default for social posts): ${brandedTrackingUrl}`)
   lines.push('- SBA enrollment (affiliate program): https://signup.surge365.com/leosp')
   lines.push('- Booking site (use code LEOSP): https://vortextrips.com/booking')
   if (campaign.cta_text && campaign.cta_url) {
     lines.push(`- Campaign-specific CTA: "${campaign.cta_text}" → ${campaign.cta_url}`)
   }
+  lines.push('')
+  lines.push('IMPORTANT: when emitting a tracking link in any social-post body,')
+  lines.push(`use the branded vortextrips.com URL above (NOT myvortex365.com/leosp).`)
+  lines.push('The branded link forwards to the final destination after capturing the click.')
 
   lines.push('')
   lines.push('Wave guidance (skill §4) — distribute social posts and emails across these waves so the campaign covers the full booking funnel:')
@@ -461,7 +477,7 @@ async function loadCampaign(supabase: SupabaseAdmin, id: string): Promise<EventC
   const { data, error } = await supabase
     .from('event_campaigns')
     .select(
-      'id, campaign_name, event_name, event_year, destination_city, destination_country, destination_region, categories, audience, event_start_date, event_end_date, travel_window_start, travel_window_end, score, is_cruise, departure_city, cruise_line, hotel_angle, cruise_angle, flight_angle, group_travel_angle, lead_magnet_idea, landing_page_headline, cta_text, cta_url, tracking_url_template',
+      'id, campaign_name, event_name, event_year, destination_city, destination_country, destination_region, categories, audience, event_start_date, event_end_date, travel_window_start, travel_window_end, score, is_cruise, departure_city, cruise_line, hotel_angle, cruise_angle, flight_angle, group_travel_angle, lead_magnet_idea, landing_page_headline, cta_text, cta_url, tracking_url_template, event_slug',
     )
     .eq('id', id)
     .maybeSingle()
