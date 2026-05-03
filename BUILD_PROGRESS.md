@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14H.2 deployed and prod-verified — event_slug persisted, Art Basel slug confirmed `art-basel-miami-beach`, attribution view rewritten. Phase 14I starting — click attribution via track-event.)
-**Last code-shipping commit:** `783803e` (Phase 14H.2: persist event slugs)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H.2 deployed and verified on prod** · **Phase 14I starting** (click attribution via track-event — UTM capture on contact_events + view click_count column)
+**Last updated:** 2026-05-03 (Phase 14I deployed and prod-verified — synthetic click round-tripped, Art Basel attributed page_view = 1. Phase 14J starting — safe posting gate / manual publish controls.)
+**Last code-shipping commit:** `c9956f5` (Phase 14I click attribution)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14I deployed and verified on prod** · **Phase 14J starting** (safe posting gate / manual publish controls — content_calendar gate fields + posting-gate route + dashboard ready/queue UI)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,46 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14I — Click Attribution via track-event (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 027 & 028 apply + deploy).**
+**Phase 14J — Safe Posting Gate / Manual Publish Controls (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 029 apply + deploy).**
+
+Phase 14I shipped (`c9956f5`), prod-verified — synthetic click validated, Art Basel attributed page_view = 1. Phase 14J adds an explicit human gate to `content_calendar` so future autoposters require an admin's explicit approval before publishing. **This phase does NOT post.**
+
+**Patch applied:**
+- [x] `supabase/migrations/029_add_posting_gate_fields_to_content_calendar.sql` — adds 8 nullable columns + 3 partial indexes on `content_calendar`. Backfill + CHECK constraint included. Idempotent.
+- [x] `src/lib/posting-gate.ts` — pure helpers (`canEnterPostingQueue`, `getPostingGateBlockReason`, `normalizePostingStatus`, `buildPostingGatePayload`, `buildPostingUnqueuePayload`) + DB actions (`markReadyForPosting`, `removeFromPostingQueue`). Idempotent; no platform API calls.
+- [x] `src/app/api/admin/content-calendar/posting-gate/route.ts` — admin-gated POST `{ content_calendar_id, action: 'queue'|'unqueue', notes? }`. 200/400/404/500. Never auto-posts.
+- [x] `src/app/dashboard/content/page.tsx` — for `status='approved'` rows: `🟢 Mark Ready` button when eligible, `✅ Ready for Posting` badge + `↩ Remove from Queue` when queued, `Gate ineligible` muted hint with tooltip reason otherwise. Header note: "Mark Ready is a manual gate only. It does not post to social platforms." Existing manual posting buttons untouched.
+- [x] `scripts/diagnose-posting-gate.js` — read-only diagnostic. Schema check, posting_status distribution, gate-approved listing, tracking_url anomaly check, posted-after-queued cross-check.
+- [ ] Existing manual posting routes (`/api/automations/post-to-{instagram,facebook,twitter}`) — **not modified.** Adding a gate guard would break the dashboard's manual flow. Documented as deferred to the future autoposter phase.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 23.3s`; `ƒ /api/admin/content-calendar/posting-gate` registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No new posting routes. No AI calls. No platform API calls from any path created in 14J.
+- Existing manual posting flow on `/dashboard/content` is unchanged — operators still publish via the same buttons against `status='approved'` rows.
+- Gate flips only via the new admin route. The route writes ONLY to `content_calendar`'s 14J columns; never touches `status`, `caption`, `hashtags`, or anything else.
+- Idempotent at every layer: re-marking ready / re-unqueueing is a quiet success.
+- Migration 029 backfills existing rows to `posting_status='idle'`, `posting_gate_approved=false`, `manual_posting_only=true`. No row's behavior changes until an admin explicitly clicks Mark Ready.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 029 to Supabase prod.** Verification:
+  ```sql
+  SELECT count(*) FROM information_schema.columns
+  WHERE table_name = 'content_calendar'
+    AND column_name IN ('posting_status','posting_gate_approved','posting_gate_approved_at','posting_gate_approved_by','posting_gate_notes','queued_for_posting_at','manual_posting_only','posting_block_reason');
+  -- Expect: 8.
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run `node scripts/diagnose-posting-gate.js` to confirm post-deploy schema.
+- [ ] Smoke test on `/dashboard/content`: mark an approved row Ready → confirm badge → unqueue → confirm reverted.
+
+---
+
+## Phase 14I — Click Attribution via track-event (shipped commit `c9956f5`, migrations 027-028 applied, prod-verified 2026-05-03).**
 
 Phase 14H.2 shipped (`783803e`), prod-verified — Art Basel slug confirmed, attribution view rewritten. Phase 14I closes the click loop: extends `contact_events` with UTM + campaign FK columns, rewrites `track-event` to capture campaign UTM (anonymous visits included), updates the attribution view to count clicks deterministically, threads click_count through the helper + dashboard.
 

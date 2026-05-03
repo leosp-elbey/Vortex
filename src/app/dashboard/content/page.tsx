@@ -9,6 +9,27 @@ import { useToast, Toaster } from '@/components/ui/toast'
 type ExtendedContentItem = ContentCalendarItem & {
   image_url?: string | null
   video_script?: string | null
+  // Phase 14J — posting gate columns (migration 029). Optional because the
+  // shared ContentCalendarItem type doesn't carry them; the dashboard reads
+  // them defensively.
+  posting_status?: 'idle' | 'ready' | 'blocked' | string | null
+  posting_gate_approved?: boolean | null
+  posting_block_reason?: string | null
+  campaign_asset_id?: string | null
+  tracking_url?: string | null
+}
+
+// Phase 14J — Mirror of `getPostingGateBlockReason` from src/lib/posting-gate.ts.
+// Kept in sync by hand; if the rules diverge the dashboard's UI hint may differ
+// from the API rejection but the API always wins (reason flows back via toast).
+function getPostingGateBlockReason(item: ExtendedContentItem): string | null {
+  if (item.status === 'rejected') return 'Row is rejected.'
+  if (item.status === 'posted') return 'Already posted.'
+  if (item.status !== 'approved') return `Status must be approved (currently '${item.status}').`
+  if (!item.platform) return 'No platform set.'
+  if (!item.caption) return 'No caption.'
+  if (item.campaign_asset_id && !item.tracking_url) return 'Missing tracking_url — re-push from the campaign dashboard.'
+  return null
 }
 
 const platformEmoji: Record<string, string> = {
@@ -95,6 +116,32 @@ export default function ContentPage() {
     }
   }
 
+  // Phase 14J — Toggle a row's posting-gate state. Pure POST to the new admin
+  // route; never touches platform APIs. The toast surfaces the API's reason
+  // string when the row is ineligible.
+  const togglePostingGate = async (item: ExtendedContentItem, action: 'queue' | 'unqueue') => {
+    try {
+      const res = await fetch('/api/admin/content-calendar/posting-gate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content_calendar_id: item.id, action }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.ok) {
+        show(json.reason || json.error || 'Posting gate update failed', 'error')
+        return
+      }
+      setContent(prev => prev.map(c => (
+        c.id === item.id
+          ? { ...c, posting_status: json.posting_status, posting_gate_approved: json.posting_gate_approved, posting_block_reason: json.posting_block_reason ?? null }
+          : c
+      )))
+      show(action === 'queue' ? 'Marked ready for posting' : 'Removed from queue')
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Posting gate update failed', 'error')
+    }
+  }
+
   const postToTwitter = async (item: ExtendedContentItem) => {
     const res = await fetch('/api/automations/post-to-twitter', {
       method: 'POST',
@@ -128,6 +175,9 @@ export default function ContentPage() {
             <span className="text-green-600">{stats.approved} approved</span>
             <span className="text-blue-600">{stats.posted} posted</span>
           </div>
+          <p className="mt-1 text-[11px] text-gray-400">
+            🟢 Mark Ready is a manual gate only. It does not post to social platforms.
+          </p>
         </div>
         <button
           onClick={handleGenerate}
@@ -279,6 +329,43 @@ export default function ContentPage() {
                         >
                           ✓ Mark Posted
                         </button>
+
+                        {/* Phase 14J — Posting gate controls. Render only when row is approved. */}
+                        {(() => {
+                          const gateBlockReason = getPostingGateBlockReason(item)
+                          const isReady = item.posting_status === 'ready' && item.posting_gate_approved === true
+                          if (isReady) {
+                            return (
+                              <>
+                                <span className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-medium text-center">
+                                  ✅ Ready for Posting
+                                </span>
+                                <button
+                                  onClick={() => togglePostingGate(item, 'unqueue')}
+                                  className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                                >
+                                  ↩ Remove from Queue
+                                </button>
+                              </>
+                            )
+                          }
+                          if (gateBlockReason) {
+                            return (
+                              <span className="text-[10px] text-gray-400 italic max-w-[160px] text-right" title={gateBlockReason}>
+                                Gate ineligible
+                              </span>
+                            )
+                          }
+                          return (
+                            <button
+                              onClick={() => togglePostingGate(item, 'queue')}
+                              className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-200 transition-colors font-medium"
+                              title="Mark this row ready for the future autoposter. Manual gate only — does not post to social platforms."
+                            >
+                              🟢 Mark Ready
+                            </button>
+                          )
+                        })()}
                       </>
                     )}
 

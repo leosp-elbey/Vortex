@@ -1,10 +1,197 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14H.2 deployed and prod-verified — event_slug persisted, attribution view rewritten, Art Basel slug confirmed `art-basel-miami-beach`. Phase 14I starting — click attribution via track-event.)
-**Last known good commit:** `783803e` — "Phase 14H.2: persist event slugs for stable campaign attribution"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14H.2 deployed and verified**; Supabase migrations 017-026 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14I deployed and prod-verified — synthetic click round-tripped: contact_events row landed with FK + UTM, view counts 1 click, dashboard reflects Art Basel page_view=1. Phase 14J starting — safe posting gate / manual publish controls.)
+**Last known good commit:** `c9956f5` — "Phase 14I: click attribution via track-event UTM capture"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14I deployed and verified**; Supabase migrations 017-028 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · **Phase 14I starting** (click attribution via track-event)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · **Phase 14J starting** (safe posting gate / manual publish controls)
+
+---
+
+## Phase 14I Production Smoke Test (PASSED 2026-05-03)
+
+End-to-end verification on prod after migrations 027 & 028 were applied + Phase 14I was deployed:
+- ✅ Migration 027 applied: 7 new columns on `contact_events` (`utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `event_campaign_id`, `campaign_asset_id`, `content_calendar_id`); 5 partial indexes; 3 FKs with `ON DELETE SET NULL`.
+- ✅ Migration 028 applied: `event_campaign_attribution_summary` recreated with 4 click columns at the tail (`campaign_click_count`, `campaign_page_view_count`, `campaign_first_click_at`, `campaign_latest_click_at`).
+- ✅ **Synthetic click validation passed.** A test POST to `/api/webhooks/track-event` with `event=page_view`, `utm_source=facebook`, `utm_medium=event_campaign`, `utm_campaign=art-basel-miami-beach_2026_W2`, `utm_content=social_post_fca9a0dd` produced one row in `contact_events` with `event_campaign_id` and `campaign_asset_id` both resolved to non-null UUIDs.
+- ✅ Diagnostic script (`scripts/diagnose-campaign-click-attribution.js`): step 1 confirmed all 7 schema columns present; step 4 (Art Basel spot check) reported **FK-attributed contact_events: 1**.
+- ✅ Performance panel on `/dashboard/campaigns` → Art Basel renders Clicks: 1, Page views: 1 (no "deferred" subtext).
+- ✅ Anonymous campaign visits are now persisted (the previous bail logic dropped them).
+- ✅ No auto-posting occurred.
+
+**Phase 14J is now safe to start.** No blockers. The campaign attribution stack is complete: assets generated → calendar drafts → tracking URLs materialized → clicks captured → leads/conversions surfaced. Phase 14J adds the explicit human gate that future auto-posting will require before sending anything to any platform.
+
+---
+
+## Phase 14J — Safe Posting Gate / Manual Publish Controls (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 029 apply + deploy)
+
+Adds an explicit human gate on `content_calendar` rows. The gate is a separate signal from `content_calendar.status` — when a row is `status='approved'`, an admin must additionally click `🟢 Mark Ready` to flip `posting_status='ready'` AND `posting_gate_approved=true`. Future autoposters MUST require both before calling any platform API. **This phase does NOT itself post.**
+
+### Existing schema/code inspected
+
+- `content_calendar` (migration 004) — canonical lifecycle is `status IN ('draft','approved','posted','rejected')`. Manual posting buttons on `/dashboard/content` already check `status='approved'` server-side.
+- `/api/automations/post-to-instagram`, `…/post-to-facebook`, `…/post-to-twitter` — admin-gated, require `post.status='approved'`. Dashboard's "Post to IG / FB / X / Mark Posted" buttons hit these directly.
+- `/api/content` PATCH — admin-gated; toggles `content_calendar.status`. Phase 14J does not touch it.
+- No autoposting cron currently exists; manual posting via dashboard buttons is the only path today.
+
+### Created
+
+- `supabase/migrations/029_add_posting_gate_fields_to_content_calendar.sql` — adds 8 nullable columns (with defaults backfilled to existing rows): `posting_status` (CHECK `'idle'|'ready'|'blocked'`), `posting_gate_approved`, `posting_gate_approved_at`, `posting_gate_approved_by` (FK to `auth.users(id) ON DELETE SET NULL`), `posting_gate_notes`, `queued_for_posting_at`, `manual_posting_only` (DEFAULT TRUE), `posting_block_reason`. Three partial indexes (`posting_status` non-idle, `posting_gate_approved=TRUE`, `queued_for_posting_at NOT NULL`). Idempotent (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS`).
+- `src/lib/posting-gate.ts` — pure helpers + DB action wrappers. Exports:
+  - `POSTING_STATUS_VALUES`, `PostingStatus`, `PostingGateRow`, `EligibilityResult`, `GateActionResult`.
+  - `normalizePostingStatus(input)` — collapses arbitrary input to one of `idle | ready | blocked` (default `idle`).
+  - `getPostingGateBlockReason(row)` — returns the first failing rule as a user-facing string, or null when fully eligible.
+  - `canEnterPostingQueue(row)` → `{ ok, reason }`.
+  - `buildPostingGatePayload(actor, notes?)` and `buildPostingUnqueuePayload(actor, reason?)` — pure UPDATE payload builders.
+  - `markReadyForPosting({ contentCalendarId, actor, notes })` — DB action; idempotent (already-ready row → quiet success); never touches `status` or platform APIs.
+  - `removeFromPostingQueue({ contentCalendarId, actor, reason })` — DB action; idempotent.
+- `src/app/api/admin/content-calendar/posting-gate/route.ts` — admin-gated POST. Zod validates `{ content_calendar_id (uuid), action ('queue' | 'unqueue'), notes? }`. Maps eligibility failures to 400, missing rows to 404, DB errors to 500, success to 200 with `{ ok, content_calendar_id, posting_status, posting_gate_approved, posting_block_reason, queued_for_posting_at }`. Never auto-posts.
+- `scripts/diagnose-posting-gate.js` — read-only diagnostic. Verifies migration 029 columns, distributes rows by `posting_status`, lists gate-approved rows, surfaces gate-approved rows with missing `tracking_url` (anomaly), and flags any rows that became `status='posted'` after being queued (informational — those are manual posts, expected).
+
+### Updated
+
+- `src/app/dashboard/content/page.tsx`
+  - `ExtendedContentItem` gains optional `posting_status`, `posting_gate_approved`, `posting_block_reason`, `campaign_asset_id`, `tracking_url`.
+  - Local mirror of `getPostingGateBlockReason` (kept in sync with the helper by hand) drives the UI hint.
+  - New `togglePostingGate(item, action)` POSTs to the new route; updates local state; surfaces API reason via toast on failure.
+  - **For `status='approved'` rows:** the existing per-platform "Post to …" buttons + "Mark Posted" button are unchanged. A new gate control sits below them:
+    - If `posting_status='ready'` AND `posting_gate_approved=true` → `✅ Ready for Posting` badge + `↩ Remove from Queue` button.
+    - Else if `getPostingGateBlockReason` returns a reason → muted `Gate ineligible` text with the reason in a `title` tooltip.
+    - Otherwise → `🟢 Mark Ready` button with hover tooltip "Mark this row ready for the future autoposter. Manual gate only — does not post to social platforms."
+  - Page header carries a small note: "🟢 Mark Ready is a manual gate only. It does not post to social platforms."
+
+### Migration 029 details
+
+| Column | Type | Default | Notes |
+|---|---|---|---|
+| `posting_status` | TEXT | `'idle'` | CHECK `IN ('idle','ready','blocked')` |
+| `posting_gate_approved` | BOOLEAN | `FALSE` | true only after admin clicks Mark Ready |
+| `posting_gate_approved_at` | TIMESTAMPTZ | NULL | overwritten on each queue action |
+| `posting_gate_approved_by` | UUID | NULL | FK `auth.users(id) ON DELETE SET NULL` |
+| `posting_gate_notes` | TEXT | NULL | free-text |
+| `queued_for_posting_at` | TIMESTAMPTZ | NULL | nulled on unqueue |
+| `manual_posting_only` | BOOLEAN | `TRUE` | future autoposter must skip TRUE rows |
+| `posting_block_reason` | TEXT | NULL | set on Remove from Queue |
+
+Three partial indexes:
+- `idx_content_calendar_posting_status WHERE posting_status IS NOT NULL AND posting_status <> 'idle'`
+- `idx_content_calendar_posting_gate_approved WHERE posting_gate_approved = TRUE`
+- `idx_content_calendar_queued_for_posting_at WHERE queued_for_posting_at IS NOT NULL`
+
+Backfills are split into separate `UPDATE`s so the migration runs cleanly even on rows inserted before column-level defaults take effect. `CHECK` constraint added separately with `DROP IF EXISTS` so re-running the migration is safe.
+
+### Posting-gate eligibility rules
+
+A row may enter the queue (`canEnterPostingQueue`) only when ALL of the following hold:
+
+| Rule | Reason if violated |
+|---|---|
+| `status === 'approved'` | "Row status must be 'approved' to enter the posting queue (currently '{status}')." |
+| `status !== 'rejected'` | "Row is rejected — cannot be queued for posting." |
+| `status !== 'posted'` | "Row is already posted — gate has nothing to do." |
+| `platform` non-empty | "Row has no platform set." |
+| `caption` non-empty | "Row has no caption / body content." |
+| `manual_posting_only !== false` | "Row is flagged manual_posting_only=false. Restore that flag before queuing." |
+| Campaign-originated rows have `tracking_url` | "Campaign-originated row is missing a tracking_url. Re-push from the campaign dashboard to materialize it." |
+
+Unqueue has no eligibility check — operators can always pull a row regardless of state.
+
+### API route behavior
+
+`POST /api/admin/content-calendar/posting-gate`
+
+| Status | Meaning |
+|---|---|
+| 200 | `{ ok:true, content_calendar_id, posting_status, posting_gate_approved, posting_block_reason, queued_for_posting_at }` |
+| 400 | Invalid input OR row ineligible (reason in body) |
+| 404 | Row not found |
+| 500 | DB / unexpected error |
+
+The route NEVER calls a platform API, NEVER changes `content_calendar.status`, NEVER auto-posts.
+
+### Dashboard changes
+
+For `status='approved'` rows on `/dashboard/content`:
+- Existing manual-posting buttons (Post to IG / FB / X, Upload to TikTok, Mark Posted) are unchanged — operator continues to publish manually as today.
+- New gate column renders directly below the manual-posting buttons:
+  - **Ready badge + Remove from Queue button** when the row is queued.
+  - **`Gate ineligible` text** (with reason on hover) when the row fails the rules.
+  - **`🟢 Mark Ready` button** otherwise.
+- Header note explicitly clarifies: "Mark Ready is a manual gate only. It does not post to social platforms."
+
+### Posting routes inspected — left unchanged (deferred)
+
+The three platform posting routes (`/api/automations/post-to-{instagram,facebook,twitter}/route.ts`) currently require only `status='approved'`. Adding a guard that also requires `posting_gate_approved=true` would break the existing manual flow on `/dashboard/content` (operators currently click the per-platform Post button directly on approved rows).
+
+**Decision: leave manual-posting routes unchanged.** The gate is a forward-looking signal. The future autoposter (Phase 14K+) MUST require both `posting_status='ready'` AND `posting_gate_approved=true` AND `manual_posting_only=true` (the third requirement effectively means "operator hasn't explicitly disabled manual-only enforcement"). Adding the guard to manual routes today would be regressive without operator agreement.
+
+### Diagnostic script behavior
+
+`node scripts/diagnose-posting-gate.js`:
+1. Schema check — selects all 8 Phase 14J columns; reports missing columns with the exact migration to apply.
+2. Distribution — counts `content_calendar` rows by `posting_status` (idle/ready/blocked/null/other).
+3. Gate-approved rows — total + first 10 with id / status / queued_at.
+4. Anomaly check — gate-approved rows with `campaign_asset_id` set but `tracking_url` NULL (should be empty; otherwise the eligibility check failed somewhere).
+5. Posted-after-queued cross-check — informational; flags rows that became `status='posted'` after being queued. Expected to be non-zero only when admins use the manual posting buttons after marking ready, which is normal.
+
+Read-only — never writes.
+
+### Tests run this session
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 23.3s`. New route registered as `ƒ /api/admin/content-calendar/posting-gate`.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migration 029 must be applied before deploy.** Without it, the route's UPDATE fails with `column "posting_status" does not exist`. The dashboard would also show 500s on every Mark Ready / Remove from Queue click. Apply migration first.
+- **The new `manual_posting_only` column defaults to TRUE for all rows.** Existing manual-posting flow is unaffected because the manual routes don't read this column. The future autoposter MUST honor it.
+- **The CHECK constraint on `posting_status`** allows NULL plus `'idle' | 'ready' | 'blocked'`. NULL is allowed because the migration adds the column nullably first; the backfill UPDATE then sets every row to `'idle'`, but if a future code path inserts without specifying the column, the column default (`'idle'`) covers it. Belt and suspenders.
+- **The eligibility check enforces `tracking_url IS NOT NULL` only when `campaign_asset_id IS NOT NULL`.** Organic content_calendar rows (weekly-content cron output, manual entries) don't have `campaign_asset_id`, so they bypass the URL requirement — which is correct (they shouldn't have a tracking_url either).
+- **The dashboard's local `getPostingGateBlockReason` mirror can drift from the helper.** Kept in sync by hand. The API still wins (it returns the reason via toast), so a stale local mirror just makes the UI hint slightly inaccurate, never wrong.
+- **Idempotency of unqueue.** Unqueueing a never-queued row is a no-op success. Unqueueing a ready row clears the gate but leaves `posting_gate_approved_by` unchanged as a historical record (operator who first queued is preserved). Re-queueing overwrites it.
+- **No autoposter exists yet.** The gate is dormant until Phase 14K+ ships an autoposter that respects it. Operators marking rows Ready today produces no observable behavior beyond the badge + cron-side bookkeeping.
+
+### Leo to do (per Mandatory End-of-Phase Save Protocol)
+
+- [ ] Commit + push.
+- [ ] **Apply migration 029 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'content_calendar'
+    AND column_name IN ('posting_status','posting_gate_approved','posting_gate_approved_at','posting_gate_approved_by','posting_gate_notes','queued_for_posting_at','manual_posting_only','posting_block_reason')
+  ORDER BY column_name;
+  -- Expect: 8 rows.
+
+  SELECT count(*) FILTER (WHERE posting_status = 'idle') AS idle,
+         count(*) FILTER (WHERE posting_status IS NULL) AS null_status,
+         count(*) AS total
+  FROM content_calendar;
+  -- Expect: idle = total, null_status = 0 (after backfill).
+
+  SELECT indexname FROM pg_indexes
+  WHERE tablename = 'content_calendar'
+    AND indexname IN ('idx_content_calendar_posting_status','idx_content_calendar_posting_gate_approved','idx_content_calendar_queued_for_posting_at')
+  ORDER BY indexname;
+  -- Expect: 3 rows.
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test (post-deploy):
+  - [ ] Open `/dashboard/content` → confirm header reads "Mark Ready is a manual gate only…"
+  - [ ] On any approved row, click `🟢 Mark Ready` → confirm `✅ Ready for Posting` badge appears + `↩ Remove from Queue` button shows up.
+  - [ ] Click `↩ Remove from Queue` → confirm badge disappears, button reverts to `🟢 Mark Ready`.
+  - [ ] Try Mark Ready on a draft row (status ≠ approved) → confirm muted `Gate ineligible` hint appears (or the button is gated upstream).
+  - [ ] (Optional) For a campaign-originated row whose `tracking_url` is missing, confirm Mark Ready is blocked with the tracking-URL reason.
+- [ ] Run `node scripts/diagnose-posting-gate.js` post-deploy → confirm step 1 passes, step 2 shows distribution, step 4 reports zero anomalies.
+- [ ] Verify no auto-posting occurred: no rows changed to `status='posted'` outside of explicit operator clicks.
+
+### Recommended next phase
+
+**Phase 14K — Autoposter cron that honors the gate.** The natural next step. Scope: a daily/weekly cron that reads `content_calendar` rows where `posting_status='ready' AND posting_gate_approved=true AND manual_posting_only=true AND status='approved' AND posted_at IS NULL`, invokes the appropriate platform poster route per row, marks `status='posted'` on success. Each platform call should be wrapped in try/catch and rate-limited; failures should set `posting_block_reason` and clear `posting_gate_approved` so an operator must re-mark before retry. The Hobby cron limit is at 4 — this would replace one of the existing crons (the underused `score-and-branch` is the strongest candidate to merge into another).
+
+Alternative: **Phase 14K — Per-asset click attribution dashboard surface.** Continues the analytics push from Phase 14I — exposes click counts at platform/wave grain by extending the attribution view's `click_match` CTE. Doesn't require a 5th cron slot. Lower risk, higher analytic value, but doesn't move the publishing flow forward.
+
+I'd lean **autoposter first** since the gate exists specifically as autoposter infrastructure. Doing 14K now closes the loop; per-asset attribution can come later when the gate has actually moved rows to `posted`.
 
 ---
 
