@@ -91,6 +91,8 @@ interface CampaignCtaRow {
   event_name: string
   event_year: number
   cta_url: string | null
+  /** Phase 14H.2 — persisted slug; falls back to event_name derivation when null. */
+  event_slug: string | null
 }
 
 const ASSET_SELECT =
@@ -233,7 +235,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // cheap validations + idempotency checks so we never fetch on a request we'll reject.
   const { data: campaign, error: campaignErr } = await auth.admin
     .from('event_campaigns')
-    .select('id, event_name, event_year, cta_url')
+    .select('id, event_name, event_year, cta_url, event_slug')
     .eq('id', asset.campaign_id)
     .maybeSingle<CampaignCtaRow>()
   if (campaignErr) {
@@ -248,6 +250,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     platform: targetPlatform,
     eventName: campaign.event_name,
     eventYear: campaign.event_year,
+    eventSlug: campaign.event_slug,
     wave: asset.wave,
     assetType: asset.asset_type,
     assetId: asset.id,

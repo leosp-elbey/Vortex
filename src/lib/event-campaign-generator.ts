@@ -17,6 +17,7 @@ import {
   type ScoringInputs,
   type ScoringResult,
 } from '@/lib/event-campaign-scoring'
+import { slugifyEventName } from '@/lib/campaign-tracking-url'
 import seedFile from '@/lib/event-seeds.json'
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
@@ -154,6 +155,7 @@ interface UpsertPayload {
   campaign_name: string
   event_name: string
   event_year: number
+  event_slug: string
   destination_city: string
   destination_country: string | null
   destination_region: string | null
@@ -190,10 +192,17 @@ function buildUpsertPayload(
   now: Date,
 ): UpsertPayload {
   const window = computeTravelWindow(occurrence.startDate, seed.lead_window_days)
+  // Phase 14H.2 — prefer the seed's pre-baked slug when present, otherwise derive
+  // it from event_name. Both paths use the same slug rule (`slugifyEventName`),
+  // so the result is byte-identical to what the SQL backfill in migration 025
+  // produced for legacy rows. The seed file is the canonical source of truth
+  // for slugs, so seed.slug wins over the derived fallback.
+  const resolvedSlug = (seed.slug && seed.slug.trim()) || slugifyEventName(seed.event_name)
   return {
     campaign_name: `${seed.campaign_name} ${occurrence.year}`,
     event_name: seed.event_name,
     event_year: occurrence.year,
+    event_slug: resolvedSlug,
     destination_city: seed.destination_city,
     destination_country: seed.destination_country ?? null,
     destination_region: seed.destination_region ?? null,
@@ -253,11 +262,36 @@ async function processSeed(
   let action: 'inserted' | 'updated'
 
   if (existingId) {
+    // Phase 14H.2 — never overwrite an existing event_slug on the update path.
+    // The slug is the stable anchor for historical UTM attribution; a re-run of
+    // the seed cron should re-score and refresh angles, but must leave the slug
+    // chosen at insert time untouched. Backfill happens in a separate, narrower
+    // update below.
+    const { event_slug: _slugFromPayload, ...updatePayloadWithoutSlug } = payload
+    void _slugFromPayload
     const { error: updateError } = await supabase
       .from('event_campaigns')
-      .update(payload)
+      .update(updatePayloadWithoutSlug)
       .eq('id', existingId)
     if (updateError) throw new Error(`event_campaigns update failed: ${updateError.message}`)
+
+    // Backfill event_slug only when the existing row's slug is currently NULL.
+    // .is('event_slug', null) makes this a no-op against rows that already have
+    // a slug (whether from the migration-025 backfill, a prior insert, or an
+    // operator edit), so re-running the cron is safe.
+    if (payload.event_slug) {
+      const { error: backfillErr } = await supabase
+        .from('event_campaigns')
+        .update({ event_slug: payload.event_slug })
+        .eq('id', existingId)
+        .is('event_slug', null)
+      if (backfillErr) {
+        // Soft failure — the main update already succeeded, and the missing slug
+        // can be repaired on the next cron tick. Log and continue.
+        console.error('[event-campaign-generator] event_slug backfill skipped:', backfillErr.message)
+      }
+    }
+
     campaignId = existingId
     action = 'updated'
   } else {

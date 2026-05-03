@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14H deployed and prod-verified — Performance panel live, metrics in expected zero/deferred state. Phase 14H.1 starting — tracking URL materialization.)
-**Last code-shipping commit:** `c01ee05` (chore: enforce mandatory end-of-phase save protocol)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H deployed and verified on prod** · **Phase 14H.1 starting** (tracking URL materialization — `content_calendar.tracking_url` + helper + push-route update + dashboard badge)
+**Last updated:** 2026-05-03 (Phase 14H.1 closed — helper hardening + diagnostic committed and deployed; diagnostic confirmed 0 bad rows. Phase 14H.2 starting — persist event_slug on event_campaigns.)
+**Last code-shipping commit:** `dc56330` (scripts: Phase 14H.1 tracking URL diagnostic helper)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H.1 deployed and verified on prod** · **Phase 14H.2 starting** (persist event_slug on event_campaigns — migration 025 + generator update + helper update + migration 026 view rewrite)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,53 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14H.1 patch — `utm_content` placeholder defense (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14H.2 — Persist event_slug on event_campaigns (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 025 & 026 apply + deploy).**
+
+Phase 14H.1 closed (helper hardening + diagnostic, commits `8582680` / `dc56330`; diagnostic confirmed 0 bad rows). Phase 14H.2 adds a persisted `event_campaigns.event_slug` column so attribution survives future `event_name` edits — addresses the slug-drift risk noted in Phases 14H + 14H.1.
+
+**Patch applied:**
+- [x] `supabase/migrations/025_add_event_slug_to_event_campaigns.sql` — adds nullable `event_slug TEXT` + backfill from `event_name` (regex matches the JS helper) + partial lookup index + conditional unique index on `(slug, year, city)` that silently skips when natural duplicates exist.
+- [x] `supabase/migrations/026_update_event_campaign_attribution_view_use_event_slug.sql` — `CREATE OR REPLACE VIEW` with the same column shape as 023; the WITH-CTE now anchors against `COALESCE(NULLIF(trim(event_slug), ''), regex-derived slug)` so persisted slug wins, NULL falls through to legacy behavior. Backwards compatible.
+- [x] `src/lib/event-campaign-generator.ts` — `UpsertPayload.event_slug` required; `buildUpsertPayload` resolves slug as `seed.slug || slugifyEventName(seed.event_name)`; INSERT carries it; UPDATE strips it from the main payload (preserves operator-edited values), then a separate narrow `.is('event_slug', null)` UPDATE backfills NULL rows on each cron tick. Soft-fails on backfill (logs to console).
+- [x] `src/lib/campaign-tracking-url.ts` — `buildCampaignUtmCampaign` and `buildCampaignTrackingUrl` accept optional `eventSlug`; when present and non-empty, used directly; else falls back to `slugifyEventName(eventName)`. Legacy callers without `eventSlug` keep working unchanged.
+- [x] `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts` — `CampaignCtaRow.event_slug: string | null`; SELECT list adds `event_slug`; helper call passes `eventSlug: campaign.event_slug`.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 15.2s`; route registry unchanged
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees:**
+- No new posting routes. No AI calls. No media generation. No caption text mutation.
+- Existing `content_calendar.tracking_url` rows are not rewritten. Force-regenerate → re-Approve → re-Push is the path to refresh a row's URL.
+- Cron UPDATE never overwrites `event_slug`. Operator edits are preserved.
+- View remains backwards compatible — NULL `event_slug` falls through to the legacy regex, so post-deploy behavior is identical for any row that hasn't been backfilled.
+- Migration 025 conditional unique index never fails the migration; if duplicates exist, it silently skips.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 025 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'event_campaigns' AND column_name = 'event_slug';
+
+  SELECT count(*) FILTER (WHERE event_slug IS NOT NULL) AS slugged,
+         count(*) FILTER (WHERE event_slug IS NULL)     AS still_null,
+         count(*) AS total
+  FROM event_campaigns;
+  ```
+- [ ] **Apply migration 026 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';
+  -- Confirm the view definition references event_slug:
+  SELECT pg_get_viewdef('event_campaign_attribution_summary', true);
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: re-push an Art Basel asset → confirm new `tracking_url` matches `…&utm_campaign=art-basel-miami-beach_2026_W<n>&utm_content=social_post_<8 hex>`. (Optional: synthetic rename test described in PROJECT_STATE_CURRENT.md.)
+
+---
+
+## Phase 14H.1 patch — `utm_content` placeholder defense (shipped commits `8582680` + `dc56330`, prod-verified 2026-05-03).**
 
 Smoke test of the just-deployed Phase 14H.1 surfaced a copied URL whose `utm_content` did not contain a real 8-char short id. `grep` confirmed there is no literal placeholder string in `src/`; the bug class is failure-mode permissiveness in `shortAssetId` + `buildCampaignTrackingUrl`. Patched both:
 

@@ -39,13 +39,22 @@ export function slugifyEventName(name: string | null | undefined): string {
  * only when a non-empty wave string is provided (W1-W8). When the event slug is
  * empty (event name was blank / null), returns an empty string so callers can
  * decide to skip emitting the UTM rather than emit a broken value like `_2026_W1`.
+ *
+ * Phase 14H.2 — prefers `eventSlug` (the persisted column) when supplied. Falls
+ * back to deriving the slug from `eventName` only when `eventSlug` is empty/null.
+ * Both paths produce byte-identical strings since they share `slugifyEventName`,
+ * but preferring the persisted value means a future rename of `eventName` does
+ * not break attribution against historical UTMs.
  */
 export function buildCampaignUtmCampaign(opts: {
   eventName: string | null | undefined
   eventYear: number | null | undefined
   wave?: string | null | undefined
+  /** Optional persisted slug from event_campaigns.event_slug. Wins over derived. */
+  eventSlug?: string | null | undefined
 }): string {
-  const slug = slugifyEventName(opts.eventName)
+  const persistedSlug = opts.eventSlug && typeof opts.eventSlug === 'string' ? opts.eventSlug.trim() : ''
+  const slug = persistedSlug || slugifyEventName(opts.eventName)
   const year = opts.eventYear
   if (!slug || !year || !Number.isFinite(year)) return ''
   const parts = [slug, String(year)]
@@ -87,6 +96,12 @@ interface BuildTrackingUrlOptions {
   assetType?: string | null | undefined
   /** Asset UUID. Last 8 chars (no dashes) appended to utm_content. Optional. */
   assetId?: string | null | undefined
+  /**
+   * Phase 14H.2 — persisted `event_campaigns.event_slug`. When present, used for
+   * the `utm_campaign` slug segment instead of deriving from `eventName`. This
+   * makes attribution survive future event-name edits.
+   */
+  eventSlug?: string | null | undefined
 }
 
 /**
@@ -135,6 +150,7 @@ export function buildCampaignTrackingUrl(opts: BuildTrackingUrlOptions): string 
     eventName: opts.eventName,
     eventYear: opts.eventYear,
     wave: opts.wave,
+    eventSlug: opts.eventSlug,
   })
   if (utmCampaign) url.searchParams.set('utm_campaign', utmCampaign)
 

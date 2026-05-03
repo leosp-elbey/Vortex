@@ -1,10 +1,135 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14H deployed and prod-verified — Performance panel rendering, metrics in expected zero/deferred state. Phase 14H.1 starting in this session — tracking URL materialization.)
-**Last known good commit:** `c01ee05` — "chore: enforce mandatory end-of-phase save protocol"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14H deployed and verified**; Supabase migrations 017-023 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14H.1 fully closed — tracking URL helper hardening + diagnostic script committed; diagnostic confirmed 0 bad rows. Phase 14H.2 starting — persist event_slug on event_campaigns.)
+**Last known good commit:** `dc56330` — "scripts: add Phase 14H.1 tracking URL diagnostic helper"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14H.1 deployed and verified**; Supabase migrations 017-024 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · **Phase 14H.1 starting** (tracking URL materialization)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · **Phase 14H.2 starting** (persist event_slug on event_campaigns)
+
+---
+
+## Phase 14H.1 — Closed (2026-05-03)
+
+End-to-end verification on prod after migration 024 was applied + Phase 14H.1 was deployed:
+- ✅ Migration 024 applied (`content_calendar.tracking_url` column + lookup index).
+- ✅ Push-to-Calendar emits a resolved tracking URL with all four UTM params (`utm_source` / `utm_medium` / `utm_campaign` / `utm_content`).
+- ✅ Dashboard shows `🔗 Tracking URL ready · copy` on session-pushed assets; clicking copies the URL.
+- ✅ The single existing `content_calendar.tracking_url` row is correctly formed: `https://myvortex365.com/leosp?utm_source=facebook&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W2&utm_content=social_post_fca9a0dd`.
+- ✅ Phase 14H.1 patch (`8582680`) shipped: `shortAssetId` rejects placeholder-shaped inputs (length+charset gate), `buildCampaignTrackingUrl` omits `utm_content` entirely when `assetId` or `assetType` is missing.
+- ✅ Diagnostic script (`scripts/diagnose-tracking-urls.js`, commit `dc56330`) ran against prod and returned **0 affected rows**. No SQL repair UPDATE was needed.
+
+**Phase 14H.2 is now safe to start.** No blockers. The remaining slug-drift risk noted in Phase 14H + 14H.1 is exactly what 14H.2 addresses: persist `event_slug` on `event_campaigns` so attribution survives event-name edits.
+
+---
+
+## Phase 14H.2 — Persist event_slug on event_campaigns (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migrations 025 & 026 apply + deploy)
+
+Locks attribution to a stable per-campaign slug chosen at insert time. **Read-mostly and additive.** No posting, no AI generation, no media generation, no caption text mutation, no route-shape change.
+
+### Created
+
+- `supabase/migrations/025_add_event_slug_to_event_campaigns.sql`
+  - `ALTER TABLE event_campaigns ADD COLUMN IF NOT EXISTS event_slug TEXT;`
+  - Backfill `UPDATE` for existing rows: `event_slug = regexp_replace(regexp_replace(lower(event_name), '[^a-z0-9]+', '-', 'g'), '^-+|-+$', '', 'g')` — byte-for-byte identical to the JS helper's `slugifyEventName`. Only runs against rows where `event_slug IS NULL AND event_name IS NOT NULL AND length(trim(event_name)) > 0`.
+  - Partial lookup index `idx_event_campaigns_event_slug` (skips NULLs).
+  - **Conditional** unique index on `(lower(event_slug), event_year, lower(destination_city))` — wrapped in a `DO $$ ... $$` block that first checks for duplicates and only creates the index when none exist. If natural duplicates already exist in prod, the unique index is silently skipped (`RAISE NOTICE`) and the migration still completes.
+- `supabase/migrations/026_update_event_campaign_attribution_view_use_event_slug.sql`
+  - `CREATE OR REPLACE VIEW event_campaign_attribution_summary` with the **same column shape** as migration 023.
+  - The internal `WITH utm_match` CTE's regex anchor changes from `regexp_replace(lower(event_name), ...)` to `COALESCE(NULLIF(trim(event_slug), ''), regexp_replace(...))`. Persisted slug wins; NULL slug falls back to the legacy derivation, so this migration is fully backwards compatible with rows that haven't been backfilled yet.
+
+### Updated
+
+- `src/lib/event-campaign-generator.ts`
+  - Imports `slugifyEventName` from `campaign-tracking-url`.
+  - `UpsertPayload` interface gains `event_slug: string`.
+  - `buildUpsertPayload` resolves the slug as `(seed.slug && seed.slug.trim()) || slugifyEventName(seed.event_name)` — seed file is canonical, derive only when missing.
+  - **Update path is slug-preserving:** the cron's UPDATE strips `event_slug` from the payload before applying it, so a re-run never overwrites an existing slug. A separate, narrow `UPDATE event_campaigns SET event_slug = ... WHERE id = ... AND event_slug IS NULL` follows the main update — this back-fills rows that predate migration 025's backfill (or any row whose slug was somehow cleared) without ever clobbering a non-null value. Soft-fails on the backfill (logs to console) so a transient failure doesn't break the cron.
+  - Insert path always carries `event_slug` in the payload.
+- `src/lib/campaign-tracking-url.ts`
+  - `buildCampaignUtmCampaign` accepts optional `eventSlug`. When present and non-empty, used directly. When null/empty, falls back to `slugifyEventName(eventName)`.
+  - `BuildTrackingUrlOptions` gains optional `eventSlug`. `buildCampaignTrackingUrl` threads it down to `buildCampaignUtmCampaign`.
+  - Both paths produce byte-identical strings via the same regex, so legacy callers (without `eventSlug`) keep working unchanged.
+- `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts`
+  - `CampaignCtaRow` gains `event_slug: string | null`.
+  - The campaign SELECT list adds `event_slug`.
+  - The `buildCampaignTrackingUrl` call passes `eventSlug: campaign.event_slug`.
+
+### Event slug generation rules (single source of truth)
+
+| Path | Rule |
+|---|---|
+| Cron INSERT | `seed.slug` (from `event-seeds.json`) when present and non-empty, else `slugifyEventName(seed.event_name)`. |
+| Cron UPDATE | `event_slug` is **never overwritten**. If the row's current `event_slug` is NULL, a separate narrow UPDATE backfills it using the same rule. |
+| Migration 025 backfill | `regexp_replace(regexp_replace(lower(event_name), '[^a-z0-9]+', '-', 'g'), '^-+|-+$', '', 'g')` — matches `slugifyEventName` exactly. Runs only against `event_slug IS NULL` rows. |
+| `slugifyEventName(name)` | `lower(name) → replace [^a-z0-9]+ with '-' → trim leading/trailing dashes`. |
+
+### Tracking URL behavior after patch
+
+- New pushes: `buildCampaignTrackingUrl` reads `campaign.event_slug` from the DB and uses it directly. `utm_campaign` becomes `<persisted_slug>_<year>[_<wave>]`.
+- Push of a row whose campaign has NULL `event_slug` (e.g. campaign predates the backfill or the campaign is freshly seeded by an unmigrated path): the helper falls back to `slugifyEventName(event_name)`, identical to the previous Phase 14H.1 behavior. **No regression.**
+- Existing `content_calendar.tracking_url` rows are not touched by this phase. They remain bit-for-bit identical to what was already stored — re-pushing a campaign asset doesn't rebuild URLs idempotently (Phase 14F's `already_pushed` short-circuit returns the existing row unchanged).
+
+### Attribution view behavior after patch
+
+- For campaigns where `event_slug` is non-null (after 025's backfill, every existing row qualifies), the view's regex anchor uses the persisted column. A future rename of `event_name` no longer breaks attribution.
+- For campaigns where `event_slug` is null (none today, but possible if a future code path inserts without populating it), the view falls through to the same `event_name`-derived regex used in migration 023. **No regression vs. Phase 14H.**
+- Column shape unchanged — no consumer of the view (helper, route, dashboard) needs a code change to read it.
+
+### Backfill behavior
+
+- **Migration 025** backfills every existing row where `event_slug IS NULL AND event_name IS NOT NULL`. With prod's current 6 campaigns (Art Basel, FIFA, Super Bowl, Paris Fashion Week, F1 Miami, NBA All-Star), all 6 will be backfilled in one statement.
+- **Cron continues to backfill** rows that somehow end up with NULL `event_slug` post-migration (operator deletion, manual SQL, future path that inserts without slug). The narrow `.is('event_slug', null)` update is idempotent — it does nothing on rows that already have a slug.
+- **Cron never overwrites** an existing slug. An operator who manually customizes `event_slug` after insert is safe.
+- **Migration 026 is fully backwards compatible** with rows that aren't yet backfilled: the COALESCE fallback uses the same regex as the previous view. The combined effect is "monotonically improve attribution accuracy without breaking any existing match."
+
+### Tests run this session
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 15.2s`. Route registry unchanged; no new endpoints in this phase.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migrations 025 & 026 must both be applied to Supabase prod before Phase 14H.2 deploy.** Without 025, the route's `SELECT event_slug` and the helper's `eventSlug` reads return undefined — falls back to derivation, equivalent to current behavior, no break. Without 026, the view still works but uses the legacy regex — also no break, just slug-drift risk. Net: **migrations make 14H.2 useful but the deploy is non-breaking even if migrations are skipped.** The order doesn't matter for safety; apply both before relying on persisted slug.
+- **Conditional unique index in 025 may silently skip.** If any of the 6 prod rows happen to share `(slug, year, city)` (extremely unlikely with current seed data), the unique index never gets created. The `RAISE NOTICE` will surface in Supabase logs. Doesn't break the migration; just means slug uniqueness isn't enforced at the DB layer until duplicates are resolved manually. Phase 14H.2 doesn't require uniqueness for correctness — the cron's `findExisting` lookup uses event_name + year + city, not slug.
+- **Slug-derivation drift between SQL and JS.** Both the view and the migration backfill use `regexp_replace(regexp_replace(lower(...), '[^a-z0-9]+', '-', 'g'), '^-+|-+$', '', 'g')`. The JS helper does the same in two `.replace(...)` calls. Tested invariants: `lower → non-alnum→single-dash → trim leading/trailing dashes`. If a non-printable Unicode char ever sneaks into `event_name`, SQL's POSIX regex and JS's regex may differ on whether to treat it as alphanumeric (locale-dependent in some Postgres builds). Acceptable — current event_names are ASCII.
+- **Cron UPDATE soft-fails on backfill.** The narrow `.is('event_slug', null)` update is wrapped to log-and-continue rather than throw. If the call fails (e.g. transient connection), the row keeps NULL slug and the next cron tick retries. Worst case: lead attribution falls back to the legacy regex for one cycle. Acceptable.
+
+### Leo to do (per Mandatory End-of-Phase Save Protocol)
+
+- [ ] Commit + push.
+- [ ] **Apply migration 025 to Supabase prod.** Verification:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'event_campaigns' AND column_name = 'event_slug';
+  -- Expect: 1 row.
+
+  SELECT count(*) FILTER (WHERE event_slug IS NOT NULL) AS slugged,
+         count(*) FILTER (WHERE event_slug IS NULL)     AS still_null,
+         count(*) AS total
+  FROM event_campaigns;
+  -- Expect: slugged = total, still_null = 0 (after backfill).
+  ```
+- [ ] **Apply migration 026 to Supabase prod.** Verification:
+  ```sql
+  SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';
+  -- Expect: 1 row (already existed; CREATE OR REPLACE VIEW just rewrote it).
+
+  -- Confirm the view's WITH-CTE references event_slug:
+  SELECT pg_get_viewdef('event_campaign_attribution_summary', true) AS definition
+  WHERE position('event_slug' IN pg_get_viewdef('event_campaign_attribution_summary', true)) > 0;
+  -- Expect: 1 row showing the new definition with event_slug in the COALESCE.
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] **Smoke test (post-deploy):**
+  - [ ] Open `/dashboard/campaigns` → Art Basel → verify Performance panel still renders (view shape unchanged).
+  - [ ] Force-regenerate one approved `social_post` asset → re-Approve → re-Push to Calendar → confirm the new `tracking_url` matches `…&utm_campaign=art-basel-miami-beach_2026_W<n>&utm_content=social_post_<8 hex>` (slug now sourced from the persisted column).
+  - [ ] As a synthetic test for slug drift survival: in Supabase SQL Editor, temporarily edit `UPDATE event_campaigns SET event_name = 'Art Basel Test Rename' WHERE campaign_name LIKE 'Art Basel%';` → push another asset → confirm the new tracking URL still uses `art-basel-miami-beach` (NOT `art-basel-test-rename`). Then `UPDATE event_campaigns SET event_name = 'Art Basel Miami Beach' WHERE …;` to restore.
+  - [ ] Verify no errors in browser console / Vercel logs.
+
+### Recommended next phase
+
+**Phase 14I — Click Attribution via track-event** is the natural next session. The persisted `event_slug` from 14H.2 means click attribution can lock to a stable column, not a derived one. Scope: extend `/api/webhooks/track-event` to extract `utm_*` from request `metadata` and store on `contact_events`, then update `event_campaign_attribution_summary` to surface a real `click_count` column (replacing the always-zero deferred slot). Closes the funnel loop the Performance panel currently signals as "deferred."
 
 ---
 
