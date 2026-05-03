@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14H committed + pushed; migration 023 applied & verified; Vercel deploy + Performance-panel smoke test pending. Mandatory End-of-Phase Save Protocol added to `CLAUDE_SESSION_SKILL.md`.)
-**Last code-shipping commit:** `4323250` (Phase 14H last-known-good hash refresh on top of `2e3869d`)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14G deployed and verified on prod** · **Phase 14H code on `main` + migration 023 applied; Vercel deploy + smoke test pending**
+**Last updated:** 2026-05-03 (Phase 14H deployed and prod-verified — Performance panel live, metrics in expected zero/deferred state. Phase 14H.1 starting — tracking URL materialization.)
+**Last code-shipping commit:** `c01ee05` (chore: enforce mandatory end-of-phase save protocol)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14H deployed and verified on prod** · **Phase 14H.1 starting** (tracking URL materialization — `content_calendar.tracking_url` + helper + push-route update + dashboard badge)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,41 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14H deploy + smoke test (2026-05-03) — pending. Mandatory End-of-Phase Save Protocol locked into `CLAUDE_SESSION_SKILL.md`.**
+**Phase 14H.1 — Tracking URL Materialization (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 024 apply + deploy).**
+
+Phase 14H shipped (`2e3869d` / `4323250`), prod-verified — Performance panel renders, metrics in expected zero/deferred state. Phase 14H.1 turns the placeholder tracking URL template into real URLs at push-to-calendar time so future click traffic with UTM params will be attributed back through the existing 14H view.
+
+**Patch applied:**
+- [x] `supabase/migrations/024_add_tracking_url_to_content_calendar.sql` — `content_calendar.tracking_url TEXT NULL` + partial lookup index. Idempotent. Existing rows unaffected.
+- [x] `src/lib/campaign-tracking-url.ts` — `slugifyEventName`, `buildCampaignUtmCampaign`, `buildCampaignTrackingUrl`. Pure helpers; no side effects.
+- [x] `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts` — loads parent campaign on the new-insert path, builds resolved tracking URL via the helper, writes `content_calendar.tracking_url` on insert, back-fills `campaign_assets.tracking_url` when currently NULL, surfaces `tracking_url` on every response shape.
+- [x] `src/app/dashboard/campaigns/page.tsx` — captures `tracking_url` from push responses into a session-local map, threads through `CampaignDetailPanel` → `AssetGroup` → `AssetCard`, renders a small `🔗 Tracking URL ready · copy` button on cards where the URL is known. Click copies to clipboard.
+- [ ] Migration 025 (attribution view rewrite) — **not created.** Existing view already works against `contacts.custom_fields.utm_campaign` and the helper's slug matches the view's slug regex exactly.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 25.2s`; route still registered
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees:**
+- No auto-posting. No AI calls. No image / video generation. No caption text mutation.
+- Posted / scheduled / approved / rejected calendar rows never modified.
+- Operator-set `campaign_assets.tracking_url` values are preserved (back-fill only fires when currently NULL).
+- All four push response shapes (new push, partial-success, both idempotency-cached returns) include `tracking_url` at the top level.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] **Apply migration 024 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'content_calendar' AND column_name = 'tracking_url';
+  ```
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: Art Basel social_post → Approve → Push to Calendar → confirm green `🔗 Tracking URL ready · copy` button + URL matches `https://myvortex365.com/leosp?utm_source=<platform>&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W<n>&utm_content=social_post_<8chars>`.
+
+---
+
+## Phase 14H deploy + smoke test (2026-05-03) — pending. Mandatory End-of-Phase Save Protocol locked into `CLAUDE_SESSION_SKILL.md`.**
 
 Phase 14H is committed to `main` (`2e3869d` + last-known-good hash bump `4323250`) and migration 023 is applied to Supabase prod (`event_campaign_attribution_summary` confirmed in `pg_views`). The new Performance panel will render the empty-state copy in the dashboard until prod is redeployed and the panel is smoke-tested.
 

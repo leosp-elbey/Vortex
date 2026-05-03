@@ -27,10 +27,20 @@
 //     specific 400 with the project-stipulated message rather than fabricating
 //     a row that would break existing posters.
 //   - image_prompt / video_prompt — handled in a future media-generation phase.
+//
+// Phase 14H.1 additions (tracking URL materialization):
+//   - On every new insert, the route resolves the placeholder tracking template
+//     using `buildCampaignTrackingUrl` and writes the result to both
+//     `content_calendar.tracking_url` (always) and `campaign_assets.tracking_url`
+//     (only when currently NULL — never overwrites an operator-set value).
+//   - Every response (new push, partial-success, both idempotency-cached returns)
+//     surfaces `tracking_url` at the top level so the dashboard can capture it
+//     for the "Tracking URL ready" affordance without re-querying.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminUser } from '@/lib/admin-auth'
+import { buildCampaignTrackingUrl } from '@/lib/campaign-tracking-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,11 +62,13 @@ interface AssetRow {
   id: string
   asset_type: string
   platform: string | null
+  wave: string | null
   body: string | null
   hashtags: string[] | null
   status: string
   scheduled_for: string | null
   content_calendar_id: string | null
+  tracking_url: string | null
   campaign_id: string
 }
 
@@ -70,8 +82,21 @@ interface CalendarRow {
   status: string
   posted_at: string | null
   campaign_asset_id: string | null
+  tracking_url: string | null
   created_at: string
 }
+
+interface CampaignCtaRow {
+  id: string
+  event_name: string
+  event_year: number
+  cta_url: string | null
+}
+
+const ASSET_SELECT =
+  'id, asset_type, platform, wave, body, hashtags, status, scheduled_for, content_calendar_id, tracking_url, campaign_id'
+const CALENDAR_SELECT =
+  'id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, campaign_asset_id, tracking_url, created_at'
 
 /** Monday (UTC) of the week containing the given date. content_calendar.week_of is a DATE column. */
 function mondayOfWeekUTC(input: Date): string {
@@ -98,7 +123,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // 1. Load the asset.
   const { data: asset, error: lookupErr } = await auth.admin
     .from('campaign_assets')
-    .select('id, asset_type, platform, body, hashtags, status, scheduled_for, content_calendar_id, campaign_id')
+    .select(ASSET_SELECT)
     .eq('id', assetId)
     .maybeSingle<AssetRow>()
 
@@ -133,14 +158,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (asset.content_calendar_id) {
     const { data: existing, error: existingErr } = await auth.admin
       .from('content_calendar')
-      .select('id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, campaign_asset_id, created_at')
+      .select(CALENDAR_SELECT)
       .eq('id', asset.content_calendar_id)
       .maybeSingle<CalendarRow>()
     if (existingErr) {
       return NextResponse.json({ error: `Existing calendar row lookup failed: ${existingErr.message}` }, { status: 500 })
     }
     if (existing) {
-      return NextResponse.json({ ok: true, already_pushed: true, content_calendar: existing })
+      return NextResponse.json({
+        ok: true,
+        already_pushed: true,
+        content_calendar: existing,
+        tracking_url: existing.tracking_url,
+      })
     }
     // Forward link points at a row that no longer exists — fall through and re-create.
     // The asset.content_calendar_id will get overwritten in step 9 below.
@@ -150,7 +180,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // but never wrote back to campaign_assets.content_calendar_id.
   const { data: backLink, error: backLinkErr } = await auth.admin
     .from('content_calendar')
-    .select('id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, campaign_asset_id, created_at')
+    .select(CALENDAR_SELECT)
     .eq('campaign_asset_id', assetId)
     .maybeSingle<CalendarRow>()
   if (backLinkErr) {
@@ -163,7 +193,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .update({ content_calendar_id: backLink.id })
       .eq('id', assetId)
       .eq('status', 'approved')
-    return NextResponse.json({ ok: true, already_pushed: true, content_calendar: backLink })
+    return NextResponse.json({
+      ok: true,
+      already_pushed: true,
+      content_calendar: backLink,
+      tracking_url: backLink.tracking_url,
+    })
   }
 
   // 6. Validate platform — overrides win, but must still be in the calendar's allowlist.
@@ -194,6 +229,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     )
   }
 
+  // 7b. Phase 14H.1 — load parent campaign for tracking-URL resolution. Done after the
+  // cheap validations + idempotency checks so we never fetch on a request we'll reject.
+  const { data: campaign, error: campaignErr } = await auth.admin
+    .from('event_campaigns')
+    .select('id, event_name, event_year, cta_url')
+    .eq('id', asset.campaign_id)
+    .maybeSingle<CampaignCtaRow>()
+  if (campaignErr) {
+    return NextResponse.json({ error: `Parent campaign lookup failed: ${campaignErr.message}` }, { status: 500 })
+  }
+  if (!campaign) {
+    return NextResponse.json({ error: 'Parent campaign not found' }, { status: 404 })
+  }
+
+  const trackingUrl = buildCampaignTrackingUrl({
+    baseUrl: campaign.cta_url,
+    platform: targetPlatform,
+    eventName: campaign.event_name,
+    eventYear: campaign.event_year,
+    wave: asset.wave,
+    assetType: asset.asset_type,
+    assetId: asset.id,
+  })
+
   // 8. Build the calendar row.
   const now = new Date()
   const scheduledOverride = parsed.data.scheduled_for ? new Date(parsed.data.scheduled_for) : null
@@ -216,6 +275,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     image_prompt: null as string | null,
     status: 'draft' as const,
     campaign_asset_id: assetId,
+    tracking_url: trackingUrl,
   }
 
   // 9. Insert. The partial unique index on campaign_asset_id (migration 022) catches a
@@ -224,14 +284,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: inserted, error: insertErr } = await auth.admin
     .from('content_calendar')
     .insert(calendarPayload)
-    .select('id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, campaign_asset_id, created_at')
+    .select(CALENDAR_SELECT)
     .maybeSingle<CalendarRow>()
 
   if (insertErr) {
     if (insertErr.code === '23505') {
       const { data: winner } = await auth.admin
         .from('content_calendar')
-        .select('id, week_of, platform, caption, hashtags, image_prompt, status, posted_at, campaign_asset_id, created_at')
+        .select(CALENDAR_SELECT)
         .eq('campaign_asset_id', assetId)
         .maybeSingle<CalendarRow>()
       if (winner) {
@@ -240,7 +300,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           .update({ content_calendar_id: winner.id })
           .eq('id', assetId)
           .eq('status', 'approved')
-        return NextResponse.json({ ok: true, already_pushed: true, content_calendar: winner })
+        return NextResponse.json({
+          ok: true,
+          already_pushed: true,
+          content_calendar: winner,
+          tracking_url: winner.tracking_url,
+        })
       }
     }
     return NextResponse.json({ error: `content_calendar insert failed: ${insertErr.message}` }, { status: 500 })
@@ -251,9 +316,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // 10. Update the forward link on the asset. Optimistic guard so we never flip
   // an asset that was concurrently moved to a non-approved state.
+  // Phase 14H.1: also back-fill campaign_assets.tracking_url when it is currently
+  // NULL. Operator-set tracking_urls are preserved (the .is(...) clause skips them).
+  const linkUpdate: { content_calendar_id: string; tracking_url?: string } = {
+    content_calendar_id: inserted.id,
+  }
+  if (asset.tracking_url === null) linkUpdate.tracking_url = trackingUrl
+
   const { error: linkErr } = await auth.admin
     .from('campaign_assets')
-    .update({ content_calendar_id: inserted.id })
+    .update(linkUpdate)
     .eq('id', assetId)
     .eq('status', 'approved')
 
@@ -265,11 +337,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         ok: true,
         partial: true,
         content_calendar: inserted,
+        tracking_url: inserted.tracking_url,
         warning: `Calendar row created but forward link failed: ${linkErr.message}. Re-click Push to Calendar to repair the link.`,
       },
       { status: 200 },
     )
   }
 
-  return NextResponse.json({ ok: true, already_pushed: false, content_calendar: inserted })
+  return NextResponse.json({
+    ok: true,
+    already_pushed: false,
+    content_calendar: inserted,
+    tracking_url: inserted.tracking_url,
+  })
 }

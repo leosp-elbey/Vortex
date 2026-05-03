@@ -137,6 +137,7 @@ interface AssetRow {
   image_url?: string | null
   video_url?: string | null
   content_calendar_id?: string | null
+  tracking_url?: string | null
   hashtags: string[] | null
   status: string
   scheduled_for: string | null
@@ -207,6 +208,13 @@ export default function CampaignsPage() {
   // After a successful push we add the id; the same badge will also render whenever the
   // API starts returning content_calendar_id without further dashboard changes.
   const [pushedAssetIds, setPushedAssetIds] = useState<Set<string>>(new Set())
+  // Phase 14H.1 — session-local map of assetId → resolved tracking URL captured
+  // from the push-to-calendar response. The campaign-detail API does not yet
+  // return campaign_assets.tracking_url, so this is what powers the "Tracking
+  // URL ready" affordance between page loads. Same forward-compat pattern as
+  // pushedAssetIds: when the API later returns tracking_url, the AssetCard
+  // already reads asset.tracking_url too and the badge appears organically.
+  const [pushedAssetTrackingUrls, setPushedAssetTrackingUrls] = useState<Map<string, string>>(new Map())
   // Phase 14H — attribution rollup for the currently-selected campaign. Loaded
   // lazily via /api/admin/campaigns/attribution?campaign_id=… when a campaign is
   // selected. Errors degrade silently (panel shows empty state).
@@ -386,6 +394,15 @@ export default function CampaignsPage() {
         next.add(assetId)
         return next
       })
+      // Capture tracking URL when the route returned one (Phase 14H.1). Surfaced
+      // on every response shape — new push, already_pushed, partial-link path.
+      if (typeof json.tracking_url === 'string' && json.tracking_url) {
+        setPushedAssetTrackingUrls(prev => {
+          const next = new Map(prev)
+          next.set(assetId, json.tracking_url as string)
+          return next
+        })
+      }
       if (json.already_pushed) {
         show('Already on the content calendar', 'info')
       } else if (json.partial) {
@@ -468,6 +485,7 @@ export default function CampaignsPage() {
             generationProgress={generationProgress}
             actionInFlight={actionInFlight}
             pushedAssetIds={pushedAssetIds}
+            pushedAssetTrackingUrls={pushedAssetTrackingUrls}
             attribution={attribution}
             attributionLoading={attributionLoading}
             onGenerate={handleGenerate}
@@ -641,6 +659,7 @@ function CampaignDetailPanel({
   generationProgress,
   actionInFlight,
   pushedAssetIds,
+  pushedAssetTrackingUrls,
   attribution,
   attributionLoading,
   onGenerate,
@@ -654,6 +673,7 @@ function CampaignDetailPanel({
   generationProgress: { current: number; total: number; label: string } | null
   actionInFlight: string | null
   pushedAssetIds: Set<string>
+  pushedAssetTrackingUrls: Map<string, string>
   attribution: AttributionRollup | null
   attributionLoading: boolean
   onGenerate: (id: string, force: boolean) => void
@@ -809,6 +829,7 @@ function CampaignDetailPanel({
                 assets={grouped[type]}
                 actionInFlight={actionInFlight}
                 pushedAssetIds={pushedAssetIds}
+                pushedAssetTrackingUrls={pushedAssetTrackingUrls}
                 onApprove={onApprove}
                 onReject={onReject}
                 onPushToCalendar={onPushToCalendar}
@@ -956,6 +977,7 @@ function AssetGroup({
   assets,
   actionInFlight,
   pushedAssetIds,
+  pushedAssetTrackingUrls,
   onApprove,
   onReject,
   onPushToCalendar,
@@ -966,6 +988,7 @@ function AssetGroup({
   assets: AssetRow[]
   actionInFlight: string | null
   pushedAssetIds: Set<string>
+  pushedAssetTrackingUrls: Map<string, string>
   onApprove: (id: string) => void
   onReject: (id: string) => void
   onPushToCalendar: (id: string) => void
@@ -988,6 +1011,7 @@ function AssetGroup({
             assetType={assetType}
             disabled={actionInFlight === a.id}
             pushedToCalendar={pushedAssetIds.has(a.id) || !!a.content_calendar_id}
+            trackingUrl={pushedAssetTrackingUrls.get(a.id) ?? a.tracking_url ?? null}
             onApprove={onApprove}
             onReject={onReject}
             onPushToCalendar={onPushToCalendar}
@@ -1003,6 +1027,7 @@ function AssetCard({
   assetType,
   disabled,
   pushedToCalendar,
+  trackingUrl,
   onApprove,
   onReject,
   onPushToCalendar,
@@ -1011,6 +1036,7 @@ function AssetCard({
   assetType: string
   disabled: boolean
   pushedToCalendar: boolean
+  trackingUrl: string | null
   onApprove: (id: string) => void
   onReject: (id: string) => void
   onPushToCalendar: (id: string) => void
@@ -1109,6 +1135,20 @@ function AssetCard({
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">
               ✓ Added to Calendar
             </span>
+          )}
+          {trackingUrl && (
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                  navigator.clipboard.writeText(trackingUrl).catch(() => {})
+                }
+              }}
+              title={trackingUrl}
+              className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100"
+            >
+              🔗 Tracking URL ready · copy
+            </button>
           )}
           {asset.status === 'approved' && !isCalendarPushable && (
             <span

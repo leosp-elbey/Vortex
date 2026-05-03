@@ -1,10 +1,101 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14H committed and pushed to `origin/main`; migration 023 applied and verified in Supabase prod; Vercel prod deploy + Performance-panel smoke test still pending. Session-skill mandatory save protocol added.)
-**Last known good commit:** `4323250` — "Phase 14H: update last-known-good commit hash"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14G deployed and verified**; Phase 14H code on `main` and migration 023 applied to Supabase, but **Phase 14H not yet deployed to Vercel**; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14H deployed and prod-verified — Performance panel rendering, metrics in expected zero/deferred state. Phase 14H.1 starting in this session — tracking URL materialization.)
+**Last known good commit:** `c01ee05` — "chore: enforce mandatory end-of-phase save protocol"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14H deployed and verified**; Supabase migrations 017-023 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · **Phase 14H committed** (`2e3869d` + hash-update `4323250`, migration 023 applied; awaiting Vercel deploy + smoke test)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · **Phase 14H.1 starting** (tracking URL materialization)
+
+---
+
+## Phase 14H Production Smoke Test (PASSED 2026-05-03)
+
+End-to-end verification on prod after migration 023 was applied + Phase 14H was deployed:
+- ✅ `/dashboard/campaigns` → Art Basel renders the new Performance panel between the Score panel and the Asset Bundle.
+- ✅ Performance score visible (composite 0-100 driven by intrinsic event-fit + production / distribution ratios; revenue contribution still 0 today).
+- ✅ Approved-asset count and calendar-row count populated from real prod data.
+- ✅ Click count = 0 (labelled "deferred"), Lead count = 0, Conversion count = 0 — matches expected state until tracking URLs are materialized in published posts.
+- ✅ Click→Lead and Lead→Member rates show "—" with leads = 0 (correct null-state rendering).
+- ✅ Per-platform breakdown line appears when a campaign has assets across multiple platforms.
+- ✅ Footer note about deferred click attribution + best-effort lead matching renders correctly.
+- ✅ No regressions on approve / reject / generate / push-to-calendar flows.
+- ✅ `event_campaign_attribution_summary` view confirmed via `SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';`.
+- ✅ No auto-posting occurred.
+
+**Phase 14H.1 is now safe to start.** The Performance panel exposes that lead/conversion metrics will stay at 0 until the placeholder tracking URLs (`?utm_source={platform}&utm_medium=event_campaign&utm_campaign={event_slug}_{year}_{wave}`) are resolved into real URLs and emitted into published posts. Phase 14H.1 closes that loop.
+
+---
+
+## Phase 14H.1 — Tracking URL Materialization (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 024 apply + deploy)
+
+Resolves the placeholder tracking template (`?utm_source={platform}&utm_medium=event_campaign&utm_campaign={event_slug}_{year}_{wave}`) into concrete URLs at push-to-calendar time. **Read-mostly and additive.** No posting, no AI generation, no media generation, no caption text mutation.
+
+### Created
+
+- `supabase/migrations/024_add_tracking_url_to_content_calendar.sql` — adds `content_calendar.tracking_url TEXT NULL` + a partial lookup index (`WHERE tracking_url IS NOT NULL`). Idempotent (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`). Existing rows unaffected (column nullable, NULL by default; legacy organic rows keep NULL). `campaign_assets.tracking_url` already exists from migration 018 line 51 — not recreated.
+- `src/lib/campaign-tracking-url.ts` — pure helper module. Exports:
+  - `DEFAULT_BASE_URL` constant (`https://myvortex365.com/leosp`).
+  - `CAMPAIGN_UTM_MEDIUM` constant (`event_campaign`).
+  - `slugifyEventName(name)` — `lower → non-alnum→dash → trim leading/trailing dashes`. Mirrors the regex in `event_campaign_attribution_summary` so the view's UTM substring match keeps working against URLs the helper produces.
+  - `buildCampaignUtmCampaign({ eventName, eventYear, wave })` — builds `<slug>_<year>[_<wave>]`. Returns `''` when slug or year is missing so callers can drop the UTM rather than emit a broken value.
+  - `buildCampaignTrackingUrl({ baseUrl, platform, eventName, eventYear, wave, assetType, assetId })` — uses `URL` API to preserve existing query params on `baseUrl`, then sets `utm_source` (lowercased platform), `utm_medium=event_campaign`, `utm_campaign` (when resolvable), and `utm_content` (`<asset_type>_<first 8 chars of asset id without dashes>`). Falls back to `DEFAULT_BASE_URL` when `baseUrl` is null or malformed. No env reads, no DB calls.
+
+### Edited
+
+- `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts`
+  - `AssetRow` and `CalendarRow` interfaces gained `tracking_url`. `AssetRow` also gained `wave`.
+  - SELECT lists hoisted into `ASSET_SELECT` and `CALENDAR_SELECT` constants so all four DB reads (asset lookup, idempotency #1, idempotency #2, race-recovery requery) stay in lockstep.
+  - New step 7b: load parent campaign (`event_name`, `event_year`, `cta_url`) via `event_campaigns.id = asset.campaign_id`. 500 on lookup error, 404 when the parent is missing.
+  - Resolved `trackingUrl` computed via `buildCampaignTrackingUrl` and added to `calendarPayload`. Inserted on every new push.
+  - Step 10 forward-link update now also back-fills `campaign_assets.tracking_url` when it is currently NULL — operator-set values are preserved.
+  - Every JSON response (new push, partial-success, both idempotency-cached returns) surfaces `tracking_url` at the top level so the dashboard captures it without re-querying.
+  - Top-of-file doc updated with a Phase 14H.1 addendum block.
+- `src/app/dashboard/campaigns/page.tsx`
+  - `AssetRow` gained optional `tracking_url`.
+  - New `pushedAssetTrackingUrls: Map<string, string>` session state populated from successful push responses (same forward-compat pattern as `pushedAssetIds` from Phase 14F — when the campaign-detail API later returns `tracking_url`, the dashboard reads `asset.tracking_url` directly without further changes).
+  - `CampaignDetailPanel`, `AssetGroup`, and `AssetCard` props extended with `pushedAssetTrackingUrls` / `trackingUrl`.
+  - `AssetCard` action row renders a small green `🔗 Tracking URL ready · copy` button when a tracking URL is known. Clicking copies via `navigator.clipboard.writeText`. Hover tooltip shows the full URL. Hidden when no URL is known yet.
+
+### Push-to-calendar behavior changes
+
+- **New push:** content_calendar.tracking_url is populated; campaign_assets.tracking_url back-filled when NULL; response includes `tracking_url`.
+- **Already pushed (forward link or back link):** response includes the existing `tracking_url` from the calendar row. May be NULL for rows that predate Phase 14H.1 — that is expected and signals the row should be re-pushed once schema is in place.
+- **Partial success:** response includes `tracking_url` from the inserted row even when the forward-link update failed.
+- **Approved body text:** **never modified.** Tracking URL lives in a separate column.
+- **Posted / scheduled / approved / rejected calendar rows:** never modified by this code path. Push only INSERTs and UPDATEs `campaign_assets.content_calendar_id` + `campaign_assets.tracking_url`.
+
+### Attribution view (migration 023)
+
+**Not changed.** Migration 025 was **not** created. The existing view's UTM substring match against `contacts.custom_fields ->> 'utm_campaign'` already works against the URLs this phase produces (the helper's `slugifyEventName` matches the view's `regexp_replace(lower(event_name), '[^a-z0-9]+', '-', 'g')` exactly). Once a contact arrives with a URL containing `?utm_campaign=art-basel-miami-beach_2026_W1`, the view starts attributing leads — no view migration needed.
+
+The only reason to introduce migration 025 would be to read directly from `content_calendar.tracking_url` instead of `contacts.custom_fields`. That would gain nothing (we still need the contact's UTM to know which contact attributed to which campaign) and would couple the view to dashboard-pushed rows only (excluding any non-pushed direct traffic). Skipped on purpose.
+
+### Tests run this session
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS; `Compiled successfully in 25.2s`. Push-to-calendar route still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **Migration 024 must be applied to Supabase prod before the new push behavior works end-to-end.** Until applied, the route's INSERT fails with `column "tracking_url" does not exist` and returns 500. The asset stays approved, no calendar row is created, the dashboard surfaces the error toast. Once the migration is applied, retries succeed cleanly.
+- **The dashboard "Tracking URL ready · copy" button only appears for assets pushed in the current browser session OR after the campaign-detail API later starts returning `tracking_url`.** Pre-existing pushed assets (from before this phase) won't show the badge until either the asset is re-pushed (which is idempotent and surfaces the URL via the route's response) or a future API change includes the column. Same forward-compat pattern as Phase 14F's `pushedAssetIds`.
+- **`navigator.clipboard.writeText` is fire-and-forget with a `.catch(() => {})` swallow.** The user gets no feedback on permission-denied. Acceptable for an internal admin surface; if it becomes an issue, swap for a toast.
+- **`buildCampaignTrackingUrl` falls back to `DEFAULT_BASE_URL` when the campaign's `cta_url` is malformed** (e.g. operator edited it to a string with spaces). This is defensive but silent — a malformed cta_url is a content bug worth surfacing eventually. Acceptable for now since cta_url is operator-set and rare.
+- **`campaign_assets.tracking_url` back-fill only fires on first push.** A re-push (idempotent path) does not re-fill the asset column. If an operator manually clears `campaign_assets.tracking_url` after a push, a re-push won't restore it. Acceptable: that's an edge case the operator caused.
+- **Migration 024 is independent of migration 025** (which was not created). If a future phase needs to materialize migration 025, the view rewrite goes there.
+
+### Leo to do
+
+- [ ] Commit + push.
+- [ ] **Apply migration 024 to Supabase prod.** Verification SQL:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'content_calendar' AND column_name = 'tracking_url';
+  ```
+  Should return one row.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → approve a `social_post` asset → click `📅 Push to Calendar` → confirm a new green `🔗 Tracking URL ready · copy` button appears next to the `✓ Added to Calendar` badge → click the button → confirm the URL is on the clipboard and matches `https://myvortex365.com/leosp?utm_source=instagram&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W1&utm_content=social_post_<8 chars>` (or similar).
 
 ---
 
