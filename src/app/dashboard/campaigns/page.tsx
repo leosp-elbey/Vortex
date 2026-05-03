@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatDate, formatDateTime, getStatusColor } from '@/lib/utils'
 import { useToast, Toaster } from '@/components/ui/toast'
+import { buildPlatformGuidanceLine, getSocialSpec } from '@/lib/social-specs'
 
 const STATUS_OPTIONS = ['', 'idea', 'draft', 'approved', 'scheduled', 'active', 'archived'] as const
 
@@ -869,6 +870,13 @@ function AssetCard({
   const isCalendarPushable = CALENDAR_PUSHABLE_ASSET_TYPES.has(assetType)
   const canPushToCalendar = asset.status === 'approved' && isCalendarPushable && !pushedToCalendar
 
+  // Phase 14G: per-platform creative-format hint. Shown only on social_post rows
+  // where the platform resolves to one of the canonical platform IDs in social-specs.ts.
+  // Both helpers return null on unknown platforms so the line silently disappears
+  // instead of rendering a malformed string.
+  const platformSpec = assetType === 'social_post' ? getSocialSpec(asset.platform) : null
+  const platformGuidance = assetType === 'social_post' ? buildPlatformGuidanceLine(asset.platform) : null
+
   // Media display: image_url and video_url are nullable on the schema. Today
   // image_prompt / video_prompt rows ship without a populated URL because the
   // generator only writes the prompt text — Pexels/OpenAI/HeyGen run in a later
@@ -955,6 +963,14 @@ function AssetCard({
       <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">
         {previewBody(asset.body)}
       </p>
+      {platformGuidance && (
+        <p
+          className="mt-2 text-[11px] text-gray-500"
+          title={platformSpec?.notes.join('\n') ?? undefined}
+        >
+          📐 {platformSpec?.displayName ?? 'Platform'}: {platformGuidance}
+        </p>
+      )}
       {imageUrl && (
         <div className="mt-2">
           {/* Use plain <img> so existing Supabase Storage / Pexels URLs render without

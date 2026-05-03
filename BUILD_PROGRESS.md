@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14F starting — migrations 017-021 applied, 14E flow smoke-tested on prod, Art Basel generated 33 draft assets, approve/reject verified)
-**Last code-shipping commit:** `a91acd3` (Phase 14E.1 media-clarity)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14E.1 deployed and verified on prod** · **Phase 14F starting** (approved `campaign_assets` → `content_calendar` push)
+**Last updated:** 2026-05-02 (Phase 14F deployed and verified — migration 022 applied, push-to-calendar working idempotently, badge confirmed, non-social hint confirmed. Phase 14G starting.)
+**Last code-shipping commit:** `e4737e0` (Phase 14F push-to-calendar)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14F deployed and verified on prod** · **Phase 14G starting** (per-platform creative sizing & media rules — `src/lib/social-specs.ts`)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,38 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14F — Push Approved Campaign Assets into `content_calendar` (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + migration apply + deploy).**
+**Phase 14G — Per-Platform Creative Sizing & Media Rules (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy).**
+
+Phase 14F shipped (`e4737e0`), migration 022 applied to Supabase prod, smoke-tested end-to-end: approved social posts push to `content_calendar` as drafts idempotently, badge confirms the link, non-social asset types correctly show the "not yet supported" hint, no auto-posting occurred. Phase 14G is now safe to start (purely additive; no posting routes / schema / generation logic touched).
+
+**Patch applied:**
+- [x] `src/lib/social-specs.ts` — single source of truth. `PlatformId` union (`instagram | facebook | twitter | tiktok | youtube_shorts`), `SocialSpec` interface, 5 populated spec constants, helper functions: `normalizePlatform`, `getSocialSpec`, `validateCaptionForPlatform`, `suggestCaptionTrim`, `getRecommendedImageSpec`, `getRecommendedVideoSpec`, `buildPlatformGuidanceLine`.
+- [x] `src/app/dashboard/campaigns/page.tsx` — for `social_post` rows where the platform resolves, renders a muted one-liner under the body: `📐 Instagram: 1080×1080 image · caption ≤ 150 chars · 8 hashtags`. Title attribute carries the spec's notes. Hidden when platform can't be resolved.
+- [ ] Push-to-calendar route metadata storage — **deferred**. `content_calendar` has no JSONB column today; route unchanged per the user's escape hatch ("If no safe field exists, do not change schema and just leave this for a later phase").
+
+**Platform specs included:** Instagram · Facebook · X / Twitter · TikTok · YouTube Shorts.
+
+**Helper functions exported:** `getSocialSpec`, `normalizePlatform`, `validateCaptionForPlatform`, `suggestCaptionTrim`, `getRecommendedImageSpec`, `getRecommendedVideoSpec`, `buildPlatformGuidanceLine`.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 11.0s`; route table unchanged
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees:**
+- No new external API calls (no Pexels / OpenAI / HeyGen / OpenRouter / Claude).
+- No `content_calendar` writes; no schema changes; no posting-route changes.
+- No changes to approve / reject / generate / push-to-calendar logic.
+- Guidance line is render-only — never blocks any operator action.
+
+**Leo to do:**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Spot-check `/dashboard/campaigns` → Art Basel → each social_post row shows the correct per-platform hint.
+
+---
+
+## Phase 14F — Push Approved Campaign Assets into `content_calendar` (shipped commit `e4737e0`, migration 022 applied, prod-verified 2026-05-02).**
 
 Phases 14E timeout patch + 14E.1 media-clarity have been committed (`5037a6c` + `a91acd3`), deployed to prod, and smoke-tested end-to-end — Art Basel generated 33 draft assets across the 4 batches, all asset-group sections render with helper text and prompt placeholders, approve/reject works. Phase 14F is now safe to start (migrations 017-021 applied, code deployed, surface validated).
 

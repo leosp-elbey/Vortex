@@ -1,10 +1,25 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-02 (Phase 14E + timeout patch + 14E.1 media-clarity patch all shipped to prod and smoke-tested. Phase 14F starting in this session.)
-**Last known good commit:** `a91acd3` — "Phase 14E.1: campaign dashboard media clarity image video prompt placeholders"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14E.1 deployed and verified**; Supabase migrations 017-022 applied; Hobby plan)
+**Last updated:** 2026-05-02 (Phase 14F deployed and prod-verified. Phase 14G starting in this session — per-platform creative sizing & media rules.)
+**Last known good commit:** `e4737e0` — "Phase 14F: push approved campaign assets into content_calendar as drafts"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14F deployed and verified**; Supabase migrations 017-022 applied; Hobby plan)
 **Branch:** `main`
-**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · **Phase 14F starting** (push approved campaign assets into `content_calendar`)
+**Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · **Phase 14G starting** (per-platform creative sizing & media rules — `social-specs.ts`)
+
+---
+
+## Phase 14F Production Smoke Test (PASSED 2026-05-02)
+
+End-to-end verification on prod after migration 022 was applied + Phase 14F was deployed:
+- ✅ Migration 022 applied: `content_calendar.campaign_asset_id` column exists; `idx_content_calendar_campaign_asset_unique` partial unique index exists.
+- ✅ Art Basel Miami Beach 2026 — approved a `social_post` asset → clicked `📅 Push to Calendar` → received `200 ok=true already_pushed=false` → a new `content_calendar` row appeared with `status='draft'`, the asset's caption, hashtags, and platform.
+- ✅ Idempotency confirmed: clicking Push again returned `already_pushed=true` and pointed at the same `content_calendar.id`. No duplicate row.
+- ✅ "✓ Added to Calendar" badge replaced the Push button after first click. Badge persists for the session.
+- ✅ Approved non-social assets (`email_subject`, `email_body`, `dm_reply`, `landing_headline`, `lead_magnet`, `hashtag_set`) display the muted "Calendar push not yet supported for {type}" hint instead of the Push button. The route returns the documented 400 if invoked directly.
+- ✅ No auto-posting occurred. The new calendar row remains `status='draft'` and is visible on `/dashboard/content` for manual review.
+- ✅ No regressions on approve / reject / generate flows.
+
+**Phase 14G is now safe to start.** No prerequisites pending. Phase 14G is purely additive (a new lib module + a one-line dashboard hint) and does not change posting routes, schema, or any existing behavior.
 
 ---
 
@@ -627,3 +642,55 @@ Connects approved `campaign_assets` rows to the existing `content_calendar` tabl
 - [ ] Apply migration 022 to Supabase prod (`supabase db push` or paste the SQL into the SQL Editor). **Required before the new route can be exercised.**
 - [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
 - [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → approve a `social_post` asset → click `📅 Push to Calendar` → verify a `content_calendar` row with `status='draft'` and the asset's caption / hashtags / platform → confirm the badge updates → click again to confirm idempotency.
+
+---
+
+## Phase 14G — Per-Platform Creative Sizing & Media Rules (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy)
+
+Centralizes platform format requirements (caption / hashtag limits, image / video aspect ratios, preferred dimensions, file-size caps) into a single reusable module. Adds a one-line creative-format hint to the campaign dashboard so operators see at a glance what each platform expects. **Does not generate any media. Does not call any external API. Does not modify any DB schema. Does not change posting routes.** Pure, additive.
+
+**Created:**
+- `src/lib/social-specs.ts` — single source of truth for all 5 platforms. Exports:
+  - `PlatformId` union type and `ALL_PLATFORM_IDS` array (`instagram | facebook | twitter | tiktok | youtube_shorts`).
+  - `SocialSpec` interface — captures display name, allowed content types, caption max + recommended chars, hashtag max + recommended count, image / video aspect ratios, preferred dimensions array (first entry is the default), max file sizes, max video length, link-clickability and hashtag-usefulness flags, short-form-video-preferred flag, and free-form practitioner notes.
+  - 5 platform spec constants populated from current (early-2026) platform docs:
+    - Instagram — 2200 cap (≤150 recommended), 30 hashtag cap (~8 recommended), 1080×1080 / 1080×1350 / 1080×1920, Reel 9:16 video preferred, links not clickable.
+    - Facebook — effectively unbounded caption (250 recommended), 30 hashtag cap (~2 recommended), 1200×630 link card / 1080×1080 square, links clickable.
+    - X / Twitter — 280 cap (240 recommended), 2 hashtag cap (1 recommended), 1600×900 / 1200×675, 5MB image cap, 140s video cap (free tier), links clickable.
+    - TikTok — 2200 cap (100 recommended), 30 hashtag cap (~4 recommended), vertical 1080×1920, 180s video cap (sweet spot 21-34s), links not clickable.
+    - YouTube Shorts — 5000 description (200 recommended), 15 hashtag cap (~3 recommended), 1080×1920 vertical, 60s cap, #Shorts tag for discovery.
+  - Helper functions:
+    - `normalizePlatform(input)` — case-insensitive alias resolution (`'X' / 'x' / 'twitter/x'` → `'twitter'`, `'IG' / 'insta'` → `'instagram'`, `'YT Shorts' / 'shorts'` → `'youtube_shorts'`, etc.). Returns null on unknown input so callers can degrade.
+    - `getSocialSpec(platform)` — returns the full `SocialSpec | null`.
+    - `validateCaptionForPlatform(platform, caption)` — returns `{ ok, reason, lengthChars, maxChars, recommendedChars, overRecommended }`. `ok=false` only when over the hard max; `overRecommended=true` is a soft warning.
+    - `suggestCaptionTrim(platform, caption)` — pure trim with ellipsis when over hard max.
+    - `getRecommendedImageSpec(platform)` — first preferred image dimension or null.
+    - `getRecommendedVideoSpec(platform)` — first preferred video dimension or null.
+    - `buildPlatformGuidanceLine(platform)` — compact `"1080×1080 image · caption ≤ 150 chars · 8 hashtags"` style string for dashboard hints. Picks video for short-form-preferred platforms (TikTok, YouTube Shorts), image otherwise.
+
+**Edited:**
+- `src/app/dashboard/campaigns/page.tsx` — `AssetCard` imports `getSocialSpec` and `buildPlatformGuidanceLine` from the new module. For `social_post` rows where the platform resolves, renders a single muted line under the body text: `📐 Instagram: 1080×1080 image · caption ≤ 150 chars · 8 hashtags`. Title attribute carries the spec's free-form notes for hover detail. Hidden when the platform can't be resolved (graceful fallback). Approve / reject / push-to-calendar / generate flows unchanged.
+
+**Content_calendar metadata storage:** **Deferred.** Reviewed `supabase/migrations/004_create_content_calendar.sql` and `022_add_campaign_asset_link_to_content_calendar.sql` — `content_calendar` has no JSONB / metadata column. Per the user's explicit instruction ("If no safe field exists, do not change schema and just leave this for a later phase"), the push-to-calendar route is unchanged. A future schema phase can add `content_calendar.platform_spec_metadata JSONB` and the push route can populate it from `getSocialSpec(asset.platform)` at insert time without further dashboard changes.
+
+**Tests run this session:**
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS; `Compiled successfully in 11.0s`. Route table unchanged.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated to this patch.
+
+**Behavioral guarantees (all preserved):**
+- No new external API calls. No image / video generation. No Pexels / OpenAI / HeyGen.
+- No `content_calendar` writes from this phase. No schema changes.
+- No changes to posting routes. No auto-posting.
+- No changes to approve / reject / generate / push-to-calendar logic.
+- Guidance line is render-only — never blocks any operator action.
+
+**Risks:**
+- Platform spec numbers reflect early-2026 docs and drift over time (X premium caps changed in 2024, IG Reels duration was 90s as of late 2025). When a platform officially changes a limit, edit the spec constant in `social-specs.ts` and downstream consumers (dashboard hint, future poster pre-flight) pick up the change automatically. Worst case if a number is stale: the recommendation is slightly off, not that anything posts. The hard-max numbers are conservative — when in doubt, the spec under-counts.
+- The dashboard's title-attribute tooltip carrying multi-line notes uses `\n`. Rendering of the newline depends on the browser's native title implementation and can vary; this is a minor cosmetic issue, not a functional one.
+- `buildPlatformGuidanceLine` returns null for unknown platforms so unrecognized values silently hide the hint. If a spec is added for a new platform that isn't yet in `normalizePlatform`'s alias map, it won't surface in the UI — keep both in sync.
+
+**Leo to do:**
+- [ ] Commit + push the patch.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Spot-check `/dashboard/campaigns` → Art Basel → confirm each `social_post` row shows the correct per-platform hint (Instagram square, Facebook link card, Twitter 1600×900, TikTok 1080×1920, etc.).
