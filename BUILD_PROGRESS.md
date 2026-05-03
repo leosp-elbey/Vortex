@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-02 (Phase 14F deployed and verified — migration 022 applied, push-to-calendar working idempotently, badge confirmed, non-social hint confirmed. Phase 14G starting.)
-**Last code-shipping commit:** `e4737e0` (Phase 14F push-to-calendar)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14F deployed and verified on prod** · **Phase 14G starting** (per-platform creative sizing & media rules — `src/lib/social-specs.ts`)
+**Last updated:** 2026-05-02 (Phase 14G deployed and prod-verified — platform guidance lines render correctly per platform. Phase 14H starting.)
+**Last code-shipping commit:** `ca7c2e4` (Phase 14G social-specs)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14G deployed and verified on prod** · **Phase 14H starting** (conversion tracking by event campaign — attribution view + admin endpoint + dashboard performance panel)
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,44 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14G — Per-Platform Creative Sizing & Media Rules (in working tree, 2026-05-02 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14H — Conversion Tracking by Event Campaign (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + migration 023 apply + deploy).**
+
+Phase 14G shipped (`ca7c2e4`), prod-verified — platform guidance lines render correctly per platform on every approved `social_post` row. Phase 14H lays the attribution foundation: a SQL view joining `event_campaigns → campaign_assets → content_calendar` plus best-effort UTM lead matching against `contacts.custom_fields`, a server helper that rolls per-(asset × calendar_row) rows up to per-campaign metrics, an admin GET endpoint, and a Performance panel on the campaign dashboard.
+
+**Patch applied:**
+- [x] `supabase/migrations/023_create_event_campaign_attribution_view.sql` — `event_campaign_attribution_summary` view, idempotent (`CREATE OR REPLACE`).
+- [x] `src/lib/event-campaign-attribution.ts` — `getEventCampaignAttributionSummary`, `getEventCampaignAttributionByCampaign`, `rollupCampaign`, `calculateCampaignPerformanceScore`. Server-only.
+- [x] `src/app/api/admin/campaigns/attribution/route.ts` — admin-gated GET. Zod-validated query (`campaign_id`/`platform`/`wave`/`min_score`/`date_from`/`date_to`). Returns `{ ok, empty, filters, totals, ranked, notes }`.
+- [x] `src/app/dashboard/campaigns/page.tsx` — new `PerformancePanel` between the score panel and the asset bundle. Renders composite performance score, latest activity, 8-cell metric grid, per-platform breakdown, deferred-attribution footer note. Empty-state copy when no signal exists. Refreshes after a successful Push to Calendar.
+- [ ] `push-to-calendar` route metadata — **not patched.** Resolving the placeholder tracking URL safely requires a `content_calendar.tracking_url` column (schema change) and persisting `event_slug` on `event_campaigns`. Documented as a high-priority gap; deferred to a future phase.
+
+**Existing tracking schema inspected:** `contact_events`, `contacts.custom_fields`, `event_campaigns.tracking_url_template`, `campaign_assets.tracking_url`, `content_calendar`. None of them carry resolved campaign UTM tags today; `/dashboard/attribution` already aggregates leads by UTM from `contacts.custom_fields`, which is the same signal the new view re-uses.
+
+**Metrics supported now:** asset_count · approved_asset_count · calendar_row_count · posted_count · latest_posted_at · lead_count (UTM best-effort) · member_count (UTM best-effort) · lead_to_conversion_rate · latest_activity_at · performance_score.
+
+**Metrics deferred:** clicks (no UTM-aware click tracking on `contact_events`) · impressions (no platform analytics integrated) · per-(platform × wave) lead breakdown (requires resolved tracking URLs first).
+
+**Tracking URL placeholder status:** documented gap. `event_campaigns.tracking_url_template` stores the literal template; `campaign_assets.tracking_url` is always NULL; `content_calendar` has no field for it. Captions don't include a UTM tag. Lead counts will be 0 until a future small phase materializes the URL through the chain.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 31.0s`; new route registered as `ƒ /api/admin/campaigns/attribution`
+- [ ] `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated
+
+**Behavioral guarantees:**
+- Read-only. No posts, no AI calls, no DB writes outside the view definition.
+- No changes to existing posting routes or generation logic.
+- Performance panel render-only — never blocks any operator action.
+
+**Leo to do:**
+- [ ] Commit + push.
+- [ ] **Apply migration 023 to Supabase prod** — required before the endpoint or panel returns data.
+- [ ] Re-deploy to Vercel prod.
+- [ ] Smoke test: `/dashboard/campaigns` → Art Basel → Performance panel renders with empty-state copy + composite score.
+
+---
+
+## Phase 14G — Per-Platform Creative Sizing & Media Rules (shipped commit `ca7c2e4`, prod-verified 2026-05-03).**
 
 Phase 14F shipped (`e4737e0`), migration 022 applied to Supabase prod, smoke-tested end-to-end: approved social posts push to `content_calendar` as drafts idempotently, badge confirms the link, non-social asset types correctly show the "not yet supported" hint, no auto-posting occurred. Phase 14G is now safe to start (purely additive; no posting routes / schema / generation logic touched).
 

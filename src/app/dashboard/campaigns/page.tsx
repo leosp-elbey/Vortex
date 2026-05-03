@@ -170,6 +170,27 @@ interface DetailResponse {
   latest_score: ScoreRow | null
 }
 
+// Phase 14H — performance / attribution panel.
+interface BreakdownEntry { asset_count: number; approved_count: number; posted_count: number }
+interface AttributionRollup {
+  campaign_id: string
+  asset_count: number
+  approved_asset_count: number
+  calendar_row_count: number
+  posted_count: number
+  latest_posted_at: string | null
+  lead_count: number
+  member_count: number
+  click_count: number
+  click_to_lead_rate: number | null
+  lead_to_conversion_rate: number | null
+  latest_activity_at: string | null
+  first_lead_at: string | null
+  performance_score: number
+  by_platform: Record<string, BreakdownEntry>
+  by_wave: Record<string, BreakdownEntry>
+}
+
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignListRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -186,6 +207,11 @@ export default function CampaignsPage() {
   // After a successful push we add the id; the same badge will also render whenever the
   // API starts returning content_calendar_id without further dashboard changes.
   const [pushedAssetIds, setPushedAssetIds] = useState<Set<string>>(new Set())
+  // Phase 14H — attribution rollup for the currently-selected campaign. Loaded
+  // lazily via /api/admin/campaigns/attribution?campaign_id=… when a campaign is
+  // selected. Errors degrade silently (panel shows empty state).
+  const [attribution, setAttribution] = useState<AttributionRollup | null>(null)
+  const [attributionLoading, setAttributionLoading] = useState(false)
   const { toasts, show } = useToast()
 
   const loadList = useCallback(async () => {
@@ -240,6 +266,32 @@ export default function CampaignsPage() {
       setDetail(null)
     }
   }, [selectedId, loadDetail])
+
+  const loadAttribution = useCallback(async (id: string) => {
+    setAttributionLoading(true)
+    try {
+      const res = await fetch(`/api/admin/campaigns/attribution?campaign_id=${id}`, { cache: 'no-store' })
+      const json = await res.json()
+      if (!res.ok || !json.ok) {
+        setAttribution(null)
+        return
+      }
+      const ranked = (json.ranked ?? []) as AttributionRollup[]
+      setAttribution(ranked.find(r => r.campaign_id === id) ?? null)
+    } catch {
+      setAttribution(null)
+    } finally {
+      setAttributionLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedId) {
+      loadAttribution(selectedId)
+    } else {
+      setAttribution(null)
+    }
+  }, [selectedId, loadAttribution])
 
   const handleGenerate = async (campaignId: string, force: boolean) => {
     if (force) {
@@ -341,7 +393,10 @@ export default function CampaignsPage() {
       } else {
         show('Pushed to content calendar as draft')
       }
-      if (selectedId) await loadDetail(selectedId)
+      if (selectedId) {
+        await loadDetail(selectedId)
+        await loadAttribution(selectedId)
+      }
     } catch (err) {
       show(err instanceof Error ? err.message : 'Push to calendar failed', 'error')
     } finally {
@@ -413,6 +468,8 @@ export default function CampaignsPage() {
             generationProgress={generationProgress}
             actionInFlight={actionInFlight}
             pushedAssetIds={pushedAssetIds}
+            attribution={attribution}
+            attributionLoading={attributionLoading}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
             onReject={handleReject}
@@ -584,6 +641,8 @@ function CampaignDetailPanel({
   generationProgress,
   actionInFlight,
   pushedAssetIds,
+  attribution,
+  attributionLoading,
   onGenerate,
   onApprove,
   onReject,
@@ -595,6 +654,8 @@ function CampaignDetailPanel({
   generationProgress: { current: number; total: number; label: string } | null
   actionInFlight: string | null
   pushedAssetIds: Set<string>
+  attribution: AttributionRollup | null
+  attributionLoading: boolean
   onGenerate: (id: string, force: boolean) => void
   onApprove: (assetId: string) => void
   onReject: (assetId: string) => void
@@ -716,6 +777,8 @@ function CampaignDetailPanel({
         <ScorePanel score={detail.latest_score} />
       )}
 
+      <PerformancePanel attribution={attribution} loading={attributionLoading} />
+
       <section className="bg-white rounded-xl shadow-sm p-6">
         <h3 className="text-lg font-bold text-[#1A1A2E] mb-3">Asset bundle</h3>
         <div className="flex flex-wrap gap-2 mb-4 text-xs">
@@ -754,6 +817,104 @@ function CampaignDetailPanel({
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+function PerformancePanel({
+  attribution,
+  loading,
+}: {
+  attribution: AttributionRollup | null
+  loading: boolean
+}) {
+  if (loading) {
+    return (
+      <section className="bg-white rounded-xl shadow-sm p-6">
+        <h3 className="text-lg font-bold text-[#1A1A2E] mb-3">Performance</h3>
+        <p className="text-xs text-gray-400">Loading attribution…</p>
+      </section>
+    )
+  }
+
+  // No rollup at all — campaign has no rows in the view (rare; means the
+  // attribution view query failed silently OR the view hasn't been created yet).
+  if (!attribution) {
+    return (
+      <section className="bg-white rounded-xl shadow-sm p-6">
+        <h3 className="text-lg font-bold text-[#1A1A2E] mb-3">Performance</h3>
+        <p className="text-sm text-gray-400">
+          No conversion data yet. Campaign assets are now trackable once links receive traffic.
+        </p>
+      </section>
+    )
+  }
+
+  const hasAnySignal =
+    attribution.lead_count > 0 ||
+    attribution.member_count > 0 ||
+    attribution.posted_count > 0 ||
+    attribution.click_count > 0
+
+  const pct = (n: number | null) => (n === null ? '—' : `${Math.round(n * 1000) / 10}%`)
+
+  return (
+    <section className="bg-white rounded-xl shadow-sm p-6">
+      <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-lg font-bold text-[#1A1A2E]">
+          Performance: <span className="text-[#FF6B35]">{attribution.performance_score}/100</span>
+        </h3>
+        {attribution.latest_activity_at && (
+          <p className="text-xs text-gray-400">
+            Latest activity: {formatDateTime(attribution.latest_activity_at)}
+          </p>
+        )}
+      </div>
+
+      {!hasAnySignal && (
+        <p className="text-sm text-gray-400 mb-4">
+          No conversion data yet. Campaign assets are now trackable once links receive traffic.
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+        <Metric label="Clicks" value={attribution.click_count} subtext="deferred" />
+        <Metric label="Leads" value={attribution.lead_count} />
+        <Metric label="Conversions" value={attribution.member_count} />
+        <Metric label="Posted" value={attribution.posted_count} />
+        <Metric label="Click → Lead" value={pct(attribution.click_to_lead_rate)} />
+        <Metric label="Lead → Member" value={pct(attribution.lead_to_conversion_rate)} />
+        <Metric label="Approved assets" value={attribution.approved_asset_count} />
+        <Metric label="Calendar rows" value={attribution.calendar_row_count} />
+      </div>
+
+      {Object.keys(attribution.by_platform).length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-gray-500 mb-1">By platform</p>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            {Object.entries(attribution.by_platform).map(([p, e]) => (
+              <span key={p} className="px-2 py-1 rounded bg-gray-50 text-gray-700">
+                {p}: {e.posted_count}/{e.approved_count} posted
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] text-gray-400">
+        Click attribution is deferred until track-event captures UTM. Lead/member counts use UTM substring match
+        on contacts (best-effort) and will start counting once campaign tracking URLs are materialized in posts.
+      </p>
+    </section>
+  )
+}
+
+function Metric({ label, value, subtext }: { label: string; value: number | string; subtext?: string }) {
+  return (
+    <div className="bg-gray-50 rounded p-2">
+      <div className="font-semibold text-gray-600 truncate">{label}</div>
+      <div className="text-[#1A1A2E] font-mono text-base">{value}</div>
+      {subtext && <div className="text-[10px] text-gray-400">{subtext}</div>}
     </div>
   )
 }
