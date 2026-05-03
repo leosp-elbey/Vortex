@@ -1,8 +1,8 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14J.1 closed — posting gate audit trail live. Phase 14J.2 in working tree — corrective fix for legacy CTA links on social posts; typecheck + build pass; awaiting commit + migration 031 + deploy.)
-**Last known good commit:** `764a6db` — "Phase 14J.1: posting gate audit trail"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14J.1 deployed and verified**; Supabase migrations 017-030 applied; Hobby plan)
+**Last updated:** 2026-05-03 (Phase 14J.2 + 14J.2.1 closed and prod-verified — branded /t/<slug> redirect routes through campaign_cta_url with full FK + UTM logging. Phase 14K starting in DRY-RUN ONLY mode — autoposter eligibility surfacing, no live posts.)
+**Last known good commit:** `dec7bb3` — "Phase 14J.2.1: harden branded tracking redirect"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14J.2.1 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
 
 ---
 
@@ -271,6 +271,245 @@ For the smoke test click, expect a row with:
 Or run `node scripts/diagnose-branded-redirect.js` for the same data formatted nicely + a reason-distribution histogram + the known-good slug spot check.
 
 If `redirect_reason` shows `slug_unmatched` for `art-basel-miami-beach`, that means the campaign was deleted from `event_campaigns` — re-seed via the next weekly-content cron tick or manually re-insert via the dashboard.
+
+---
+
+## Phase 14K — Autoposter Cron (DRY-RUN ONLY) (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy)
+
+The first piece of autoposter infrastructure. **Selects content_calendar rows that WOULD be posted, but never posts.** A future phase will add the live-posting layer (replacing one of the existing crons or upgrading to Vercel Pro to allow a 5th).
+
+### Existing code inspected
+
+- 4 existing crons (`/api/cron/check-heygen-jobs`, `/api/cron/score-and-branch`, `/api/cron/send-sequences`, `/api/cron/weekly-content`) — already at the Hobby plan's 4-cron limit. Phase 14K's dry-run route is **not** registered in `vercel.json`; it's invoked manually via curl.
+- 3 manual posting routes (`/api/automations/post-to-{twitter,facebook,instagram}`) — admin-Supabase-auth-gated; require `post.status = 'approved'`; do NOT currently check `posting_gate_approved`. Used by the dashboard's per-row Post buttons. **Not modified in 14K** (per spec — manual flow stays as-is).
+- `posting-gate.ts` (Phase 14J) + `posting_gate_audit` (Phase 14J.1) — drive the gate's `posting_status='ready'` and `posting_gate_approved=true`. The autoposter reads them.
+- `content_calendar` schema — already carries the 8 gate columns from Phase 14J's migration 029; no schema change required.
+
+### Files created
+
+- `src/lib/autoposter-gate.ts` — eligibility helper. Exports:
+  - `getAutoposterEligibleRows({ limit?, platform?, now? })` — pre-filters by `status='approved'` server-side; runs the remaining 8 rules in JS so each skipped row carries a precise reason. Returns `{ eligible: AutoposterEligibleRow[], skipped: AutoposterSkippedRow[] }`.
+  - `validateAutoposterCandidate(row)` — pure; returns `null` when eligible, otherwise a short user-facing reason string.
+  - `buildAutoposterDryRunPlan(rows)` — pure; reshapes for JSON output.
+  - `summarizeAutoposterDryRun(eligible, skipped)` — returns `{ eligible_count, skipped_count, by_platform, skipped_by_reason }`.
+  - `markAutoposterDryRunInspected(opts)` — Phase 14K stub returning `{ ok: true, written: false, reason: 'mutation deferred — Phase 14K is dry-run only' }`. Future phases can fill it in once `posting_gate_audit.action` or `ai_actions_log.action_type` CHECK constraints are extended; today's tables don't have a clean slot without a migration.
+  - `hardBlockLivePosting(reason)` — tripwire that throws unless an internal `LIVE_POSTING_ENABLED` const flips to true. Const is `as const false` for Phase 14K, making it impossible to call a platform API from this module.
+  - `LIVE_POSTING_BLOCKED = true as const` — runtime contract surfaced in the cron response.
+- `src/app/api/cron/autoposter-dry-run/route.ts` — GET-only cron route. Bearer-auth via `CRON_SECRET` (same pattern as the other 4 crons). Optional `?limit=N` (1-500, default 100) and `?platform=ig` query params. Returns the structured JSON (shape below). Calls `markAutoposterDryRunInspected` (no-op stub) at the end.
+- `scripts/diagnose-autoposter-dry-run.js` — read-only diagnostic. Schema check, candidate eligibility split, ineligibility-reason histogram, hits the dry-run endpoint when CRON_SECRET is in `.env.local` (otherwise prints curl command), 6 contract assertions, before/after snapshot of `posted_at` row count to confirm zero mutations.
+
+### Files updated
+
+- `src/app/dashboard/content/page.tsx` — added a one-line note under the existing gate note: "Autoposter dry-run only. Ready rows are inspected, not posted." No other UI changes; existing Approve / Reject / Mark Ready / Post-to-platform buttons untouched.
+
+### Eligibility rules implemented
+
+A row is eligible iff ALL of the following hold (validated by `validateAutoposterCandidate`):
+
+| Rule | Reason if violated |
+|---|---|
+| `status === 'approved'` | `status is '<X>', need 'approved'` |
+| `posting_status === 'ready'` | `posting_status is '<X>', need 'ready'` |
+| `posting_gate_approved === true` | `posting_gate_approved is not true` |
+| `manual_posting_only === true` | `manual_posting_only is not true` |
+| `queued_for_posting_at` non-null | `queued_for_posting_at is null` |
+| `posted_at` is null | `already posted` |
+| `platform` non-empty | `platform is missing` |
+| `caption` non-empty | `caption is empty` |
+| Campaign-originated rows have `tracking_url` | `campaign-originated row missing tracking_url` |
+
+The server-side query pre-filters to `status='approved'` and orders by `queued_for_posting_at ASC NULLS LAST` so the next-due row tops the list. The remaining rules run in JS so the skipped-rows sample carries human-readable reasons.
+
+### Dry-run cron response shape
+
+`GET /api/cron/autoposter-dry-run` (Bearer CRON_SECRET) returns:
+
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "live_posting_blocked": true,
+  "eligible_count": 0,
+  "skipped_count": 0,
+  "eligible_rows": [
+    {
+      "id": "<uuid>",
+      "platform": "instagram",
+      "status": "approved",
+      "posting_status": "ready",
+      "posting_gate_approved": true,
+      "queued_for_posting_at": "2026-05-03T...",
+      "tracking_url_present": true,
+      "campaign_asset_id_present": true,
+      "reason": "eligible"
+    }
+  ],
+  "skipped_rows_sample": [
+    { "id": "<uuid>", "platform": "instagram", "reason": "posting_gate_approved is not true" }
+  ],
+  "summary": {
+    "eligible_count": 0,
+    "skipped_count": 0,
+    "by_platform": {},
+    "skipped_by_reason": {}
+  },
+  "inspected": { "ok": true, "written": false, "reason": "mutation deferred — Phase 14K is dry-run only" },
+  "params": { "limit": 100, "platform": null }
+}
+```
+
+`skipped_rows_sample` is capped at 25 rows; `summary.skipped_by_reason` carries the full histogram.
+
+### How live posting is hard-blocked
+
+Three layered guarantees:
+
+1. **No platform integration in the module.** `autoposter-gate.ts` has zero imports of any social SDK (`twitter-api-v2`, Facebook Graph fetch, etc.) and zero references to the existing `/api/automations/post-to-*` routes.
+2. **`LIVE_POSTING_ENABLED = false as const`.** Type-narrowing prevents flipping it without source-code changes. `hardBlockLivePosting()` reads it and throws unconditionally during Phase 14K.
+3. **Runtime contract in the cron response.** `live_posting_blocked: LIVE_POSTING_BLOCKED` (which is `true as const`) is surfaced in every JSON response so any operator inspecting the curl output sees the dry-run guarantee without reading source.
+
+A future phase that introduces live posting MUST: (a) extend `LIVE_POSTING_ENABLED` to a non-const branch, (b) wire the platform integration explicitly, (c) update the response contract, and (d) probably register this route in `vercel.json` after replacing one of the existing crons.
+
+### Whether any rows were mutated
+
+**No.** The dry-run never writes:
+- `getAutoposterEligibleRows` is pure read.
+- `markAutoposterDryRunInspected` is a no-op stub returning `{ ok: true, written: false }`.
+- The cron route never updates a `content_calendar` row.
+
+The diagnostic script's "no-mutation cross-check" snapshots `count(*) WHERE posted_at IS NOT NULL` before and after the curl call; values must match.
+
+### Existing posting routes inspected
+
+| Route | Auth | Gate-respecting | Status in 14K |
+|---|---|---|---|
+| `/api/automations/post-to-twitter` | Supabase admin user | ❌ requires only `status='approved'` | **unchanged** — manual dashboard flow continues to work as today |
+| `/api/automations/post-to-facebook` | Supabase admin user | ❌ requires only `status='approved'` | **unchanged** — same |
+| `/api/automations/post-to-instagram` | Supabase admin user | ❌ requires only `status='approved'` | **unchanged** — same |
+| `/api/cron/weekly-content` | CRON_SECRET | n/a — generates content, doesn't post | unchanged |
+| `/api/cron/send-sequences` | CRON_SECRET | n/a — sends email/SMS, not platform posts | unchanged |
+| `/api/cron/score-and-branch` | CRON_SECRET | n/a — lead scoring, not posting | unchanged |
+| `/api/cron/check-heygen-jobs` | CRON_SECRET | n/a — video render polling | unchanged |
+| `/api/cron/autoposter-dry-run` (NEW) | CRON_SECRET | ✅ requires full gate | dry-run only — never posts |
+
+The 3 manual posting routes are intentionally **NOT modified** per spec: "Do not disable existing manual buttons unless dangerous." They remain admin-only and require `status='approved'` (which is enforced server-side). Adding a `posting_gate_approved=true` requirement would break the existing manual dashboard flow that operators use today. A future phase can introduce that requirement once an autoposter is live and operators have agreed on the new contract.
+
+### Dashboard copy added
+
+Single line under the existing gate note on `/dashboard/content`:
+
+> 🟢 Mark Ready is a manual gate only. It does not post to social platforms.
+> Autoposter dry-run only. Ready rows are inspected, not posted.
+
+Both lines are `text-[11px] text-gray-400` — small, muted, no UI clutter. No new buttons. No layout change to existing rows.
+
+### Diagnostic script behavior
+
+`node scripts/diagnose-autoposter-dry-run.js`:
+
+1. Loads `.env.local` and verifies Supabase service role key is present.
+2. Runs a probe SELECT on `content_calendar` for the 7 gate columns; reports schema status.
+3. Pulls all `status='approved'` rows (capped at 500) and splits them into `eligible` vs `skipped` using the same rules as the helper. Lists the first 10 eligible by `queued_for_posting_at ASC` with platform / queue-time / tracking-url-presence.
+4. For skipped rows, prints a histogram of reasons + a 5-row sample.
+5. If `CRON_SECRET` is in `.env.local`, fetches `${NEXT_PUBLIC_APP_URL}/api/cron/autoposter-dry-run` and verifies the response shape (3 contract assertions: `dry_run`, `live_posting_blocked`, `eligible_count` consistency). Otherwise prints the exact curl command.
+6. Snapshots `count(*) WHERE posted_at IS NOT NULL` before AND after the dry-run call; reports green if equal (zero mutations) or red if different.
+
+Read-only — never writes.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 13.5s`. New route registered as `ƒ /api/cron/autoposter-dry-run`.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+
+### Risks
+
+- **No vercel.json registration.** This route runs only when manually curled. A future phase moving to scheduled execution must replace one of the 4 existing crons OR upgrade to Vercel Pro. Documented in the route's header comment.
+- **Manual posting routes still bypass the gate.** Phase 14K's autoposter-dry-run respects the gate; the dashboard's per-platform Post buttons do NOT. Operators can still post directly without `posting_gate_approved=true`. Acceptable for now (preserves existing flow); resolution comes when a future phase introduces live autoposting and contracts the manual flow at the same time.
+- **`hardBlockLivePosting` is exported but unused inside the module today.** Intentional — it's a tripwire, not active code. If a future engineer accidentally adds platform code to this module, calling the function (or removing the guard) is the documented gate.
+- **`markAutoposterDryRunInspected` is a stub.** Returns `{ ok, written:false }` always. The dry-run response includes `inspected.written: false` so operators can confirm no audit row was attempted. If a future phase wants per-run audit, it will need migration to extend `posting_gate_audit.action` CHECK or `ai_actions_log.action_type` CHECK to include an `autoposter_inspected` value.
+- **`?limit=N` capped at 500** to prevent the helper from scanning all of `content_calendar` on a single call. With current production volume (~143 rows total per the Phase 14J diagnostic), 500 is far above any realistic eligibility set.
+- **Anonymous candidates with no platform** (`platform = null` somehow — shouldn't happen given migration 004's NOT NULL CHECK, but defensively) are surfaced as `'platform is missing'` skipped rows rather than crashing.
+
+### Exact git commands
+
+```bash
+git status
+git add src/lib/autoposter-gate.ts "src/app/api/cron/autoposter-dry-run/route.ts" scripts/diagnose-autoposter-dry-run.js src/app/dashboard/content/page.tsx PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14K (dry-run only): autoposter eligibility helper + manual-curl cron route + dashboard note + diagnostic"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` intentionally **not** in the `git add` list (cache file, save-protocol Rule 5). Named-file staging only — never `git add .` (Rule 6).
+
+### Deploy instructions
+
+1. `git push origin main` (×2 for verification).
+2. `npx vercel --prod --yes`.
+3. Run the curl command below to verify the route works.
+4. Run `node scripts/diagnose-autoposter-dry-run.js` to verify the response contract + zero-mutation cross-check.
+
+**No migration in this phase.** No `vercel.json` changes (still 4-cron Hobby limit). No platform API integrations.
+
+### Curl command for dry-run cron
+
+```bash
+CRON_SECRET=$(grep "^CRON_SECRET=" .env.local | head -1 | sed 's/CRON_SECRET=//' | tr -d '\r\n'); curl -sS -w "\n---HTTP %{http_code}---\n" -H "Authorization: Bearer $CRON_SECRET" https://www.vortextrips.com/api/cron/autoposter-dry-run
+```
+
+Optional query params:
+- `?limit=10` — limit candidate scan to 10 rows.
+- `?platform=instagram` — only consider Instagram rows.
+
+Combine: `https://www.vortextrips.com/api/cron/autoposter-dry-run?limit=10&platform=instagram`
+
+### Supabase verification queries
+
+```sql
+-- Count of currently-eligible rows (matches the dry-run's eligible_count):
+SELECT count(*)
+FROM content_calendar
+WHERE status = 'approved'
+  AND posting_status = 'ready'
+  AND posting_gate_approved = TRUE
+  AND manual_posting_only = TRUE
+  AND queued_for_posting_at IS NOT NULL
+  AND posted_at IS NULL
+  AND platform IS NOT NULL
+  AND length(trim(coalesce(caption, ''))) > 0
+  AND (campaign_asset_id IS NULL OR (tracking_url IS NOT NULL AND length(trim(tracking_url)) > 0));
+
+-- Snapshot of posted_at row count — should NOT change after running the dry-run:
+SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL;
+
+-- After running the curl above, re-run the previous query and confirm the count is unchanged.
+```
+
+### Smoke-test checklist (post-deploy)
+
+- [ ] `git push` confirmed `Everything up-to-date` on the second push.
+- [ ] `npx vercel --prod --yes` finished cleanly.
+- [ ] Open `/dashboard/content` → confirm new "Autoposter dry-run only…" line appears under the existing gate note.
+- [ ] Existing manual posting buttons (Post to IG / FB / X / Mark Posted) still render unchanged.
+- [ ] Run the curl command → expect HTTP 200 and a JSON response with `dry_run: true`, `live_posting_blocked: true`, `eligible_count` matching the SQL count above.
+- [ ] Run `node scripts/diagnose-autoposter-dry-run.js` → all three contract assertions pass; "no-mutation cross-check" reports posted_at count unchanged.
+- [ ] Confirm the response includes `inspected.written: false` (Phase 14K stub is intact).
+- [ ] Confirm no row in `content_calendar` flipped to `status='posted'` because of the dry-run call.
+- [ ] If `eligible_count > 0`, manually inspect one of the eligible rows in Supabase and verify all 9 eligibility rules are satisfied.
+
+### Recommended next phase
+
+**Phase 14K.1 — Autoposter live posting (per-platform, gated, opt-in).** The natural continuation. Scope:
+- Move/replace one of the 4 existing crons OR upgrade to Vercel Pro to register `autoposter` (non-dry-run) in `vercel.json`.
+- Per-platform poster module that respects the gate AND `manual_posting_only=true` (skip when true; only post when an operator explicitly flips it to false).
+- Per-row idempotency: mark `posted_at` immediately on success; clear `posting_gate_approved` and write `posting_block_reason` on failure so operators must re-mark for retry.
+- Migration to extend `posting_gate_audit.action` CHECK to include `auto_posted` and `auto_skipped` so the audit trail covers cron actions, not just human gate clicks.
+- Feature flag (env var) to disable the autoposter at any time without redeploy.
+
+Phase 14K's `hardBlockLivePosting` and `LIVE_POSTING_ENABLED` constants are the explicit handoff points — 14K.1 starts by removing the dry-run guards intentionally, not accidentally.
+
+A safer intermediate alternative: **Phase 14K.0.5 — Posting gate consistency.** Add `posting_gate_approved=true` requirement to the 3 manual platform routes BEFORE introducing autoposting. Closes the existing gap where manual posting bypasses the gate. Trades operator convenience for consistency. Probably not worth doing on its own; pair it with 14K.1.
 **Branch:** `main`
 **Status:** 🚀 LIVE · Phases 0 → 12.8 shipped · Phase 13 code-side complete · Phase 14A shipped (commit `dd01930`) · Phase 14B shipped (commit `8340a62`, migrations 017-021 applied) · Phase 14C shipped (commit `f4bae3a`) · Phase 14D shipped (commit `410e0a8`) · Phase 14E shipped (commit `b7fc8ad`) · Phase 14E timeout patch shipped (commit `5037a6c`) · Phase 14E.1 media clarity shipped (commit `a91acd3`) · Phase 14F shipped (commit `e4737e0`, migration 022 applied) · Phase 14G shipped (commit `ca7c2e4`) · Phase 14H shipped (commits `2e3869d`/`4323250`, migration 023 applied) · Phase 14H.1 shipped (commits `69d354d`/`8582680`/`dc56330`, migration 024 applied) · Phase 14H.2 shipped (commit `783803e`, migrations 025-026 applied) · Phase 14I shipped (commit `c9956f5`, migrations 027-028 applied) · Phase 14J shipped (commit `0b3896a`, migration 029 applied) · **Phase 14J.1 starting** (posting gate UI smoke test + audit trail)
 

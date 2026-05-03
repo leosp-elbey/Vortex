@@ -186,6 +186,9 @@ export default function ContentPage() {
           <p className="mt-1 text-[11px] text-gray-400">
             🟢 Mark Ready is a manual gate only. It does not post to social platforms.
           </p>
+          <p className="text-[11px] text-gray-400">
+            Autoposter dry-run only. Ready rows are inspected, not posted.
+          </p>
         </div>
         <button
           onClick={handleGenerate}

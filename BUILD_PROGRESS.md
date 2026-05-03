@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14J.1 closed — audit trail live. Phase 14J.2 starting — replace legacy `myvortex365.com/leosp` social CTAs with branded `vortextrips.com/t/<slug>` tracking links.)
-**Last code-shipping commit:** `764a6db` (Phase 14J.1 audit trail)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J.1 deployed and verified on prod** · **Phase 14J.2 starting** (corrective: branded social tracking URLs + redirect route + data backfill for unposted rows)
+**Last updated:** 2026-05-03 (Phase 14J.2 + 14J.2.1 closed and prod-verified — branded redirect resolves with redirect_reason=campaign_cta_url, no VortexTrips 404. Phase 14K starting in DRY-RUN ONLY mode — autoposter eligibility surfacing, no live posts.)
+**Last code-shipping commit:** `dec7bb3` (Phase 14J.2.1 hardened redirect)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J.2.1 deployed and verified on prod** · **Phase 14K starting (DRY-RUN ONLY)** — autoposter eligibility helper + manual-curl cron + dashboard dry-run note + diagnostic script. Hobby plan is at the 4-cron limit, so this dry-run route is NOT registered in `vercel.json` — it's invoked manually during this phase.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,44 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14J.2.1 — Harden Branded Tracking Redirect Route (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14K — Autoposter Cron, DRY-RUN ONLY (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+First piece of autoposter infrastructure. Selects content_calendar rows that WOULD be posted, but never posts. Manually invoked via curl during this phase — Hobby plan is at the 4-cron limit, so no `vercel.json` registration. Future Phase 14K.1 ships live posting.
+
+**Patch applied:**
+- [x] `src/lib/autoposter-gate.ts` — eligibility helper (`getAutoposterEligibleRows`, `validateAutoposterCandidate`, `buildAutoposterDryRunPlan`, `summarizeAutoposterDryRun`, no-op `markAutoposterDryRunInspected` stub, `hardBlockLivePosting` tripwire, `LIVE_POSTING_BLOCKED` runtime contract). Pure server-side, zero platform-SDK imports.
+- [x] `src/app/api/cron/autoposter-dry-run/route.ts` — GET-only cron route. Bearer-auth via CRON_SECRET (matches existing pattern). Optional `?limit=N` (1-500, default 100) and `?platform=ig`. Returns the structured JSON spec'd in Phase 14K. Calls the no-op stub at the end.
+- [x] `scripts/diagnose-autoposter-dry-run.js` — read-only diagnostic. Schema check, eligibility split, ineligibility-reason histogram, hits the dry-run endpoint when CRON_SECRET is in `.env.local`, 6 contract assertions, before/after snapshot of `posted_at` count to confirm zero mutations.
+- [x] `src/app/dashboard/content/page.tsx` — added one-line note "Autoposter dry-run only. Ready rows are inspected, not posted." under the existing gate note. No other UI changes.
+- [ ] Existing manual posting routes (`/api/automations/post-to-{twitter,facebook,instagram}`) — **not modified.** Per spec they remain admin-only / `status='approved'`-gated and continue to bypass the posting gate. Documented in the report; resolution comes with Phase 14K.1.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 13.5s`; `ƒ /api/cron/autoposter-dry-run` registered
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Behavioral guarantees:**
+- No `vercel.json` registration (Hobby plan at 4-cron limit). Manual curl invocation only during 14K.
+- No platform API calls. No AI calls. No auto-posting. No new content generation.
+- `LIVE_POSTING_ENABLED = false as const` in the helper. `hardBlockLivePosting()` exported as a tripwire — no path inside the module reaches a platform integration.
+- `LIVE_POSTING_BLOCKED = true as const` surfaced in every dry-run JSON response as a runtime contract.
+- The dry-run never mutates: `markAutoposterDryRunInspected` is a no-op stub returning `{ ok, written: false }`. The diagnostic's before/after `posted_at` count snapshot is the cross-check.
+- Existing dashboard manual buttons unchanged.
+- Existing migrations unchanged. Schema unchanged.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Run the curl command:
+  ```bash
+  CRON_SECRET=$(grep "^CRON_SECRET=" .env.local | head -1 | sed 's/CRON_SECRET=//' | tr -d '\r\n'); curl -sS -w "\n---HTTP %{http_code}---\n" -H "Authorization: Bearer $CRON_SECRET" https://www.vortextrips.com/api/cron/autoposter-dry-run
+  ```
+- [ ] Run `node scripts/diagnose-autoposter-dry-run.js` and verify all contract assertions + the no-mutation cross-check pass.
+- [ ] Spot-check `/dashboard/content` for the new dry-run note line.
+
+---
+
+## Phase 14J.2.1 — Harden Branded Tracking Redirect Route (shipped commit `dec7bb3`, prod-verified 2026-05-03).**
 
 Phase 14J.2 shipped (`2abb1cf`), migration 031 applied. Smoke test surfaced one issue: clicking the branded `/t/<slug>?...` link logged the click correctly but returned a VortexTrips 404 to the browser. Phase 14J.2.1 hardens the redirect call shape, adds a three-tier fallback chain so the route can never produce a 404, and adds debug metadata (`route_slug`, `redirect_target`, `redirect_reason`) to every logged click for post-mortem.
 
