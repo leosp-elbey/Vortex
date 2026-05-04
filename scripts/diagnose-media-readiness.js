@@ -185,13 +185,15 @@ async function main() {
   // image_url / video_url / media_status / media_error / media_generated_at
   // / media_source columns from migration 032. If migration 032 hasn't been
   // applied, retry with the legacy SELECT and flag the schema gap.
+  // Phase 14L.2.1 — also reports which provider keys are present and how
+  // many rows are workable per provider.
   let rows = null
   let migration032Applied = true
   {
     const res = await supabase
       .from('content_calendar')
       .select(
-        'id, status, platform, caption, image_prompt, tracking_url, campaign_asset_id, posted_at, ' +
+        'id, status, platform, caption, image_prompt, video_script, tracking_url, campaign_asset_id, posted_at, ' +
         'image_url, video_url, media_status, media_error, media_generated_at, media_source, ' +
         'campaign_asset:campaign_assets!campaign_asset_id(id, image_url, video_url, asset_type)'
       )
@@ -210,7 +212,7 @@ async function main() {
         const fallback = await supabase
           .from('content_calendar')
           .select(
-            'id, status, platform, caption, image_prompt, tracking_url, campaign_asset_id, posted_at, image_url, ' +
+            'id, status, platform, caption, image_prompt, video_script, tracking_url, campaign_asset_id, posted_at, image_url, ' +
             'campaign_asset:campaign_assets!campaign_asset_id(id, image_url, video_url, asset_type)'
           )
           .order('created_at', { ascending: false })
@@ -329,6 +331,57 @@ async function main() {
   const readyAfterMedia = unposted.length - blockedByMedia.length
   console.log(`${COLORS.bold}6c. Rows ready after media (would pass validateMediaReadiness)${COLORS.reset}`)
   console.log(`   ${COLORS.green}ready / text-only-allowed:${COLORS.reset} ${readyAfterMedia} of ${unposted.length}`)
+  console.log()
+
+  // Phase 14L.2.1 — provider readiness section.
+  console.log(`${COLORS.bold}6d. Provider readiness (Phase 14L.2.1)${COLORS.reset}`)
+  for (const [name, role] of [
+    ['PEXELS_API_KEY',   'image (primary)'],
+    ['OPENAI_API_KEY',   'image (fallback)'],
+    ['HEYGEN_API_KEY',   'video'],
+    ['HEYGEN_AVATAR_ID', 'video — avatar'],
+    ['HEYGEN_VOICE_ID',  'video — voice'],
+  ]) {
+    const present = !!(env[name] && env[name].length > 0)
+    console.log(`   ${present ? COLORS.green + '✓' : COLORS.yellow + '·'} ${name}${COLORS.reset}  (${role}) ${present ? 'present' : 'MISSING'}`)
+  }
+  // Per-provider eligible row counts among the blocked set.
+  const needsImage = blockedByMedia.filter(r => {
+    const reasons = validateMediaReadinessJs(r).reasons
+    return reasons.some(s => s.startsWith('missing required image_url'))
+        || reasons.some(s => s === 'campaign media prompt exists but generated media is missing')
+  })
+  const needsVideo = blockedByMedia.filter(r => {
+    const reasons = validateMediaReadinessJs(r).reasons
+    return reasons.some(s => s.startsWith('missing required video_url'))
+  })
+  const videoWithScript = needsVideo.filter(r => nonEmpty(r.video_script))
+  const videoWithoutScript = needsVideo.filter(r => !nonEmpty(r.video_script))
+  console.log(`   ${COLORS.cyan}rows ready for Pexels image:${COLORS.reset}     ${needsImage.length}`)
+  console.log(`   ${COLORS.cyan}rows ready for OpenAI fallback:${COLORS.reset}   ${needsImage.length}  (same set; OpenAI is the auto-fallback)`)
+  console.log(`   ${COLORS.cyan}rows ready for HeyGen (have script):${COLORS.reset} ${videoWithScript.length}`)
+  console.log(`   ${COLORS.red}rows blocked — no video script:${COLORS.reset}   ${videoWithoutScript.length}`)
+  // Pending HeyGen jobs (where the worker queued a render but it hasn't
+  // landed yet). Read both campaign_assets (clean home) and content_calendar
+  // (sentinel in media_error).
+  let pendingHeygen = 0
+  if (migration032Applied) {
+    const { count: ccPending } = await supabase
+      .from('content_calendar')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_source', 'heygen')
+      .eq('media_status', 'pending')
+    pendingHeygen += ccPending ?? 0
+  }
+  const { data: caPending } = await supabase
+    .from('campaign_assets')
+    .select('id, video_source_metadata')
+    .eq('video_source', 'heygen')
+    .is('video_url', null)
+  if (caPending) {
+    pendingHeygen += caPending.filter(r => nonEmpty(r.video_source_metadata?.heygen_video_id)).length
+  }
+  console.log(`   ${COLORS.dim}heygen jobs awaiting poll:${COLORS.reset}        ${pendingHeygen}`)
   console.log()
 
   // 7. posted_at snapshot AFTER.

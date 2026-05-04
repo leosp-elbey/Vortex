@@ -1,58 +1,51 @@
 #!/usr/bin/env node
 /**
- * Phase 14L.2 — Media generation worker scaffold.
+ * Phase 14L.2.1 — Media generation worker.
  *
- * DRY-RUN ONLY by default. Plans the work that would be done to populate
- * media URLs on rows that need them. Provider integrations are stubbed —
- * --apply / --generate prints a clear "not yet implemented" notice and
- * exits without calling any provider API. Real provider wiring is a
- * follow-up sub-phase (14L.2.1+) after the storage shape and migration 032
- * are reviewed and applied in production.
+ * SAFETY MODES:
+ *   default                                    → DRY-RUN. No provider calls. No DB writes.
+ *   --dry-run                                  → DRY-RUN. Same as default; explicit form.
+ *   --generate                                 → Calls provider APIs. Prints fetched/generated URLs. NO DB writes.
+ *   --generate --apply                         → Calls provider APIs AND writes allowed media columns.
+ *   --apply (without --generate)               → Refuses with a clear message — no input source for known URLs in this phase.
  *
- * What this script DOES today:
- *   - Walks unposted rows in content_calendar (joined to campaign_assets
- *     via campaign_asset_id) and identifies rows that need image / video.
- *   - Mirrors src/lib/media-readiness.ts platform rules + the prompt-
- *     without-resolution rule.
- *   - Groups the work by (campaign × platform × asset_type × source table).
- *   - Picks a recommended provider per group:
- *       image → Pexels (PEXELS_API_KEY) — fallback to OpenAI image (OPENAI_API_KEY)
- *       video → HeyGen (HEYGEN_API_KEY) when video_script / video_prompt exists,
- *               otherwise reports "video script missing".
- *   - Reports which provider keys are present (no calls).
- *   - Snapshots posted_at row count BEFORE and AFTER to prove zero mutations.
- *   - Refuses to run without --apply / --generate; the default is dry-run.
+ * Always allowed flags:
+ *   --limit=N            cap rows processed (default 5)
+ *   --provider=pexels    force a specific image provider (default 'pexels' with openai fallback when 'auto')
+ *   --provider=openai
+ *   --provider=heygen
+ *   --provider=auto      pexels-then-openai for image; heygen for video
+ *   --images-only        only process rows that need image
+ *   --videos-only        only process rows that need video
+ *   --campaign-only      only process rows whose target_table is campaign_assets
+ *   --content-only       only process rows whose target_table is content_calendar (organic)
  *
- * What this script DOES NOT do:
- *   - Never calls Pexels / OpenAI / HeyGen / Supabase Storage upload APIs.
- *   - Never calls Facebook / Instagram / TikTok / X (Twitter) / email APIs.
- *   - Never mutates content_calendar.status, content_calendar.posted_at,
- *     campaign_assets.status, posting_status, or posting_gate_approved.
- *   - --apply mode is intentionally a stub. It prints what WOULD run and
- *     exits non-zero so the operator's CI cannot mistakenly enable
- *     generation by passing the flag.
+ * Allowed writes (with --generate --apply only):
+ *   content_calendar.image_url
+ *   content_calendar.video_url
+ *   content_calendar.media_status
+ *   content_calendar.media_source
+ *   content_calendar.media_generated_at
+ *   content_calendar.media_error
+ *   campaign_assets.image_url
+ *   campaign_assets.video_url
+ *   campaign_assets.image_source
+ *   campaign_assets.image_source_metadata
+ *   campaign_assets.video_source
+ *   campaign_assets.video_source_metadata
  *
- * Run from project root:
- *   node scripts/generate-missing-media.js               # DRY-RUN (default)
- *   node scripts/generate-missing-media.js --dry-run     # explicit; same as default
- *   node scripts/generate-missing-media.js --apply       # stub: refuses to run real generation
- *   node scripts/generate-missing-media.js --generate    # alias of --apply
+ * Forbidden (regardless of flags):
+ *   content_calendar.status        (especially 'posted')
+ *   content_calendar.posted_at
+ *   posting_status / posting_gate_approved / queued_for_posting_at
+ *   any platform publishing API (Facebook / Instagram / TikTok / X / email)
  *
- * Storage plan (when real generation is wired in):
- *   - Pexels & OpenAI image generation return a public URL. The worker
- *     SHOULD download the asset and re-upload to Supabase Storage's
- *     `media` bucket (already used by src/app/api/cron/weekly-content/
- *     route.ts). That gives us a stable URL we control + caches the asset.
- *   - HeyGen returns a hosted MP4 URL; same pattern — re-upload to the
- *     `media` bucket so retention is ours.
- *   - Generated URL lands in:
- *       campaign_assets.image_url / .video_url     (campaign-originated rows)
- *       content_calendar.image_url / .video_url    (organic rows; column
- *                                                   added by migration 032)
- *   - On success: media_status='ready', media_source set, media_generated_at
- *     set, media_error cleared.
- *   - On failure: media_status='failed', media_error set (truncated 1000 ch),
- *     image_url/video_url left untouched.
+ * Storage:
+ *   Pexels + OpenAI return temporary URLs. We download + re-upload to the
+ *   Supabase Storage `media` bucket (same pattern as
+ *   src/app/api/cron/weekly-content/route.ts) so the URL is durable. HeyGen
+ *   is async; we DO NOT re-upload here — instead we store the video_id and
+ *   let scripts/check-video-generation-status.js poll it later.
  */
 
 const fs = require('fs')
@@ -70,8 +63,6 @@ const COLORS = {
 
 const TERMINAL_STATUSES = new Set(['posted', 'rejected', 'archived'])
 
-// Mirror of src/lib/media-readiness.ts platform rules. Update both when one
-// changes.
 const PLATFORM_RULES = {
   instagram: { image: 'required',    video: 'required',    either_satisfies: true  },
   tiktok:    { image: 'none',        video: 'required',    either_satisfies: false },
@@ -120,9 +111,7 @@ function isUnposted(row) {
 }
 
 /**
- * Per-row recommendation. Returns { needs, reason, source_image, source_video,
- * target_table, target_id, target_column_image, target_column_video }.
- * Pure logic — no DB calls, no provider calls.
+ * Per-row recommendation (pure logic — no DB / provider calls).
  */
 function recommend(row) {
   const rule = getRule(row.platform)
@@ -135,34 +124,26 @@ function recommend(row) {
   let needs_video = false
   if (rule.either_satisfies) {
     if ((rule.image === 'required' || rule.video === 'required') && !has_image && !has_video) {
-      needs_image = true   // platform accepts either; image is the cheaper/faster default
+      needs_image = true
     }
   } else {
     if (rule.image === 'required' && !has_image) needs_image = true
     if (rule.video === 'required' && !has_video) needs_video = true
   }
 
-  // Prompt-without-resolution rule (mirrors media-readiness.ts).
   if (!needs_image && nonEmpty(row.image_prompt) && !has_image) needs_image = true
   if (!needs_video && nonEmpty(row.video_prompt) && !has_video) needs_video = true
 
   if (!needs_image && !needs_video) return { needs: 'none', reason: 'media already present or not required' }
 
-  // Decide where the generated URL would land. Phase 14L.2: organic rows now
-  // have content_calendar.image_url / .video_url (migration 032), so they
-  // land on content_calendar; campaign rows still land on campaign_assets.
   const target_table = row.campaign_asset_id ? 'campaign_assets' : 'content_calendar'
   const target_id = row.campaign_asset_id ?? row.id
 
   const source_image = needs_image ? 'pexels (fallback: openai-image)' : null
-  // Video provider depends on whether we have a script. HeyGen needs one.
   let source_video = null
   if (needs_video) {
-    if (nonEmpty(row.video_script) || nonEmpty(row.video_prompt)) {
-      source_video = 'heygen'
-    } else {
-      source_video = '⚠ blocked: video script missing'
-    }
+    if (nonEmpty(row.video_script) || nonEmpty(row.video_prompt)) source_video = 'heygen'
+    else source_video = '⚠ blocked: video script missing'
   }
 
   let needs
@@ -176,20 +157,286 @@ function recommend(row) {
     source_image,
     source_video,
     target_table,
-    target_column_image: needs_image ? `${target_table}.image_url` : null,
-    target_column_video: needs_video ? `${target_table}.video_url` : null,
     target_id,
   }
 }
 
 function parseArgs(argv) {
-  const args = new Set(argv.slice(2))
-  return {
-    apply: args.has('--apply') || args.has('--generate'),
-    dryRun: !(args.has('--apply') || args.has('--generate')),
-    onlyDryRun: args.has('--dry-run'),
+  const args = argv.slice(2)
+  const flags = {
+    apply: false,
+    generate: false,
+    explicitDryRun: false,
+    limit: 5,
+    provider: 'auto',
+    imagesOnly: false,
+    videosOnly: false,
+    campaignOnly: false,
+    contentOnly: false,
+  }
+  for (const a of args) {
+    if (a === '--apply') flags.apply = true
+    else if (a === '--generate') flags.generate = true
+    else if (a === '--dry-run') flags.explicitDryRun = true
+    else if (a === '--images-only') flags.imagesOnly = true
+    else if (a === '--videos-only') flags.videosOnly = true
+    else if (a === '--campaign-only') flags.campaignOnly = true
+    else if (a === '--content-only') flags.contentOnly = true
+    else if (a.startsWith('--limit=')) {
+      const n = Number(a.split('=')[1])
+      if (Number.isFinite(n) && n > 0) flags.limit = Math.min(Math.floor(n), 50)
+    } else if (a.startsWith('--provider=')) {
+      const p = a.split('=')[1]?.toLowerCase()
+      if (['pexels', 'openai', 'heygen', 'auto'].includes(p)) flags.provider = p
+    }
+  }
+  return flags
+}
+
+// ============================================================
+// Provider helpers — JS mirrors of src/lib/media-providers.ts so this
+// script can run standalone without a TS toolchain. Both must stay in
+// sync; the TypeScript module is the source of truth for shape.
+// ============================================================
+
+function normalizeError(err) {
+  if (!err) return 'unknown error'
+  if (typeof err === 'string') return err.slice(0, 500)
+  if (err instanceof Error) return err.message.slice(0, 500)
+  if (typeof err === 'object') {
+    const oe = err.error
+    if (typeof oe === 'string') return oe.slice(0, 500)
+    if (oe && typeof oe === 'object' && typeof oe.message === 'string') return oe.message.slice(0, 500)
+    if (typeof err.message === 'string') return err.message.slice(0, 500)
+  }
+  try { return JSON.stringify(err).slice(0, 500) } catch { return 'unserializable error' }
+}
+
+async function fetchPexelsImage(env, { query, orientation }) {
+  const key = env.PEXELS_API_KEY
+  if (!key) return { success: false, provider: 'pexels', error: 'PEXELS_API_KEY not set' }
+  if (!nonEmpty(query)) return { success: false, provider: 'pexels', error: 'query is required' }
+  const params = new URLSearchParams({ query: query.slice(0, 200), per_page: '1' })
+  if (orientation) params.set('orientation', orientation)
+  try {
+    const res = await fetch(`https://api.pexels.com/v1/search?${params.toString()}`, {
+      headers: { Authorization: key },
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) return { success: false, provider: 'pexels', error: normalizeError(data) || `pexels http ${res.status}` }
+    const photo = data?.photos?.[0]
+    const src = photo?.src?.large2x ?? photo?.src?.large ?? photo?.src?.original
+    if (!src) return { success: false, provider: 'pexels', error: 'pexels returned no usable photo' }
+    return { success: true, provider: 'pexels', url: src, external_id: photo?.id != null ? String(photo.id) : undefined, raw: photo }
+  } catch (err) {
+    return { success: false, provider: 'pexels', error: normalizeError(err) }
   }
 }
+
+async function generateOpenAIImage(env, { prompt, size }) {
+  const key = env.OPENAI_API_KEY
+  if (!key) return { success: false, provider: 'openai', error: 'OPENAI_API_KEY not set' }
+  if (!nonEmpty(prompt)) return { success: false, provider: 'openai', error: 'prompt is required' }
+  try {
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'dall-e-3',
+        prompt: `Photorealistic lifestyle travel photo. ${prompt}. Real people, candid and natural expressions, not posed or stock-photo stiff. Warm, vibrant colors. No text overlays, no logos. Shot on a professional camera, shallow depth of field.`,
+        n: 1,
+        size: size ?? '1024x1024',
+        quality: 'standard',
+        response_format: 'url',
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) return { success: false, provider: 'openai', error: normalizeError(data) || `openai http ${res.status}` }
+    const url = data?.data?.[0]?.url
+    if (!url) return { success: false, provider: 'openai', error: 'openai returned no image url' }
+    return { success: true, provider: 'openai', url, raw: data?.data?.[0] }
+  } catch (err) {
+    return { success: false, provider: 'openai', error: normalizeError(err) }
+  }
+}
+
+async function createHeyGenVideo(env, { script, title }) {
+  const key = env.HEYGEN_API_KEY
+  if (!key) return { success: false, provider: 'heygen', error: 'HEYGEN_API_KEY not set' }
+  if (!nonEmpty(script)) return { success: false, provider: 'heygen', error: 'video script is empty' }
+  const avatarId = env.HEYGEN_AVATAR_ID
+  const voiceId = env.HEYGEN_VOICE_ID
+  if (!avatarId) return { success: false, provider: 'heygen', error: 'HEYGEN_AVATAR_ID not set' }
+  if (!voiceId)  return { success: false, provider: 'heygen', error: 'HEYGEN_VOICE_ID not set' }
+  try {
+    const res = await fetch('https://api.heygen.com/v2/video/generate', {
+      method: 'POST',
+      headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_inputs: [{
+          character: { type: 'avatar', avatar_id: avatarId, avatar_style: 'normal' },
+          voice: { type: 'text', input_text: script, voice_id: voiceId, speed: 1.0 },
+        }],
+        dimension: { width: 720, height: 1280 },
+        title: title?.slice(0, 120),
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) return { success: false, provider: 'heygen', error: normalizeError(data) || `heygen http ${res.status}` }
+    const videoId = data?.data?.video_id
+    if (!videoId) return { success: false, provider: 'heygen', error: 'heygen returned no video_id', raw: data }
+    return { success: true, provider: 'heygen', external_id: videoId, status: 'queued', raw: data?.data }
+  } catch (err) {
+    return { success: false, provider: 'heygen', error: normalizeError(err) }
+  }
+}
+
+// ============================================================
+// Storage helper — re-upload a remote URL to Supabase `media` bucket.
+// Mirrors the pattern in src/app/api/cron/weekly-content/route.ts.
+// Returns the final public URL or null on failure.
+// ============================================================
+
+async function downloadAndStoreImage(supabase, remoteUrl, prefix) {
+  try {
+    const res = await fetch(remoteUrl)
+    if (!res.ok) return { ok: false, error: `download http ${res.status}` }
+    const buf = await res.arrayBuffer()
+    const fileName = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`
+    const { error: upErr } = await supabase.storage.from('media').upload(fileName, buf, {
+      contentType: 'image/jpeg',
+      upsert: false,
+    })
+    if (upErr) return { ok: false, error: `upload: ${upErr.message}` }
+    const { data: pub } = supabase.storage.from('media').getPublicUrl(fileName)
+    if (!pub?.publicUrl) return { ok: false, error: 'no public url returned' }
+    return { ok: true, url: pub.publicUrl, fileName }
+  } catch (err) {
+    return { ok: false, error: normalizeError(err) }
+  }
+}
+
+// ============================================================
+// Per-row processor — decides which provider to call for the row, then
+// optionally writes the resulting URL back to the right table+column.
+// ============================================================
+
+async function processImage(supabase, env, row, flags) {
+  const query = buildImageQuery(row)
+  let result
+  if (flags.provider === 'pexels' || flags.provider === 'auto') {
+    const orientation = imageOrientationFor(row.platform)
+    result = await fetchPexelsImage(env, { query, orientation })
+    if (!result.success && flags.provider === 'auto') {
+      // Fall through to OpenAI fallback only when explicitly auto.
+      const promptText = nonEmpty(row.image_prompt) ? row.image_prompt : query
+      const fallback = await generateOpenAIImage(env, { prompt: promptText })
+      if (fallback.success) result = fallback
+    }
+  } else if (flags.provider === 'openai') {
+    const promptText = nonEmpty(row.image_prompt) ? row.image_prompt : query
+    result = await generateOpenAIImage(env, { prompt: promptText })
+  } else {
+    return { ok: false, error: `provider '${flags.provider}' is not an image provider` }
+  }
+  if (!result.success) return { ok: false, provider: result.provider, error: result.error }
+
+  // We have a remote URL. In --apply mode, re-upload to Supabase Storage so
+  // the URL is durable; in --generate-only mode, hand back the provider URL
+  // for the operator to inspect (no Storage write).
+  if (!flags.apply) {
+    return { ok: true, provider: result.provider, url: result.url, external_id: result.external_id, durable: false }
+  }
+  const stored = await downloadAndStoreImage(supabase, result.url, `content/${row.platform || 'misc'}`)
+  if (!stored.ok) return { ok: false, provider: result.provider, error: `storage: ${stored.error}` }
+  return { ok: true, provider: result.provider, url: stored.url, external_id: result.external_id, durable: true }
+}
+
+async function processVideo(supabase, env, row, flags) {
+  void supabase
+  const script = pickVideoScript(row)
+  if (!nonEmpty(script)) {
+    return { ok: false, error: 'video script missing — refusing to call HeyGen', skipped: true }
+  }
+  if (flags.provider !== 'heygen' && flags.provider !== 'auto') {
+    return { ok: false, error: `provider '${flags.provider}' is not a video provider` }
+  }
+  const result = await createHeyGenVideo(env, { script, title: `${row.platform} ${row.id?.slice(0, 8) ?? ''}` })
+  if (!result.success) return { ok: false, provider: 'heygen', error: result.error }
+  // HeyGen returned a video_id — the URL is NOT yet available. We keep
+  // status='queued' and return external_id; the apply-write path stores
+  // it and the operator runs scripts/check-video-generation-status.js
+  // later to land the final URL.
+  return {
+    ok: true,
+    provider: 'heygen',
+    pending: true,
+    external_id: result.external_id,
+  }
+}
+
+function buildImageQuery(row) {
+  // Build a focused Pexels search string. Prefer explicit image_prompt
+  // text if present (it's already curated). Fall back to the campaign /
+  // event name + the platform.
+  if (nonEmpty(row.image_prompt)) return row.image_prompt.slice(0, 100)
+  if (nonEmpty(row.campaign_event_name)) return `${row.campaign_event_name} travel`
+  if (nonEmpty(row.caption)) return row.caption.slice(0, 60)
+  return 'travel destination scenic'
+}
+
+function pickVideoScript(row) {
+  if (nonEmpty(row.video_script)) return row.video_script
+  if (nonEmpty(row.video_prompt)) return row.video_prompt
+  if (nonEmpty(row.caption))      return row.caption.slice(0, 600)
+  return ''
+}
+
+function imageOrientationFor(platform) {
+  const p = (platform || '').toLowerCase()
+  if (p === 'instagram' || p === 'tiktok') return 'portrait'
+  if (p === 'twitter' || p === 'facebook' || p === 'linkedin') return 'landscape'
+  return undefined
+}
+
+// ============================================================
+// DB writers — only invoked with --generate --apply. Strictly limited to
+// the allow-list of media columns; never touches status / posted_at /
+// posting_status / posting_gate_approved / queued_for_posting_at.
+// ============================================================
+
+async function writeMediaToContentCalendar(supabase, contentId, payload) {
+  // Defensive guardrails — refuse to send a payload that includes any
+  // forbidden key. Never use `as any`; explicit allow-list keeps the
+  // surface small and reviewable.
+  const ALLOWED = new Set(['image_url', 'video_url', 'media_status', 'media_source', 'media_generated_at', 'media_error'])
+  const safe = {}
+  for (const [k, v] of Object.entries(payload)) {
+    if (ALLOWED.has(k)) safe[k] = v
+  }
+  if (Object.keys(safe).length === 0) return { ok: false, error: 'empty payload' }
+  const { error } = await supabase.from('content_calendar').update(safe).eq('id', contentId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+async function writeMediaToCampaignAsset(supabase, assetId, payload) {
+  const ALLOWED = new Set([
+    'image_url', 'video_url',
+    'image_source', 'image_source_metadata',
+    'video_source', 'video_source_metadata',
+  ])
+  const safe = {}
+  for (const [k, v] of Object.entries(payload)) {
+    if (ALLOWED.has(k)) safe[k] = v
+  }
+  if (Object.keys(safe).length === 0) return { ok: false, error: 'empty payload' }
+  const { error } = await supabase.from('campaign_assets').update(safe).eq('id', assetId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ============================================================
 
 async function main() {
   const flags = parseArgs(process.argv)
@@ -202,19 +449,35 @@ async function main() {
   }
 
   let createClient
-  try {
-    ;({ createClient } = require('@supabase/supabase-js'))
-  } catch {
+  try { ;({ createClient } = require('@supabase/supabase-js')) }
+  catch {
     console.error(`${COLORS.red}@supabase/supabase-js not installed. Run "npm install" first.${COLORS.reset}`)
     process.exit(1)
   }
-
   const supabase = createClient(url, key, { auth: { persistSession: false } })
 
+  const mode = flags.apply
+    ? (flags.generate ? 'GENERATE+APPLY (provider calls + DB writes)' : 'APPLY-ONLY (refused)')
+    : flags.generate
+      ? 'GENERATE (provider calls; NO writes)'
+      : 'DRY-RUN'
+
   console.log()
-  console.log(`${COLORS.bold}Phase 14L.2 — Media Generation Worker [${flags.apply ? 'APPLY (stubbed)' : 'DRY-RUN'}]${COLORS.reset}`)
-  console.log(`${COLORS.dim}No platform calls. No image/video provider API calls.${COLORS.reset}`)
+  console.log(`${COLORS.bold}Phase 14L.2.1 — Media Generation Worker [${mode}]${COLORS.reset}`)
+  if (!flags.generate) {
+    console.log(`${COLORS.dim}No provider API calls. No platform calls. No mutations.${COLORS.reset}`)
+  } else if (!flags.apply) {
+    console.log(`${COLORS.yellow}May call provider APIs (Pexels / OpenAI / HeyGen). DB writes are DISABLED.${COLORS.reset}`)
+  } else {
+    console.log(`${COLORS.red}May call provider APIs AND write media columns to DB. NEVER posts to platforms.${COLORS.reset}`)
+  }
   console.log()
+
+  if (flags.apply && !flags.generate) {
+    console.log(`${COLORS.red}Refused: --apply without --generate has no input source for known URLs in this phase.${COLORS.reset}`)
+    console.log(`${COLORS.dim}Pass --generate alongside --apply to fetch + persist; or drop --apply to dry-run.${COLORS.reset}`)
+    process.exit(2)
+  }
 
   // 0. posted_at no-mutation snapshot.
   const { count: postedBefore } = await supabase
@@ -222,132 +485,31 @@ async function main() {
     .select('id', { count: 'exact', head: true })
     .not('posted_at', 'is', null)
 
-  // 1. Pull unposted rows + linked assets. Phase 14L.2 selects row-level
-  //    columns added by migration 032 (video_url / media_status / etc).
-  //    If migration 032 hasn't been applied yet, the SELECT returns 42703
-  //    ("column does not exist"); we catch that and fall back to the legacy
-  //    SELECT so the planner still produces useful output. The operator
-  //    sees a clear "migration 032 not applied" banner so they know to
-  //    apply it before generation can write back state.
-  let rows
-  let migration032Applied = true
-  {
-    const res = await supabase
-      .from('content_calendar')
-      .select(
-        'id, status, platform, week_of, image_url, video_url, video_script, image_prompt, ' +
-        'media_status, media_error, media_generated_at, media_source, ' +
-        'campaign_asset_id, posted_at, ' +
-        'campaign_asset:campaign_assets!campaign_asset_id(id, campaign_id, asset_type, image_url, video_url, image_source, video_source)'
-      )
-      .order('created_at', { ascending: false })
-      .limit(5000)
-    if (res.error) {
-      const msg = res.error.message ?? String(res.error)
-      const looksLikeSchemaGap =
-        msg.includes('media_status') ||
-        msg.includes('media_error') ||
-        msg.includes('media_generated_at') ||
-        msg.includes('media_source') ||
-        msg.includes('content_calendar.video_url')
-      if (looksLikeSchemaGap) {
-        migration032Applied = false
-        const fallback = await supabase
-          .from('content_calendar')
-          .select(
-            'id, status, platform, week_of, image_url, video_script, image_prompt, ' +
-            'campaign_asset_id, posted_at, ' +
-            'campaign_asset:campaign_assets!campaign_asset_id(id, campaign_id, asset_type, image_url, video_url, image_source, video_source)'
-          )
-          .order('created_at', { ascending: false })
-          .limit(5000)
-        if (fallback.error) {
-          console.error(`${COLORS.red}Fallback query failed:${COLORS.reset} ${fallback.error.message}`)
-          process.exit(2)
-        }
-        rows = fallback.data
-      } else {
-        console.error(`${COLORS.red}Query failed:${COLORS.reset} ${msg}`)
-        process.exit(2)
-      }
-    } else {
-      rows = res.data
-    }
+  // 1. Pull unposted rows + linked assets. Phase 14L.2.1 trusts migration
+  //    032 is applied (the prior phase verified it). No fallback path here
+  //    because writes need the new columns; if the SELECT errors, abort.
+  const { data: rows, error: selErr } = await supabase
+    .from('content_calendar')
+    .select(
+      'id, status, platform, week_of, caption, image_url, video_url, video_script, image_prompt, ' +
+      'media_status, media_error, media_generated_at, media_source, ' +
+      'campaign_asset_id, posted_at, ' +
+      'campaign_asset:campaign_assets!campaign_asset_id(id, campaign_id, asset_type, image_url, video_url, image_source, video_source, body)'
+    )
+    .order('created_at', { ascending: false })
+    .limit(5000)
+  if (selErr) {
+    console.error(`${COLORS.red}Query failed:${COLORS.reset} ${selErr.message}`)
+    process.exit(2)
   }
 
-  if (!migration032Applied) {
-    console.log(`${COLORS.yellow}⚠ Migration 032 (content_calendar.video_url + media_status) not yet applied.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Running with legacy SELECT — media_status distribution + organic video_url will be n/a.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Apply supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql${COLORS.reset}`)
-    console.log()
-  }
-
-  const all = (rows ?? []).map(r => {
-    const ca = Array.isArray(r.campaign_asset) ? (r.campaign_asset[0] ?? null) : (r.campaign_asset ?? null)
-    return {
-      ...r,
-      asset_image_url: ca?.image_url ?? null,
-      asset_video_url: ca?.video_url ?? null,
-      asset_type: ca?.asset_type ?? null,
-      asset_campaign_id: ca?.campaign_id ?? null,
-      // Validator-style fields. Prefer campaign_asset URLs (carry
-      // provenance via image_source / video_source) and fall back to
-      // row-level columns from migration 032.
-      image_url: ca?.image_url ?? r.image_url ?? null,
-      video_url: ca?.video_url ?? r.video_url ?? null,
-      video_prompt: null,
-    }
-  })
-  const unposted = all.filter(isUnposted)
-
-  // 2. Per-row recommendation.
-  let need_image = 0, need_video = 0, need_both = 0, need_none = 0
-  let blockedVideoNoScript = 0
-  const groups = new Map()  // key=`${campaign_id}|${platform}|${asset_type}|${target_table}`
-  const samples = []
-
-  for (const r of unposted) {
-    const rec = recommend(r)
-    if (rec.needs === 'none') { need_none++; continue }
-    if (rec.needs === 'image') need_image++
-    if (rec.needs === 'video') need_video++
-    if (rec.needs === 'both') need_both++
-
-    if (rec.source_video && rec.source_video.startsWith('⚠')) blockedVideoNoScript++
-
-    const campaignId = r.asset_campaign_id ?? '(organic)'
-    const assetType = r.asset_type ?? '(organic)'
-    const groupKey = `${campaignId}|${r.platform}|${assetType}|${rec.target_table}`
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, {
-        campaign_id: campaignId,
-        platform: r.platform,
-        asset_type: assetType,
-        target_table: rec.target_table,
-        source_image: null,
-        source_video: null,
-        count_image: 0,
-        count_video: 0,
-        count_video_blocked_no_script: 0,
-        ids: [],
-      })
-    }
-    const g = groups.get(groupKey)
-    if (rec.needs === 'image' || rec.needs === 'both') {
-      g.count_image++
-      if (!g.source_image && rec.source_image) g.source_image = rec.source_image
-    }
-    if (rec.needs === 'video' || rec.needs === 'both') {
-      g.count_video++
-      if (!g.source_video && rec.source_video) g.source_video = rec.source_video
-      if (rec.source_video && rec.source_video.startsWith('⚠')) g.count_video_blocked_no_script++
-    }
-    g.ids.push(r.id)
-    if (samples.length < 10) samples.push({ row: r, rec })
-  }
-
-  // 3. Resolve campaign names for nicer output.
-  const campaignIds = [...new Set([...groups.values()].map(g => g.campaign_id).filter(c => c !== '(organic)'))]
+  // 2. Resolve campaign event names for prompt/query building.
+  const allRowsRaw = rows ?? []
+  const campaignIds = [...new Set(
+    allRowsRaw
+      .map(r => Array.isArray(r.campaign_asset) ? r.campaign_asset[0]?.campaign_id : r.campaign_asset?.campaign_id)
+      .filter(Boolean)
+  )]
   let campaignMap = {}
   if (campaignIds.length > 0) {
     const { data: cs } = await supabase
@@ -357,89 +519,205 @@ async function main() {
     campaignMap = Object.fromEntries((cs ?? []).map(c => [c.id, c]))
   }
 
-  // 4. Per-row + per-status counts for the worker queue scope.
-  const byMediaStatus = { null: 0, pending: 0, ready: 0, failed: 0, skipped: 0 }
-  for (const r of unposted) {
-    const ms = r.media_status ?? null
-    if (ms === null || ms === undefined) byMediaStatus.null++
-    else if (Object.prototype.hasOwnProperty.call(byMediaStatus, ms)) byMediaStatus[ms]++
-  }
-
-  console.log(`${COLORS.bold}1. Per-row needs (unposted, gate-eligible candidates only)${COLORS.reset}`)
-  console.log(`   total scanned:      ${unposted.length}`)
-  console.log(`   ${COLORS.green}already covered:${COLORS.reset}    ${need_none}`)
-  console.log(`   ${COLORS.yellow}need image only:${COLORS.reset}    ${need_image}`)
-  console.log(`   ${COLORS.yellow}need video only:${COLORS.reset}    ${need_video}`)
-  console.log(`   ${COLORS.red}need both:${COLORS.reset}          ${need_both}`)
-  if (blockedVideoNoScript > 0) {
-    console.log(`   ${COLORS.red}video blocked (no script):${COLORS.reset} ${blockedVideoNoScript}`)
-  }
-  console.log()
-
-  console.log(`${COLORS.bold}2. media_status distribution (unposted rows)${COLORS.reset}`)
-  if (migration032Applied) {
-    console.log(`   ${COLORS.dim}null     :${COLORS.reset} ${byMediaStatus.null}`)
-    console.log(`   ${COLORS.dim}pending  :${COLORS.reset} ${byMediaStatus.pending}`)
-    console.log(`   ${COLORS.green}ready    :${COLORS.reset} ${byMediaStatus.ready}`)
-    console.log(`   ${COLORS.red}failed   :${COLORS.reset} ${byMediaStatus.failed}`)
-    console.log(`   ${COLORS.dim}skipped  :${COLORS.reset} ${byMediaStatus.skipped}`)
-  } else {
-    console.log(`   ${COLORS.dim}n/a — migration 032 not applied${COLORS.reset}`)
-  }
-  console.log()
-
-  console.log(`${COLORS.bold}3. Groups by (campaign × platform × asset_type × target table)${COLORS.reset}`)
-  const sortedGroups = [...groups.values()].sort((a, b) => (b.count_image + b.count_video) - (a.count_image + a.count_video))
-  for (const g of sortedGroups) {
-    const c = campaignMap[g.campaign_id]
-    const cName = c ? `${c.event_name} ${c.event_year} (${c.event_slug ?? '?'})` : g.campaign_id
-    console.log(`   ${COLORS.cyan}${cName}${COLORS.reset}  platform=${g.platform}  asset_type=${g.asset_type}`)
-    console.log(`     ${COLORS.dim}target table:${COLORS.reset}   ${g.target_table}`)
-    if (g.count_image > 0) console.log(`     ${COLORS.yellow}image needed:${COLORS.reset}   ${g.count_image}  source: ${g.source_image}`)
-    if (g.count_video > 0) console.log(`     ${COLORS.yellow}video needed:${COLORS.reset}   ${g.count_video}  source: ${g.source_video}`)
-    if (g.count_video_blocked_no_script > 0) {
-      console.log(`     ${COLORS.red}↳ video blocked (no script):${COLORS.reset} ${g.count_video_blocked_no_script}`)
+  const all = allRowsRaw.map(r => {
+    const ca = Array.isArray(r.campaign_asset) ? (r.campaign_asset[0] ?? null) : (r.campaign_asset ?? null)
+    const camp = ca?.campaign_id ? campaignMap[ca.campaign_id] : null
+    return {
+      ...r,
+      asset_image_url: ca?.image_url ?? null,
+      asset_video_url: ca?.video_url ?? null,
+      asset_type: ca?.asset_type ?? null,
+      asset_body: ca?.body ?? null,
+      asset_campaign_id: ca?.campaign_id ?? null,
+      campaign_event_name: camp?.event_name ?? null,
+      image_url: ca?.image_url ?? r.image_url ?? null,
+      video_url: ca?.video_url ?? r.video_url ?? null,
+      video_prompt: null,
     }
-    console.log(`     ${COLORS.dim}content_calendar ids (first 3):${COLORS.reset} ${g.ids.slice(0, 3).join(', ')}${g.ids.length > 3 ? ` … (+${g.ids.length - 3})` : ''}`)
+  })
+  const unposted = all.filter(isUnposted)
+
+  // 3. Build the candidate queue, applying flag filters.
+  const queue = []
+  for (const r of unposted) {
+    const rec = recommend(r)
+    if (rec.needs === 'none') continue
+    if (flags.imagesOnly && rec.needs === 'video') continue
+    if (flags.videosOnly && rec.needs === 'image') continue
+    if (flags.campaignOnly && rec.target_table !== 'campaign_assets') continue
+    if (flags.contentOnly && rec.target_table !== 'content_calendar') continue
+    queue.push({ row: r, rec })
   }
+
+  console.log(`${COLORS.bold}Queue${COLORS.reset}`)
+  console.log(`   total scanned (unposted):  ${unposted.length}`)
+  console.log(`   matched filters:           ${queue.length}`)
+  console.log(`   limit:                     ${flags.limit}`)
+  console.log(`   provider preference:       ${flags.provider}`)
   console.log()
 
-  console.log(`${COLORS.bold}4. Sample rows (first ${samples.length})${COLORS.reset}`)
+  const work = queue.slice(0, flags.limit)
+  if (work.length === 0) {
+    console.log(`${COLORS.dim}Nothing to do. (queue empty after filters)${COLORS.reset}`)
+    process.exit(0)
+  }
+
+  // 4. Process each row.
+  let succeeded = 0
+  let failed = 0
+  let skipped = 0
+  const samples = []
+
+  for (const { row, rec } of work) {
+    const item = { id: row.id, platform: row.platform, target: rec.target_table, needs: rec.needs }
+
+    // DRY-RUN — describe only.
+    if (!flags.generate) {
+      samples.push({ ...item, action: 'dry-run', detail: 'no provider call' })
+      continue
+    }
+
+    // Image path.
+    if (rec.needs === 'image' || (rec.needs === 'both' && !flags.videosOnly)) {
+      const r = await processImage(supabase, env, row, flags)
+      if (!r.ok) {
+        failed++
+        samples.push({ ...item, action: 'image', success: false, error: r.error, provider: r.provider })
+        if (flags.apply) {
+          // Mark failed only when --apply explicitly requests writes.
+          if (rec.target_table === 'content_calendar') {
+            await writeMediaToContentCalendar(supabase, row.id, {
+              media_status: 'failed',
+              media_source: r.provider ?? null,
+              media_error: (r.error ?? 'image generation failed').slice(0, 1000),
+            })
+          }
+          // For campaign_assets we don't have a media_status column; record
+          // provenance via image_source_metadata only on success. On
+          // failure leave the asset alone so a re-run can try again.
+        }
+      } else {
+        samples.push({ ...item, action: 'image', success: true, provider: r.provider, url: r.url, durable: r.durable })
+        succeeded++
+        if (flags.apply) {
+          if (rec.target_table === 'content_calendar') {
+            await writeMediaToContentCalendar(supabase, row.id, {
+              image_url: r.url,
+              media_status: 'ready',
+              media_source: r.provider,
+              media_generated_at: new Date().toISOString(),
+              media_error: null,
+            })
+          } else {
+            await writeMediaToCampaignAsset(supabase, rec.target_id, {
+              image_url: r.url,
+              image_source: r.provider,
+              image_source_metadata: {
+                generated_by: 'scripts/generate-missing-media.js',
+                phase: '14L.2.1',
+                external_id: r.external_id ?? null,
+                generated_at: new Date().toISOString(),
+              },
+            })
+          }
+        }
+      }
+      // If row needed both, skip the video pass on the same row in this
+      // limit slot — keep one provider call per row per run for safety.
+      if (rec.needs === 'both') continue
+    }
+
+    // Video path.
+    if (rec.needs === 'video' || (rec.needs === 'both' && flags.videosOnly)) {
+      const r = await processVideo(supabase, env, row, flags)
+      if (!r.ok) {
+        if (r.skipped) {
+          skipped++
+          samples.push({ ...item, action: 'video', success: false, skipped: true, error: r.error })
+          // Per spec — "do not write failed unless --apply explicitly requests"
+          // For 'video script missing' we simply log and move on. Operator
+          // can extend the upstream content generator to author scripts.
+        } else {
+          failed++
+          samples.push({ ...item, action: 'video', success: false, error: r.error, provider: r.provider })
+          if (flags.apply && rec.target_table === 'content_calendar') {
+            await writeMediaToContentCalendar(supabase, row.id, {
+              media_status: 'failed',
+              media_source: 'heygen',
+              media_error: (r.error ?? 'heygen call failed').slice(0, 1000),
+            })
+          }
+        }
+      } else if (r.pending) {
+        // HeyGen returned a video_id — render in progress. Don't write a
+        // URL; mark pending and persist the id where it can be polled.
+        succeeded++
+        samples.push({ ...item, action: 'video', success: true, provider: 'heygen', pending: true, external_id: r.external_id })
+        if (flags.apply) {
+          if (rec.target_table === 'campaign_assets') {
+            // campaign_assets has video_source_metadata JSONB — clean home
+            // for the heygen video_id.
+            await writeMediaToCampaignAsset(supabase, rec.target_id, {
+              video_source: 'heygen',
+              video_source_metadata: {
+                heygen_video_id: r.external_id,
+                status: 'queued',
+                queued_at: new Date().toISOString(),
+                generated_by: 'scripts/generate-missing-media.js',
+                phase: '14L.2.1',
+              },
+            })
+          } else {
+            // content_calendar has no metadata column today. Use a clearly-
+            // prefixed sentinel in media_error. The validator only reads
+            // media_error when media_status='failed'; pending+heygen
+            // doesn't fall into that branch, so this is safe.
+            await writeMediaToContentCalendar(supabase, row.id, {
+              media_status: 'pending',
+              media_source: 'heygen',
+              media_error: `heygen_video_id:${r.external_id}`,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Print samples.
+  console.log(`${COLORS.bold}Per-row outcomes${COLORS.reset}`)
   for (const s of samples) {
-    console.log(`   ${COLORS.dim}${s.row.id}${COLORS.reset} ${s.row.platform} ${s.row.week_of}  needs=${s.rec.needs}  → ${s.rec.target_table}`)
+    const tag = s.success === true ? `${COLORS.green}ok${COLORS.reset}`
+              : s.skipped         ? `${COLORS.yellow}skip${COLORS.reset}`
+              : s.success === false ? `${COLORS.red}err${COLORS.reset}`
+              : `${COLORS.dim}plan${COLORS.reset}`
+    const url = s.url ? ` ${COLORS.dim}${s.url}${COLORS.reset}` : ''
+    const ext = s.external_id ? ` ${COLORS.dim}(heygen_id=${s.external_id})${COLORS.reset}` : ''
+    const err = s.error ? ` ${COLORS.dim}— ${s.error}${COLORS.reset}` : ''
+    const dur = s.durable === false ? ` ${COLORS.yellow}[provider URL — not stored]${COLORS.reset}` : ''
+    console.log(`   [${tag}] ${s.id} ${s.platform} ${s.action ?? 'plan'} → ${s.target}${url}${ext}${dur}${err}`)
   }
   console.log()
+  console.log(`${COLORS.bold}Summary${COLORS.reset}`)
+  console.log(`   succeeded: ${succeeded}`)
+  console.log(`   failed:    ${failed}`)
+  console.log(`   skipped:   ${skipped}`)
+  console.log()
 
-  // 5. Env presence sanity check (NO calls — just check the keys exist).
-  console.log(`${COLORS.bold}5. Generation source key presence${COLORS.reset}`)
-  const keyChecks = [
+  // 6. Provider key presence.
+  console.log(`${COLORS.bold}Provider key presence${COLORS.reset}`)
+  for (const [name, role] of [
     ['PEXELS_API_KEY',  'image (primary)'],
     ['OPENAI_API_KEY',  'image (fallback)'],
     ['HEYGEN_API_KEY',  'video'],
-  ]
-  for (const [name, role] of keyChecks) {
-    const val = env[name]
-    const present = !!(val && val.length > 0)
-    console.log(`   ${present ? COLORS.green + '✓' : COLORS.yellow + '·'} ${name}${COLORS.reset}  (${role}) ${present ? 'present' : 'MISSING — needed before generator runs'}`)
+    ['HEYGEN_AVATAR_ID','video — avatar'],
+    ['HEYGEN_VOICE_ID', 'video — voice'],
+  ]) {
+    const present = !!(env[name] && env[name].length > 0)
+    console.log(`   ${present ? COLORS.green + '✓' : COLORS.yellow + '·'} ${name}${COLORS.reset}  (${role}) ${present ? 'present' : 'MISSING'}`)
   }
   console.log()
 
-  // 6. Apply / Generate guard. Stubbed for Phase 14L.2 — refuses to call
-  //    real provider APIs; the operator must explicitly land provider
-  //    integration code in a follow-up phase.
-  if (flags.apply) {
-    console.log()
-    console.log(`${COLORS.bold}${COLORS.red}--apply / --generate is a stub in Phase 14L.2.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Provider integrations (Pexels / OpenAI image / HeyGen) are not yet wired.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Phase 14L.2 only ships the storage shape (migration 032), the validator${COLORS.reset}`)
-    console.log(`${COLORS.dim}wiring (media-readiness reads media_status), and this dry-run scaffold.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Real generation lands in Phase 14L.2.1 with explicit operator approval.${COLORS.reset}`)
-    console.log()
-    console.log(`${COLORS.yellow}No mutation. No provider calls.${COLORS.reset}`)
-    console.log()
-  }
-
-  // 7. posted_at unchanged.
+  // 7. posted_at unchanged cross-check.
   const { count: postedAfter } = await supabase
     .from('content_calendar')
     .select('id', { count: 'exact', head: true })
@@ -448,11 +726,7 @@ async function main() {
     ? `${COLORS.green}✓ posted_at row count unchanged (${postedBefore ?? 0}).${COLORS.reset}`
     : `${COLORS.red}✗ posted_at row count changed: ${postedBefore} → ${postedAfter}.${COLORS.reset}`
   )
-  console.log(`${COLORS.dim}No platform API calls. No provider API calls. No mutations.${COLORS.reset}`)
-
-  // Apply mode exits non-zero so a misconfigured CI pipeline can't claim
-  // success without operator review.
-  if (flags.apply) process.exit(3)
+  console.log(`${COLORS.dim}No platform API calls. Live posting remains BLOCKED.${COLORS.reset}`)
 }
 
 main().catch(err => {

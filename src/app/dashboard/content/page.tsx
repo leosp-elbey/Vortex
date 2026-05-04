@@ -30,6 +30,9 @@ type ExtendedContentItem = ContentCalendarItem & {
   video_url?: string | null
   media_status?: string | null
   media_error?: string | null
+  // Phase 14L.2.1 — provider that produced the media; surfaces a "Video
+  // generating" badge when set to 'heygen' and media_status='pending'.
+  media_source?: string | null
   campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | null
 }
 
@@ -101,7 +104,7 @@ export default function ContentPage() {
     // Phase 14L — join campaign_assets to surface media readiness in the UI.
     supabase
       .from('content_calendar')
-      .select('*, image_prompt, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+      .select('*, image_prompt, video_url, media_status, media_error, media_source, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
       .order('created_at', { ascending: false })
       .then(({ data }) => setContent((data || []) as unknown as ExtendedContentItem[]))
   }, [])
@@ -115,7 +118,7 @@ export default function ContentPage() {
       const supabase = createClient()
       const { data } = await supabase
         .from('content_calendar')
-        .select('*, image_prompt, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+        .select('*, image_prompt, video_url, media_status, media_error, media_source, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
         .order('created_at', { ascending: false })
       setContent((data || []) as unknown as ExtendedContentItem[])
       show(`Generated ${result.generated} posts · ${result.images_generated ?? 0} images created`)
@@ -309,6 +312,17 @@ export default function ContentPage() {
                         >
                           {mediaBadgeLabel}
                         </span>
+                        {/* Phase 14L.2.1 — surface pending HeyGen renders so
+                            operators see "video generating" instead of just
+                            "media missing" while the worker polls. */}
+                        {item.media_status === 'pending' && item.media_source === 'heygen' && (
+                          <span
+                            className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-indigo-50 text-indigo-700"
+                            title="HeyGen render is in progress — run scripts/check-video-generation-status.js to poll."
+                          >
+                            🎬 Video generating
+                          </span>
+                        )}
                         <span className="text-xs text-gray-400">Week of {formatDate(item.week_of)}</span>
                       </div>
 

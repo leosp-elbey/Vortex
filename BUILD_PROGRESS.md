@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.1 backfill + caption cleanup applied successfully. Phase 14L.2 in working tree — migration 032 + media_status field + DRY-RUN media-generation worker scaffold. No mutations. No platform calls. No provider API calls.)
-**Last code-shipping commit:** `7e8ec63` (Phase 14L.1: tracking URL backfill and media generation planner dry-run only)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.1 deployed + applied on prod** · **Phase 14L.2 in working tree** — migration 032 (content_calendar.video_url + media_status), validator wiring, DRY-RUN media-generation worker scaffold. `--apply` mode is intentionally a stub. Live autoposter (Phase 14K.1) does NOT start until provider integrations land in Phase 14L.2.1 and at least one worker run produces `media_status='ready'` populations on Instagram + TikTok rows.
+**Last updated:** 2026-05-03 (Phase 14L.2 deployed and migration 032 applied. Phase 14L.2.1 in working tree — real Pexels / OpenAI / HeyGen provider helpers, hardened worker flag matrix, HeyGen polling script. Default mode remains DRY-RUN. No provider calls fired in this phase. No mutations. No platform calls.)
+**Last code-shipping commit:** `7aad656` (Phase 14L.2: media storage migration and dry-run media generation worker scaffold)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2 deployed and verified on prod** · **Phase 14L.2.1 in working tree** — real provider integrations (Pexels / OpenAI image / HeyGen video) plus hardened CLI flag matrix and HeyGen polling script. Live posting still BLOCKED. Worker default is DRY-RUN; `--generate` calls providers but writes nothing; `--generate --apply` calls providers AND writes only allow-listed media columns.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,34 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2 — Media Generation Storage + Worker Foundation (in working tree, 2026-05-03 — migration 032 pending; --apply mode is a stub).**
+**Phase 14L.2.1 — Real Media Provider Integration (in working tree, 2026-05-03 — default DRY-RUN, no provider calls fired).**
+
+Phase 14L.2 deployed at `7aad656` and migration 032 applied successfully. content_calendar now has `video_url`, `media_status`, `media_generated_at`, `media_source`, `media_error` columns. The validator stack reads them. The dry-run worker scaffold ran clean (107 scanned, 39 blocked, posted_at unchanged at 22).
+
+Phase 14L.2.1 replaces the worker's `--apply` stub with real provider integrations behind a strict flag matrix.
+
+**Built in 14L.2.1 (no mutations, no provider calls fired):**
+- [x] `src/lib/media-providers.ts` — typed `MediaProviderResult` shape; `fetchPexelsImage`, `generateOpenAIImage`, `createHeyGenVideo`, `getHeyGenVideoStatus`, `normalizeProviderError`, `isMediaProviderConfigured`. HeyGen is async-only.
+- [x] `scripts/generate-missing-media.js` rewritten — flag matrix: default DRY-RUN; `--generate` (provider calls, no writes); `--generate --apply` (provider calls + allow-listed media writes); `--apply` alone refuses. Filters: `--limit=N`, `--provider=pexels|openai|heygen|auto`, `--images-only`, `--videos-only`, `--campaign-only`, `--content-only`. Image path Pexels-first → OpenAI fallback when `provider='auto'`. Video path HeyGen, refuses without script. Campaign-asset writes go to `image_url` / `video_url` + `image_source` / `video_source` + `*_source_metadata` JSONB. Organic-row writes go to `image_url` / `video_url` + `media_status` + `media_source` + `media_generated_at` + `media_error`. Apply uses a strict allow-list — never touches `status` / `posted_at` / `posting_status` / `posting_gate_approved` / `queued_for_posting_at`.
+- [x] `scripts/check-video-generation-status.js` — HeyGen polling. Default DRY-RUN; `--apply` writes resolved `video_url` + `media_status='ready'` (or `'failed'`) back. Reads pending jobs from `campaign_assets.video_source_metadata.heygen_video_id` AND from `content_calendar.media_error LIKE 'heygen_video_id:%'`.
+- [x] `scripts/diagnose-media-readiness.js` — adds section `6d. Provider readiness` (key presence + per-provider eligible row counts + HeyGen jobs awaiting poll).
+- [x] `src/app/dashboard/content/page.tsx` — adds "🎬 Video generating" indigo badge for `media_status='pending' && media_source='heygen'` rows; SELECT pulls `media_source`.
+
+**Dry-run results (post-migration-032 baseline):**
+- Diagnostic: migration 032 ✓ applied; 39 of 107 unposted rows blocked (30 TikTok no video, 14 prompt without media, 3 IG no media); media_status distribution = 22 null / 0 pending / 85 ready / 0 failed / 0 skipped; 16 rows ready for Pexels image, 5 rows ready for HeyGen (have script), 25 blocked-no-script; 0 HeyGen jobs awaiting poll; posted_at unchanged at 22.
+- Generator (DRY-RUN, no flags): 107 scanned, 39 matched, 5 sampled at default `--limit=5`, 0 calls; posted_at unchanged at 22.
+- Polling script (DRY-RUN): 0 pending jobs, exit clean.
+
+**Live posting still BLOCKED.** Phase 14L.2.1 only adds provider plumbing; no provider call has been authorized yet. Once the operator approves:
+1. Run `node scripts/generate-missing-media.js --generate --images-only --limit=1 --provider=pexels` for a single Pexels-only review (provider call, no write)
+2. Operator inspects the URL, then runs the same with `--apply` to persist
+3. Repeat scaling up `--limit` and switching to `--provider=heygen` for video (with `--limit=1` for the first HeyGen render)
+4. Run `node scripts/check-video-generation-status.js --apply` after a few minutes to land the resolved video_url
+5. Once IG + TikTok rows are populated, ship Phase 14K.1 (live autoposter)
+
+---
+
+### Pre-Phase-14L.2.1: Phase 14L.2 — Media Generation Storage + Worker Foundation (saved + pushed `7aad656`; migration 032 applied 2026-05-03).
 
 Phase 14L.1 backfill applied successfully: 8 content_calendar + 8 campaign_assets rows now carry branded VortexTrips tracking URLs; 7 unposted captions had legacy `myvortex365.com/leosp` rewritten; visible legacy links in unposted rows are now 0; posted_at row count unchanged at 22.
 

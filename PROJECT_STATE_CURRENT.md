@@ -1,14 +1,164 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14L.1 backfill + caption cleanup applied successfully. Phase 14L.2 in working tree — migration 032, media_status field, and DRY-RUN media-generation worker scaffold. No mutations. No platform calls. No provider API calls.)
-**Last known good commit:** `7e8ec63` — "Phase 14L.1: tracking URL backfill and media generation planner dry-run only"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.1 deployed + applied**; Supabase migrations 017-031 applied; **migration 032 pending**; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14L.2 deployed + migration 032 applied. Phase 14L.2.1 in working tree — real Pexels / OpenAI / HeyGen provider helpers, hardened worker flag matrix, HeyGen polling script. Default mode remains DRY-RUN. No provider calls fired in this phase. No mutations. No platform calls.)
+**Last known good commit:** `7aad656` — "Phase 14L.2: media storage migration and dry-run media generation worker scaffold"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2 deployed and verified**; Supabase migrations 017-032 applied; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L.2 lands the storage shape (migration 032 adds `content_calendar.video_url` + `media_status` + worker fields), threads the new columns through both gates, and ships a DRY-RUN media-generation worker scaffold with provider stubs. Real Pexels / OpenAI image / HeyGen integration is intentionally deferred to Phase 14L.2.1 with explicit operator approval. Live autoposter (Phase 14K.1) does not start until media generation is wired and a worker run produces non-empty `media_status='ready'` populations on Instagram + TikTok rows.
+**Live posting status:** STILL BLOCKED. Phase 14L.2.1 wires real provider integrations (Pexels for images, OpenAI image as fallback, HeyGen for video) behind a strict flag matrix: default is dry-run; `--generate` may call providers but writes nothing; `--generate --apply` may call providers AND write only the allow-listed media columns. Live posting endpoints (Facebook/Instagram/TikTok/X) are not touched. Operator approval is required before any `--generate` or `--apply` run.
 
 ---
 
-## Phase 14L.2 — Media Generation Storage + Worker Foundation (in working tree, 2026-05-03 — migration 032 pending; --apply mode is a stub)
+## Phase 14L.2.1 — Real Media Provider Integration (in working tree, 2026-05-03 — default DRY-RUN; no provider calls fired in this phase)
+
+### What this phase ships
+
+Phase 14L.2 (deployed `7aad656`) added the storage shape (migration 032: `content_calendar.video_url` + `media_status` + `media_source` + `media_generated_at` + `media_error`) and threaded `media_status` through both gates. Phase 14L.2.1 adds the real provider plumbing: a typed `media-providers.ts` helper, a hardened CLI worker that may call Pexels / OpenAI / HeyGen behind explicit flags, and a HeyGen polling script for the async video case. Nothing is written to the DB unless the operator passes `--generate --apply` together.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `src/lib/media-providers.ts` | Typed wrappers for Pexels / OpenAI image / HeyGen with a normalized `MediaProviderResult` shape. Reads keys from env at call time; returns `{ success: false }` on missing key instead of throwing. HeyGen is async — `createHeyGenVideo` returns `status='queued'` + `external_id`; a separate `getHeyGenVideoStatus` poller lands the final URL. |
+| `scripts/check-video-generation-status.js` | HeyGen polling script. Default DRY-RUN (reads pending jobs, polls HeyGen, prints results, no DB writes). `--apply` writes the resolved `video_url` + `media_status='ready'` (or `'failed'` with the HeyGen error) back to the originating row. Reads pending jobs from `campaign_assets.video_source_metadata.heygen_video_id` (clean home) AND from `content_calendar.media_error` when prefixed with `heygen_video_id:` (organic-row fallback). |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `scripts/generate-missing-media.js` | Now real-or-dry. Default still DRY-RUN. New flags: `--generate` (call providers; do NOT write), `--generate --apply` (call providers AND write allow-listed media columns), `--limit=N` (default 5; max 50), `--provider=pexels|openai|heygen|auto`, `--images-only`, `--videos-only`, `--campaign-only`, `--content-only`. `--apply` without `--generate` refuses with a clear message. Image path: Pexels first, OpenAI fallback only when `provider='auto'`. Video path: HeyGen only when a `video_script`/`video_prompt` is present (else skipped — never auto-fails). Image writes go to `image_url` + `media_status='ready'` + `media_source='pexels'\|'openai'` + `media_generated_at` (or to `campaign_assets.image_url` + `image_source` + `image_source_metadata` for campaign rows). Video writes go to `media_status='pending'` + `media_source='heygen'`; the HeyGen video_id lands in `campaign_assets.video_source_metadata.heygen_video_id` for campaign rows or in `content_calendar.media_error` with the `heygen_video_id:` prefix for organic rows (the validator only reads `media_error` when `media_status='failed'`, so this is safe). Apply writes use a strict allow-list — never touches `status`, `posted_at`, `posting_status`, `posting_gate_approved`, or `queued_for_posting_at`. |
+| `scripts/diagnose-media-readiness.js` | Adds section `6d. Provider readiness`: per-provider key presence, count of rows ready for Pexels/OpenAI image, count of rows ready for HeyGen (have script), count blocked by missing video script, count of HeyGen jobs awaiting poll. Now also pulls `video_script` so the HeyGen-vs-no-script split is accurate. |
+| `src/app/dashboard/content/page.tsx` | `ExtendedContentItem` gains `media_source`; SELECT extended; new "🎬 Video generating" indigo badge appears when `media_status='pending' && media_source='heygen'`. The existing `'failed'` rose badge from Phase 14L.2 remains. No new posting buttons added. |
+
+### Provider helper behavior
+
+`src/lib/media-providers.ts` exports:
+- `fetchPexelsImage({ query, orientation?, perPage? })` — Pexels Search v1; returns `success: true, url, external_id` or `success: false, error`.
+- `generateOpenAIImage({ prompt, size? })` — DALL·E-3 1024x1024 by default; mirrors the photorealistic-travel preamble used in `src/lib/openai.ts` so quality and cost stay consistent.
+- `createHeyGenVideo({ script, title?, avatarId?, voiceId? })` — POSTs to `/v2/video/generate`; returns `success: true, external_id, status: 'queued'` (no URL yet). Refuses when script is empty, when `HEYGEN_API_KEY` is missing, or when `HEYGEN_AVATAR_ID` / `HEYGEN_VOICE_ID` are not set and no override was passed.
+- `getHeyGenVideoStatus(videoId)` — polls `/v1/video_status.get`; returns `success: true, status: 'completed', url` when ready, `success: false, status: 'failed'` on HeyGen failure, or `success: false, status: 'queued'\|'processing'` when still rendering.
+- `normalizeProviderError(err)` — normalizes Error / `{ error: { message } }` / `{ message }` / bare strings to a ≤500-char string.
+- `isMediaProviderConfigured(provider)` — returns true when the provider's required env var is non-empty.
+
+All functions are pure HTTP clients. No DB calls. No platform posting. The script-side mirrors of these helpers (in `scripts/generate-missing-media.js`) are pure JS with the same shape so the script runs without a TypeScript toolchain; both must stay in sync.
+
+### Script flag matrix and safety behavior
+
+| Flags | Provider calls? | DB writes? | Allowed |
+|---|---|---|---|
+| (none) | no | no | always |
+| `--dry-run` | no | no | always (explicit form) |
+| `--generate` | yes | **no** | requires operator approval |
+| `--generate --apply` | yes | yes (allow-listed media columns only) | requires operator approval |
+| `--apply` (without `--generate`) | refused | refused | n/a — refuses with clear message |
+
+Other flags (`--limit`, `--provider`, `--images-only`, `--videos-only`, `--campaign-only`, `--content-only`) are filters and are honored in any mode.
+
+### Provider calls fired in this phase?
+
+**No.** Zero Pexels / OpenAI / HeyGen calls were made by this phase. The only commands run during development were:
+- `node scripts/generate-missing-media.js` (default DRY-RUN — no `--generate`, no calls)
+- `node scripts/diagnose-media-readiness.js` (read-only diagnostic — no calls)
+- `node scripts/check-video-generation-status.js` (default DRY-RUN — 0 pending jobs, no HeyGen call needed)
+
+### Rows mutated?
+
+**No.** posted_at row count snapshot before/after each script run is unchanged at 22.
+
+### Platform APIs called?
+
+**No.** Zero Facebook / Instagram / TikTok / X / email API calls.
+
+### Diagnostic results (post-migration-032 baseline)
+
+```
+0. Migration 032: ✓ applied
+1. Caption legacy-link debt: 0
+2. Branded tracking_url:    8
+3. Instagram missing both:  3 of 26
+4. TikTok missing video:   30 of 30
+5. Prompt without media:    0
+6. Total blocked:          39 of 107
+   30  missing required video_url for TikTok
+   14  campaign media prompt exists but generated media is missing
+    3  missing required image_url for Instagram
+6b. media_status distribution: 22 null · 0 pending · 85 ready · 0 failed · 0 skipped
+6c. ready/text-only-allowed:   68 of 107
+6d. Provider readiness: PEXELS / OPENAI / HEYGEN / HEYGEN_AVATAR_ID / HEYGEN_VOICE_ID all present
+    rows ready for Pexels image: 16
+    rows ready for HeyGen (have script): 5
+    rows blocked — no video script: 25
+    heygen jobs awaiting poll: 0
+7. posted_at unchanged (22 → 22)
+```
+
+### Required approvals before `--generate` or `--apply`
+
+- **`--generate` alone** (provider calls, no writes): explicit operator authorization in chat. Cost notes — Pexels is free up to ~200 req/hr; OpenAI DALL·E-3 standard ~$0.04 per image; HeyGen pricing varies by plan.
+- **`--generate --apply`** (writes media columns): explicit operator authorization in chat AND a clear `--limit` value (default 5; max 50). Operator should review one DRY-RUN result first to confirm the queue order.
+- **`--provider=heygen`** (real HeyGen render): explicit operator authorization in chat. HeyGen is async and bills per render; use `--limit=1` for the first run.
+- **`--provider=openai`** (forced OpenAI image, no Pexels first): explicit operator authorization in chat. Default `--provider=auto` already does Pexels-first → OpenAI fallback only on Pexels miss.
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS (clean)
+- `npm run build` → ✅ PASS (`Compiled successfully in 7.4s`; no new routes)
+- `node scripts/generate-missing-media.js` → ✅ PASS (DRY-RUN; 39 matched, 5 sampled at default limit; posted_at unchanged at 22)
+- `node scripts/diagnose-media-readiness.js` → ✅ PASS (migration 032 applied banner; 5 HeyGen-eligible, 25 blocked-no-script, posted_at unchanged at 22)
+- `node scripts/check-video-generation-status.js` → ✅ PASS (DRY-RUN; 0 pending jobs)
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+### Risks and deferred items
+
+- **Provider integrations are live but ungated by tests.** First real `--generate` run should use `--limit=1` per provider to verify the API contract before scaling.
+- **HeyGen video_id storage on organic rows uses `media_error` with a `heygen_video_id:` prefix.** The validator only consults `media_error` when `media_status='failed'`, so this is gate-safe, but a future migration could add `content_calendar.media_external_id` for cleanliness. Campaign rows already have `video_source_metadata` JSONB.
+- **OpenAI image returns a temporary URL.** Worker downloads + re-uploads to Supabase Storage `media` bucket only in `--apply` mode. In `--generate` (no `--apply`), the operator sees the temporary URL — it expires within ~1 hour. That's deliberate: review-only.
+- **HeyGen returns 9:16 portrait at 720x1280** by default in the worker. Suitable for TikTok / Reels / Stories. A future YouTube-targeted render would need a 1280x720 swap.
+- **25 organic TikTok rows have no `video_script`.** They're skipped gracefully (no failure write, no provider call); the upstream `weekly-content` cron must be extended in a follow-up to author scripts before HeyGen can do anything for them.
+- **Existing `weekly-content` cron does NOT set `media_status='ready'` after `fetchAndStoreImage`.** New organic rows from the cron sit at `'pending'` while having a URL — the gate's "trust but verify" still passes (URL present), but the column is cosmetically wrong. Tightening the cron is a small follow-up.
+
+### Deploy instructions
+
+Phase 14L.2.1 is purely additive at the schema level — no migration. Deploy steps:
+
+1. Confirm `git push origin main` returns `Everything up-to-date` on the second push.
+2. `npx vercel --prod --yes` — no `vercel.json` change.
+3. Open `/dashboard/content` while signed in as admin and confirm the page loads. Pending HeyGen badges only appear once a real HeyGen render is queued.
+
+### Safe smoke-test commands
+
+```bash
+# Default DRY-RUN — verify the queue without calling anything.
+node scripts/generate-missing-media.js
+
+# DRY-RUN with limited scope.
+node scripts/generate-missing-media.js --images-only --campaign-only --limit=3
+
+# (Operator-authorized only) DRY-RUN over the wire — calls Pexels but writes
+# nothing. Returns the Pexels URL for review.
+node scripts/generate-missing-media.js --generate --images-only --limit=1 --provider=pexels
+
+# (Operator-authorized only) Apply — Pexels + Supabase Storage write back.
+# Use --limit=1 the first time.
+node scripts/generate-missing-media.js --generate --apply --images-only --limit=1 --provider=pexels
+
+# HeyGen polling — DRY-RUN (no writes).
+node scripts/check-video-generation-status.js
+
+# (Operator-authorized only) HeyGen polling — write resolved video_urls.
+node scripts/check-video-generation-status.js --apply
+```
+
+### Recommended next phase
+
+**Phase 14L.2.2 — `weekly-content` cron tightening + organic video script generation.**
+1. Update `src/app/api/cron/weekly-content/route.ts` to set `media_status='ready'` + `media_source='pexels'` + `media_generated_at=now()` after `fetchAndStoreImage` succeeds, so new organic rows don't sit at `'pending'` when they actually have a URL.
+2. Extend the weekly-content prompt to author a `video_script` for organic TikTok rows (today they have nothing, which leaves 25 rows unbuildable).
+3. Once HeyGen renders are queued, add a daily cron to call `/api/cron/check-heygen-jobs` for the SBA case AND a sibling polling endpoint for the new content_calendar / campaign_assets jobs (or wire the polling script to run on a Hobby-plan-friendly cadence).
+4. After enough rows clear the gate via real generation, ship Phase 14K.1 (live autoposter).
+
+---
+
+## Phase 14L.2 — Media Generation Storage + Worker Foundation (deployed `7aad656`; migration 032 applied 2026-05-03)
 
 ### What this phase ships
 
