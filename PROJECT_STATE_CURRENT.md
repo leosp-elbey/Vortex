@@ -1,8 +1,8 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14K dry-run + patch closed and prod-verified. Phase 14K.0.5 in working tree — manual posting gate consistency; typecheck + build pass; awaiting commit + deploy.)
-**Last known good commit:** `63bb4ba` — "Phase 14K patch: remove updated_at dependency from dry-run query"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14K (dry-run) deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14K.0.5 closed. Phase 14K.0.6 in working tree — closes `/api/content` PATCH bypass for the `→ posted` transition; typecheck + build pass; awaiting commit + deploy.)
+**Last known good commit:** `0c81df2` — "Phase 14K.0.5: gate manual platform-post routes"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14K.0.5 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
 
 ---
 
@@ -765,6 +765,99 @@ No migration. No `vercel.json` change.
 Or jump straight to **Phase 14K.1 — Live autoposter cron.** Removes the `LIVE_POSTING_ENABLED` guard, wires per-platform poster modules, replaces one of the 4 existing crons or upgrades to Vercel Pro, and extends `posting_gate_audit.action` CHECK to include `auto_posted` / `auto_skipped`.
 
 I'd lean **14K.0.6 first** — small and closes a real gap that exists today. 14K.1 then ships with a clean defensive perimeter.
+
+---
+
+## Phase 14K.0.6 — Close `/api/content` PATCH Bypass for `→ posted` (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy)
+
+The last server-side bypass before Phase 14K.1 (live autoposter). The `/api/content` PATCH route was the only remaining path that could mutate a row to `status='posted'` without going through a gate-checked platform poster route. The dashboard's Mark Posted button (Phase 14K.0.5) hides on non-ready rows, but a direct curl could still bypass.
+
+### What changed
+
+- **`src/app/api/content/route.ts`**: when `request.body.status === 'posted'`, the route now fetches the current row's gate columns and runs `validateManualPostingGate(row, { bookkeepingOnly: true })` BEFORE updating. If `!gate.allowed`, returns **403** with `{ success: false, blocked_by_gate: true, reasons: [...] }`. Other status transitions (draft↔approved, *→rejected, *→draft reset) are NOT gated — operators retain full control over the approval lifecycle.
+- **`scripts/diagnose-manual-posting-gates.js`**: added `src/app/api/content/route.ts` to `ROUTES_TO_CHECK` so the source-code grep verifies the helper is imported + called. Comment explains that the route gates conditionally on `status === 'posted'` and that runtime testing (not the static grep) verifies the conditional.
+
+### What `bookkeepingOnly: true` skips
+
+- platform non-empty check
+- caption non-empty check
+
+Everything else still applies — `status='approved'`, `posting_status='ready'`, `posting_gate_approved=true`, `queued_for_posting_at IS NOT NULL`, `manual_posting_only=true`, `posted_at IS NULL`, plus the branded `tracking_url` requirement for campaign-originated rows.
+
+### Routes inspected
+
+| Route | Status | Notes |
+|---|---|---|
+| `src/app/api/content/route.ts` | **patched** | gates `→ posted` only |
+| `src/app/api/automations/post-to-{facebook,instagram,twitter}/route.ts` | gated (Phase 14K.0.5) | unchanged |
+| `src/app/api/cron/autoposter-dry-run/route.ts` | gated (Phase 14K) | unchanged |
+| `src/app/api/admin/content-calendar/posting-gate/route.ts` | gate toggle | unchanged |
+
+After Phase 14K.0.6 deploys, **every** server-side path that can land a row in `status='posted'` runs the same gate. No remaining bypass.
+
+### Database mutations / Platform API calls
+
+**Zero of either** from this phase's code paths. The route only ADDS a 403 short-circuit BEFORE the existing UPDATE; the existing successful path is unchanged and only fires after the gate passes.
+
+### Tests run
+
+- `npx tsc --noEmit` — ✅ PASS (clean)
+- `npm run build` — ✅ PASS — `Compiled successfully in 27.0s`. `ƒ /api/content` still registered.
+- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
+- `node scripts/diagnose-manual-posting-gates.js` — to run **after** deploy. Expected: section 1 reports `✓` for all 4 routes (the 3 platform routes + `/api/content`); other sections unchanged.
+
+### Risks
+
+- **Existing dashboard "Mark Posted" clicks must hit gate-ready rows.** They do — the dashboard already hides the button on non-ready rows (Phase 14K.0.5). Operators using the dashboard see no behavior change.
+- **Direct curl callers attempting `→ posted` on non-ready rows now get 403.** Intentional — that's the gap being closed. Any internal tooling that does this would need to either Mark Ready first OR use a different status (the gate doesn't constrain `→ approved`, `→ rejected`, or `→ draft`).
+- **`bookkeepingOnly: true` mode is now exercised in production.** Phase 14K.0.5 defined the option but didn't use it. This phase is the first real consumer.
+- **Reset path (`posted → draft`) remains ungated.** A row that's already posted can be reset to draft without gate. That's correct behavior — reset is a recovery action, not a posting action.
+- **Race condition is benign.** If two clients race to set `→ posted`, both pass the gate read, both update — second update is idempotent (status already posted). The platform routes have this same property.
+
+### Exact git commands
+
+```bash
+git status
+git add src/app/api/content/route.ts scripts/diagnose-manual-posting-gates.js PROJECT_STATE_CURRENT.md BUILD_PROGRESS.md
+git commit -m "Phase 14K.0.6: gate /api/content PATCH →posted transition with validateManualPostingGate(bookkeepingOnly)"
+git push origin main
+git push origin main   # verify "Everything up-to-date"
+```
+
+`tsconfig.tsbuildinfo` intentionally **not** in the `git add` list (cache file, save-protocol Rule 5).
+
+### Deploy instructions
+
+1. `git push origin main` (×2 for verification).
+2. `npx vercel --prod --yes`.
+3. Smoke-test (below).
+
+No migration. No `vercel.json` change. No new platform integrations.
+
+### Smoke-test checklist
+
+- [ ] `git push` confirmed `Everything up-to-date` on the second push.
+- [ ] `npx vercel --prod --yes` finished cleanly.
+- [ ] **Dashboard happy path**: open `/dashboard/content` → click `🟢 Mark Ready` on an approved row → click `✓ Mark Posted` → row transitions to `status='posted'` (existing behavior preserved). The toast "Post posted" appears.
+- [ ] **Dashboard refusal path** (synthetic): use browser devtools to fire `fetch('/api/content', { method: 'PATCH', body: JSON.stringify({ id: '<idle approved row id>', status: 'posted' }), headers: { 'Content-Type': 'application/json' } })` against an idle row → expect **403** with `{ success: false, blocked_by_gate: true, reasons: [...] }`. Reasons should include `"posting_status is 'idle', need 'ready' (Mark Ready first)"` and `"posting_gate_approved is not true — Mark Ready first"`.
+- [ ] **Other transitions still work**: approve a draft → confirm 200. Reject a draft → confirm 200. Reset a posted row → confirm 200.
+- [ ] Run `node scripts/diagnose-manual-posting-gates.js`:
+  - [ ] Section 1: `✓` for all 4 routes (3 platform + `/api/content`).
+  - [ ] Section 2: counts match Supabase.
+  - [ ] Section 3: 0 idle rows leaked.
+  - [ ] Section 5: `posted_at` count unchanged.
+
+### Recommended next phase
+
+**Phase 14K.1 — Live autoposter cron.** The defensive perimeter is now complete: every path that mutates a row to `posted` runs through the gate. 14K.1 can confidently:
+
+1. Remove `LIVE_POSTING_ENABLED = false as const` in `src/lib/autoposter-gate.ts` (or thread it through an env var).
+2. Wire per-platform poster modules (initially calling the existing `/api/automations/post-to-*` endpoints from the cron with admin-credentialed fetch, OR refactor those routes to share a platform-call layer).
+3. Replace one of the 4 existing crons in `vercel.json` (the underused `score-and-branch` is the strongest merge candidate) OR upgrade to Vercel Pro for a 5th slot.
+4. Migrate `posting_gate_audit.action` CHECK to include `auto_posted` and `auto_skipped` so cron actions are auditable alongside human gate actions.
+5. Add a feature flag (env var) to disable the autoposter at any time without redeploy.
+
+Phase 14K.1 starts with a clean defensive perimeter — every existing bypass is now closed.
 
 ---
 

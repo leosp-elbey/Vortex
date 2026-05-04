@@ -28,7 +28,41 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14K.0.5 — Posting Gate Consistency for Manual Platform Routes (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14K.0.6 — Close `/api/content` PATCH bypass for `→ posted` (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+
+Phase 14K.0.5 shipped (`0c81df2`). The 3 manual platform-post routes are now gated. The last remaining bypass was `/api/content` PATCH — Mark Posted bookkeeping could still curl-flip a non-ready row to `status='posted'`. Phase 14K.0.6 closes that gap.
+
+**Patch applied:**
+- [x] `src/app/api/content/route.ts` — when `body.status === 'posted'`, fetches the current row's gate columns and runs `validateManualPostingGate(row, { bookkeepingOnly: true })` before the UPDATE. Returns 403 with structured reasons if not allowed. Other transitions (draft↔approved, *→rejected, *→draft reset) NOT gated — operators retain full control over the approval lifecycle.
+- [x] `scripts/diagnose-manual-posting-gates.js` — added `src/app/api/content/route.ts` to `ROUTES_TO_CHECK` so the source-code grep verifies the helper is imported + called. Comment explains the conditional gating (only on `→ posted`) and that runtime smoke-tests verify the conditional, not the static check.
+
+**Tests run:**
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run build` — `Compiled successfully in 27.0s`; `ƒ /api/content` still registered.
+- [ ] `npm run lint` — not run; Phase 13 ESLint v8/v9 mismatch unrelated.
+- [ ] `node scripts/diagnose-manual-posting-gates.js` — to run after deploy. Expected: 4 routes ✓.
+
+**Behavioral guarantees:**
+- No new migration. No `vercel.json` change.
+- Zero database mutations from this phase's code paths.
+- Zero platform API calls from this phase's code paths.
+- Dashboard "Mark Posted" continues to work — the dashboard already only shows the button on gate-ready rows (Phase 14K.0.5).
+- `bookkeepingOnly: true` skips platform/caption checks (this route doesn't post anywhere). Everything else still applies — `status='approved'`, `posting_status='ready'`, `posting_gate_approved=true`, `queued_for_posting_at` non-null, `manual_posting_only=true`, `posted_at IS NULL`, branded `tracking_url` for campaign rows.
+- Reset path (`posted → draft`) remains ungated. Reset is a recovery action, not a posting action.
+
+**Outcome:**
+After Phase 14K.0.6 deploys, **every** server-side path that lands a row in `status='posted'` runs through `validateManualPostingGate`. No remaining bypass. Phase 14K.1 (live autoposter) can ship with a clean defensive perimeter.
+
+**Leo to do (per Mandatory End-of-Phase Save Protocol):**
+- [ ] Commit + push.
+- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`).
+- [ ] Dashboard smoke test: Mark Ready → Mark Posted on an approved row → confirm 200 + status flips to posted.
+- [ ] Synthetic refusal test: in browser devtools, `fetch('/api/content', { method: 'PATCH', body: JSON.stringify({ id: '<idle approved row id>', status: 'posted' }), headers: { 'Content-Type': 'application/json' } })` → expect HTTP 403 with `blocked_by_gate: true`.
+- [ ] Run `node scripts/diagnose-manual-posting-gates.js` → all 4 routes ✓.
+
+---
+
+## Phase 14K.0.5 — Posting Gate Consistency for Manual Platform Routes (shipped commit `0c81df2`, prod-verified 2026-05-03).**
 
 Phase 14K (dry-run) shipped (`63bb4ba`) and prod-verified (HTTP 200, `dry_run=true`, `live_posting_blocked=true`, `posted_at` count 22 unchanged). Phase 14K.0.5 closes the manual-route bypass: every `/api/automations/post-to-{facebook,instagram,twitter}` route now calls a shared `validateManualPostingGate` helper before any platform API call.
 
