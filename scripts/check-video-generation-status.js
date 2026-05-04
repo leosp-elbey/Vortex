@@ -132,7 +132,7 @@ async function main() {
   const supabase = createClient(url, key, { auth: { persistSession: false } })
 
   console.log()
-  console.log(`${COLORS.bold}Phase 14L.2.1 — HeyGen Video Status Poll [${flags.apply ? 'APPLY (writes)' : 'DRY-RUN'}]${COLORS.reset}`)
+  console.log(`${COLORS.bold}Phase 14L.2.2 — HeyGen Video Status Poll [${flags.apply ? 'APPLY (writes)' : 'DRY-RUN'}]${COLORS.reset}`)
   console.log(`${COLORS.dim}No platform calls. ${flags.apply ? 'May update media columns.' : 'No DB writes.'}${COLORS.reset}`)
   console.log()
 
@@ -161,23 +161,57 @@ async function main() {
     video_id: r.video_source_metadata?.heygen_video_id ?? null,
   })).filter(j => nonEmpty(j.video_id))
 
-  // 2. Pull pending HeyGen jobs from content_calendar (fallback home —
-  //    media_error carries 'heygen_video_id:<id>' for organic rows).
-  const { data: cc, error: ccErr } = await supabase
-    .from('content_calendar')
-    .select('id, platform, media_status, media_source, media_error, posted_at')
-    .eq('media_source', 'heygen')
-    .eq('media_status', 'pending')
-    .is('posted_at', null)
-    .limit(500)
-  if (ccErr) {
-    console.error(`${COLORS.red}content_calendar query failed:${COLORS.reset} ${ccErr.message}`)
-    process.exit(2)
+  // 2. Pull pending HeyGen jobs from content_calendar.
+  //    Phase 14L.2.2 — preferred home is `media_metadata.heygen_video_id`
+  //    (migration 033). Legacy fallback: `media_error` with a
+  //    `heygen_video_id:<id>` sentinel from Phase 14L.2.1 runs. We try
+  //    the new column first, retry without it if migration 033 hasn't
+  //    landed yet, and union the results.
+  let cc = []
+  let migration033Applied = true
+  {
+    const res = await supabase
+      .from('content_calendar')
+      .select('id, platform, media_status, media_source, media_error, media_metadata, posted_at')
+      .eq('media_source', 'heygen')
+      .eq('media_status', 'pending')
+      .is('posted_at', null)
+      .limit(500)
+    if (res.error) {
+      const msg = res.error.message ?? String(res.error)
+      if (msg.includes('media_metadata')) {
+        migration033Applied = false
+        const fallback = await supabase
+          .from('content_calendar')
+          .select('id, platform, media_status, media_source, media_error, posted_at')
+          .eq('media_source', 'heygen')
+          .eq('media_status', 'pending')
+          .is('posted_at', null)
+          .limit(500)
+        if (fallback.error) {
+          console.error(`${COLORS.red}content_calendar fallback query failed:${COLORS.reset} ${fallback.error.message}`)
+          process.exit(2)
+        }
+        cc = fallback.data ?? []
+      } else {
+        console.error(`${COLORS.red}content_calendar query failed:${COLORS.reset} ${msg}`)
+        process.exit(2)
+      }
+    } else {
+      cc = res.data ?? []
+    }
   }
-  const contentJobs = (cc ?? []).flatMap(r => {
+  if (!migration033Applied) {
+    console.log(`${COLORS.yellow}⚠ migration 033 (content_calendar.media_metadata) not yet applied — reading legacy media_error fallback only.${COLORS.reset}`)
+  }
+  const contentJobs = cc.flatMap(r => {
+    const fromMetadata = r.media_metadata?.heygen_video_id
+    if (nonEmpty(fromMetadata)) {
+      return [{ source: 'content_calendar', id: r.id, video_id: fromMetadata, storage: 'media_metadata' }]
+    }
     const m = typeof r.media_error === 'string' ? r.media_error.match(/^heygen_video_id:(\S+)$/) : null
     if (!m) return []
-    return [{ source: 'content_calendar', id: r.id, video_id: m[1] }]
+    return [{ source: 'content_calendar', id: r.id, video_id: m[1], storage: 'media_error' }]
   })
 
   const jobs = [...campaignJobs, ...contentJobs]
@@ -223,13 +257,34 @@ async function main() {
           }).eq('id', job.id)
           if (error) console.log(`     ${COLORS.red}write failed:${COLORS.reset} ${error.message}`)
         } else {
-          const { error } = await supabase.from('content_calendar').update({
+          // Phase 14L.2.2 — preserve media_metadata provenance on success.
+          // We merge `status: 'completed'` + `completed_at` into whatever
+          // queue metadata the worker wrote earlier, and clear the legacy
+          // media_error sentinel if this row was queued under Phase 14L.2.1.
+          let metadataPatch = null
+          if (migration033Applied) {
+            const { data: cur } = await supabase
+              .from('content_calendar')
+              .select('media_metadata')
+              .eq('id', job.id)
+              .maybeSingle()
+            const existing = (cur?.media_metadata && typeof cur.media_metadata === 'object') ? cur.media_metadata : {}
+            metadataPatch = {
+              ...existing,
+              heygen_video_id: existing.heygen_video_id ?? job.video_id,
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+            }
+          }
+          const update = {
             video_url: result.url,
             media_status: 'ready',
             media_source: 'heygen',
             media_generated_at: new Date().toISOString(),
             media_error: null,
-          }).eq('id', job.id)
+          }
+          if (metadataPatch) update.media_metadata = metadataPatch
+          const { error } = await supabase.from('content_calendar').update(update).eq('id', job.id)
           if (error) console.log(`     ${COLORS.red}write failed:${COLORS.reset} ${error.message}`)
         }
       }
@@ -237,11 +292,27 @@ async function main() {
       failed++
       console.log(`   ${COLORS.red}✗${COLORS.reset} ${job.source} ${job.id} → failed (${result.error})`)
       if (flags.apply && job.source === 'content_calendar') {
-        await supabase.from('content_calendar').update({
+        const update = {
           media_status: 'failed',
           media_source: 'heygen',
           media_error: (result.error ?? 'heygen render failed').slice(0, 1000),
-        }).eq('id', job.id)
+        }
+        if (migration033Applied) {
+          const { data: cur } = await supabase
+            .from('content_calendar')
+            .select('media_metadata')
+            .eq('id', job.id)
+            .maybeSingle()
+          const existing = (cur?.media_metadata && typeof cur.media_metadata === 'object') ? cur.media_metadata : {}
+          update.media_metadata = {
+            ...existing,
+            heygen_video_id: existing.heygen_video_id ?? job.video_id,
+            status: 'failed',
+            failed_at: new Date().toISOString(),
+            error: (result.error ?? 'heygen render failed').slice(0, 1000),
+          }
+        }
+        await supabase.from('content_calendar').update(update).eq('id', job.id)
       }
       if (flags.apply && job.source === 'campaign_assets') {
         const { data: cur } = await supabase

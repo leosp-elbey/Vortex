@@ -173,6 +173,10 @@ function parseArgs(argv) {
     videosOnly: false,
     campaignOnly: false,
     contentOnly: false,
+    /** Phase 14L.2.2 — single-row pilot pin. When set, only this row is
+     *  considered for processing; matched against either content_calendar.id
+     *  or campaign_asset_id. */
+    id: null,
   }
   for (const a of args) {
     if (a === '--apply') flags.apply = true
@@ -188,9 +192,27 @@ function parseArgs(argv) {
     } else if (a.startsWith('--provider=')) {
       const p = a.split('=')[1]?.toLowerCase()
       if (['pexels', 'openai', 'heygen', 'auto'].includes(p)) flags.provider = p
+    } else if (a.startsWith('--id=')) {
+      const v = a.split('=')[1]?.trim()
+      if (v) flags.id = v
     }
   }
   return flags
+}
+
+/**
+ * Phase 14L.2.2 — strip director cues so HeyGen does not speak them.
+ * Removes bracketed direction blocks like `[VISUAL: …]`, `[B-ROLL: …]`,
+ * `[CTA: …]`, plus stage-direction lines starting with "Hook:" / "Outro:".
+ * The cleaned text is what HeyGen actually voices.
+ */
+function cleanScriptForHeyGen(raw) {
+  if (typeof raw !== 'string') return ''
+  let s = raw.replace(/\[[^\]]*\]/g, ' ')      // drop [VISUAL: ...] / [CTA:] / etc
+  s = s.replace(/\s+(Hook|Outro|CTA|Intro|Pause)\s*:\s*/gi, ' ')   // drop labels
+  s = s.replace(/^\s*(Hook|Outro|CTA|Intro|Pause)\s*:\s*/i, '')    // ditto at start
+  s = s.replace(/\s{2,}/g, ' ').trim()
+  return s
 }
 
 // ============================================================
@@ -354,12 +376,17 @@ async function processImage(supabase, env, row, flags) {
 
 async function processVideo(supabase, env, row, flags) {
   void supabase
-  const script = pickVideoScript(row)
-  if (!nonEmpty(script)) {
+  const rawScript = pickVideoScript(row)
+  if (!nonEmpty(rawScript)) {
     return { ok: false, error: 'video script missing — refusing to call HeyGen', skipped: true }
   }
   if (flags.provider !== 'heygen' && flags.provider !== 'auto') {
     return { ok: false, error: `provider '${flags.provider}' is not a video provider` }
+  }
+  // Phase 14L.2.2 — strip director cues so HeyGen doesn't speak them.
+  const script = cleanScriptForHeyGen(rawScript)
+  if (!nonEmpty(script)) {
+    return { ok: false, error: 'video script became empty after stripping director cues', skipped: true }
   }
   const result = await createHeyGenVideo(env, { script, title: `${row.platform} ${row.id?.slice(0, 8) ?? ''}` })
   if (!result.success) return { ok: false, provider: 'heygen', error: result.error }
@@ -409,7 +436,9 @@ async function writeMediaToContentCalendar(supabase, contentId, payload) {
   // Defensive guardrails — refuse to send a payload that includes any
   // forbidden key. Never use `as any`; explicit allow-list keeps the
   // surface small and reviewable.
-  const ALLOWED = new Set(['image_url', 'video_url', 'media_status', 'media_source', 'media_generated_at', 'media_error'])
+  // Phase 14L.2.2 — `media_metadata` (migration 033) is the clean home
+  // for HeyGen video_id storage on organic rows.
+  const ALLOWED = new Set(['image_url', 'video_url', 'media_status', 'media_source', 'media_generated_at', 'media_error', 'media_metadata'])
   const safe = {}
   for (const [k, v] of Object.entries(payload)) {
     if (ALLOWED.has(k)) safe[k] = v
@@ -463,7 +492,7 @@ async function main() {
       : 'DRY-RUN'
 
   console.log()
-  console.log(`${COLORS.bold}Phase 14L.2.1 — Media Generation Worker [${mode}]${COLORS.reset}`)
+  console.log(`${COLORS.bold}Phase 14L.2.2 — Media Generation Worker [${mode}]${COLORS.reset}`)
   if (!flags.generate) {
     console.log(`${COLORS.dim}No provider API calls. No platform calls. No mutations.${COLORS.reset}`)
   } else if (!flags.apply) {
@@ -476,6 +505,25 @@ async function main() {
   if (flags.apply && !flags.generate) {
     console.log(`${COLORS.red}Refused: --apply without --generate has no input source for known URLs in this phase.${COLORS.reset}`)
     console.log(`${COLORS.dim}Pass --generate alongside --apply to fetch + persist; or drop --apply to dry-run.${COLORS.reset}`)
+    process.exit(2)
+  }
+
+  // Phase 14L.2.2 — pilot-mode enforcement for HeyGen.
+  // While the HeyGen pilot is in progress, every HeyGen run must be
+  // strictly capped at one render per invocation. Refuse anything that
+  // could queue more than one HeyGen render at a time.
+  if (flags.provider === 'heygen' && flags.limit !== 1) {
+    console.log(`${COLORS.red}Refused: --provider=heygen requires --limit=1 during the Phase 14L.2.2 pilot.${COLORS.reset}`)
+    console.log(`${COLORS.dim}Bulk HeyGen generation is intentionally blocked. Re-run with --limit=1.${COLORS.reset}`)
+    process.exit(2)
+  }
+  // Auto-mode is permissive — but if the operator passes both --videos-only
+  // AND --provider=auto with a high limit, they could accidentally fan out
+  // HeyGen calls. Refuse the combination too; force them to either pick a
+  // specific provider or drop --videos-only.
+  if (flags.provider === 'auto' && flags.videosOnly && flags.limit > 1) {
+    console.log(`${COLORS.red}Refused: --videos-only + --provider=auto + --limit>1 could fan out HeyGen calls.${COLORS.reset}`)
+    console.log(`${COLORS.dim}Use --provider=heygen --limit=1 for a single pilot render.${COLORS.reset}`)
     process.exit(2)
   }
 
@@ -538,14 +586,28 @@ async function main() {
   const unposted = all.filter(isUnposted)
 
   // 3. Build the candidate queue, applying flag filters.
+  // Phase 14L.2.2 — when --videos-only or --provider=heygen is in effect,
+  // pre-filter rows that HeyGen can't (or shouldn't) render:
+  //   - rows whose video_url is already populated  → already done
+  //   - rows whose pickVideoScript() returns empty → no script to speak
+  // The processVideo function ALSO refuses these, but pre-filtering at the
+  // queue level keeps the printed queue counts honest.
   const queue = []
   for (const r of unposted) {
+    if (flags.id && r.id !== flags.id && r.campaign_asset_id !== flags.id) continue
     const rec = recommend(r)
     if (rec.needs === 'none') continue
     if (flags.imagesOnly && rec.needs === 'video') continue
     if (flags.videosOnly && rec.needs === 'image') continue
     if (flags.campaignOnly && rec.target_table !== 'campaign_assets') continue
     if (flags.contentOnly && rec.target_table !== 'content_calendar') continue
+    if (flags.provider === 'heygen' || flags.videosOnly) {
+      if (nonEmpty(r.video_url) || nonEmpty(r.asset_video_url)) continue
+      // Phase 14L.2.2 — strict pilot script check: only an explicit
+      // video_script or video_prompt counts. caption-as-script (the legacy
+      // pickVideoScript fallback) is too loose for HeyGen voice rendering.
+      if (!nonEmpty(r.video_script) && !nonEmpty(r.video_prompt)) continue
+    }
     queue.push({ row: r, rec })
   }
 
@@ -558,7 +620,15 @@ async function main() {
 
   const work = queue.slice(0, flags.limit)
   if (work.length === 0) {
-    console.log(`${COLORS.dim}Nothing to do. (queue empty after filters)${COLORS.reset}`)
+    if (flags.provider === 'heygen' && flags.id) {
+      console.log(`${COLORS.yellow}No eligible row for --id=${flags.id}.${COLORS.reset}`)
+      console.log(`${COLORS.dim}Either the id doesn't exist, the row is already posted, the row already has video_url, or the row has no video script.${COLORS.reset}`)
+    } else if (flags.provider === 'heygen') {
+      console.log(`${COLORS.yellow}No eligible HeyGen rows.${COLORS.reset}`)
+      console.log(`${COLORS.dim}Run scripts/inspect-heygen-pilot-candidates.js to see candidate ids.${COLORS.reset}`)
+    } else {
+      console.log(`${COLORS.dim}Nothing to do. (queue empty after filters)${COLORS.reset}`)
+    }
     process.exit(0)
   }
 
@@ -668,14 +738,22 @@ async function main() {
               },
             })
           } else {
-            // content_calendar has no metadata column today. Use a clearly-
-            // prefixed sentinel in media_error. The validator only reads
-            // media_error when media_status='failed'; pending+heygen
-            // doesn't fall into that branch, so this is safe.
+            // Phase 14L.2.2 — clean storage in content_calendar.media_metadata
+            // (migration 033). Replaces the Phase 14L.2.1 media_error
+            // overload. The polling script reads media_metadata first and
+            // falls back to media_error for legacy in-flight jobs.
             await writeMediaToContentCalendar(supabase, row.id, {
               media_status: 'pending',
               media_source: 'heygen',
-              media_error: `heygen_video_id:${r.external_id}`,
+              media_metadata: {
+                heygen_video_id: r.external_id,
+                queued_at: new Date().toISOString(),
+                generated_by: 'scripts/generate-missing-media.js',
+                phase: '14L.2.2',
+              },
+              // Defensively clear any legacy media_error sentinel left over
+              // from a Phase 14L.2.1 run on this row (no-op if absent).
+              media_error: null,
             })
           }
         }

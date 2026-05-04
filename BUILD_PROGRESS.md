@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.2 deployed and migration 032 applied. Phase 14L.2.1 in working tree — real Pexels / OpenAI / HeyGen provider helpers, hardened worker flag matrix, HeyGen polling script. Default mode remains DRY-RUN. No provider calls fired in this phase. No mutations. No platform calls.)
-**Last code-shipping commit:** `7aad656` (Phase 14L.2: media storage migration and dry-run media generation worker scaffold)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2 deployed and verified on prod** · **Phase 14L.2.1 in working tree** — real provider integrations (Pexels / OpenAI image / HeyGen video) plus hardened CLI flag matrix and HeyGen polling script. Live posting still BLOCKED. Worker default is DRY-RUN; `--generate` calls providers but writes nothing; `--generate --apply` calls providers AND writes only allow-listed media columns.
+**Last updated:** 2026-05-03 (Phase 14L.2.1 deployed and Pexels image write-back applied — Instagram media gap cleared. Phase 14L.2.2 in working tree — single-video HeyGen pilot scaffold: migration 033 (`media_metadata` JSONB), pilot guards on the worker (refuses `--limit>1` with `--provider=heygen`), `--id` pin, polling reads `media_metadata.heygen_video_id`. Default mode remains DRY-RUN. No HeyGen call fired in this phase. No mutations. No platform calls.)
+**Last code-shipping commit:** `98204ef` (Phase 14L.2.1: real Pexels OpenAI HeyGen provider integration with strict flag matrix)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.1 deployed and verified on prod** · **Phase 14L.2.2 in working tree** — single-video HeyGen pilot scaffold + migration 033. Live posting still BLOCKED. Worker refuses bulk HeyGen during the pilot. Operator approval required before the single `--generate --apply` HeyGen call.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,38 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2.1 — Real Media Provider Integration (in working tree, 2026-05-03 — default DRY-RUN, no provider calls fired).**
+**Phase 14L.2.2 — HeyGen Single-Video Pilot (in working tree, 2026-05-03 — migration 033 pending; no HeyGen call fired).**
+
+Phase 14L.2.1 deployed at `98204ef`. Pexels image generation + Supabase Storage write-back ran safely; Instagram media gap is now 0 of 26 (was 3 of 26). Diagnostic baseline: 30 of 107 unposted rows still blocked, all "missing required video_url for TikTok"; 5 rows ready for HeyGen (have script), 25 still blocked-no-script; 0 HeyGen jobs awaiting poll; posted_at unchanged at 22.
+
+Phase 14L.2.2 narrows the focus to a single controlled HeyGen render against one TikTok row that has a real `video_script`. The recommended pilot row is `71c25664-38a7-4bc3-80b5-326bfc36c54d` (TikTok, week 2026-04-20, 354-char script). The four other eligible rows: `b378c767…`, `a42b8a02…`, `3e6879da…`, `41f3fa6a…`.
+
+**Built in 14L.2.2 (no mutations, no HeyGen call fired):**
+- [x] `supabase/migrations/033_add_media_metadata_to_content_calendar.sql` — `media_metadata JSONB DEFAULT '{}'::jsonb` + partial GIN index. Idempotent. Replaces the Phase 14L.2.1 `media_error` overload for HeyGen `video_id` storage on organic rows. Pending application.
+- [x] `scripts/inspect-heygen-pilot-candidates.js` — read-only enumerator. Returns 5 eligible rows + 25 blocked-no-script rows; recommends a deterministic pilot pick.
+- [x] `scripts/generate-missing-media.js` — adds `--id=<uuid>`; refuses `--provider=heygen --limit>1` and `--videos-only --provider=auto --limit>1`; pre-filter drops rows already with `video_url` AND rows without explicit `video_script`/`video_prompt` (caption fallback excluded for HeyGen pilot); strips `[VISUAL: …]` / `Hook:` / `Outro:` cues via new `cleanScriptForHeyGen()` helper; switches organic-row HeyGen storage from `media_error` overload to `media_metadata.heygen_video_id`.
+- [x] `scripts/check-video-generation-status.js` — reads `media_metadata.heygen_video_id` first, falls back to legacy `media_error` sentinel; gracefully handles migration-033-not-applied; merges into `media_metadata` on completion / failure instead of clobbering.
+- [x] `scripts/diagnose-media-readiness.js` — section `6e. HeyGen pilot status` (migration 033 applied/not, pending HeyGen jobs by table with metadata-vs-media_error breakdown, completed `video_url` counts, TikTok unposted passing media readiness, TikTok still blocked-no-script).
+
+**Dry-run results (post-Phase-14L.2.1, pre-deploy):**
+- Inspector: 5 eligible / 25 blocked-no-script; pilot pick `71c25664…`.
+- Diagnostic 6e: migration 033 NOT applied (banner shown); 0 pending HeyGen jobs; 0 completed; 0 of 30 TikTok rows passing; 25 blocked-no-script; posted_at unchanged at 22.
+- Generator (`--videos-only --provider=heygen --limit=1`): matched filters = 5; queued 1 dry-run plan; posted_at unchanged.
+- Generator (`--limit=3 --provider=heygen`): refused with clear pilot-mode message.
+- Polling script: 0 pending jobs, exit clean.
+
+**Live posting still BLOCKED.** Phase 14L.2.2 only ships pilot guards and storage shape. No HeyGen call has been authorized. Once approved:
+1. Apply migration 033 in Supabase SQL Editor; verify
+2. Deploy code via Vercel
+3. (operator-approved) `node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=1 --id=71c25664-38a7-4bc3-80b5-326bfc36c54d` → exactly one HeyGen render queued; row marked pending
+4. Wait ~3–5 min, then `node scripts/check-video-generation-status.js` (DRY-RUN) to observe status
+5. (operator-approved) `node scripts/check-video-generation-status.js --apply` once HeyGen reports completed
+6. Verify on dashboard — row's media badge flips to `Media ready`
+7. After pilot succeeds, repeat for one campaign_assets video row, then drop the `--limit=1` enforcement
+
+---
+
+### Pre-Phase-14L.2.2: Phase 14L.2.1 — Real Media Provider Integration (saved + pushed `98204ef`; Pexels image write-back applied 2026-05-03; Instagram media gap cleared).
 
 Phase 14L.2 deployed at `7aad656` and migration 032 applied successfully. content_calendar now has `video_url`, `media_status`, `media_generated_at`, `media_source`, `media_error` columns. The validator stack reads them. The dry-run worker scaffold ran clean (107 scanned, 39 blocked, posted_at unchanged at 22).
 

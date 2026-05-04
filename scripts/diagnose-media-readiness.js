@@ -384,6 +384,90 @@ async function main() {
   console.log(`   ${COLORS.dim}heygen jobs awaiting poll:${COLORS.reset}        ${pendingHeygen}`)
   console.log()
 
+  // Phase 14L.2.2 — HeyGen pilot section.
+  console.log(`${COLORS.bold}6e. HeyGen pilot status (Phase 14L.2.2)${COLORS.reset}`)
+  // Pending jobs broken out by table.
+  let ccPendingCount = 0
+  let ccPendingViaMetadata = 0
+  let ccPendingViaMediaError = 0
+  if (migration032Applied) {
+    // Try to read media_metadata; fall back if migration 033 isn't applied.
+    let cc, ccErr
+    {
+      const r = await supabase
+        .from('content_calendar')
+        .select('id, media_metadata, media_error')
+        .eq('media_source', 'heygen')
+        .eq('media_status', 'pending')
+      cc = r.data
+      ccErr = r.error
+    }
+    let migration033Applied = true
+    if (ccErr && (ccErr.message ?? '').includes('media_metadata')) {
+      migration033Applied = false
+      const r2 = await supabase
+        .from('content_calendar')
+        .select('id, media_error')
+        .eq('media_source', 'heygen')
+        .eq('media_status', 'pending')
+      cc = r2.data
+    }
+    for (const r of cc ?? []) {
+      ccPendingCount++
+      if (r.media_metadata && typeof r.media_metadata === 'object' && nonEmpty(r.media_metadata.heygen_video_id)) {
+        ccPendingViaMetadata++
+      } else if (typeof r.media_error === 'string' && /^heygen_video_id:\S+/.test(r.media_error)) {
+        ccPendingViaMediaError++
+      }
+    }
+    console.log(`   ${migration033Applied ? COLORS.green + '✓' : COLORS.yellow + '·'} migration 033 (content_calendar.media_metadata) ${migration033Applied ? 'applied' : 'NOT applied — using legacy media_error fallback'}${COLORS.reset}`)
+  } else {
+    console.log(`   ${COLORS.yellow}· migration 032 not applied — pending HeyGen counts unavailable${COLORS.reset}`)
+  }
+  let caPendingCount = 0
+  {
+    const { data: caRows } = await supabase
+      .from('campaign_assets')
+      .select('id, video_source_metadata, video_url, status')
+      .eq('video_source', 'heygen')
+      .is('video_url', null)
+    caPendingCount = (caRows ?? []).filter(r => nonEmpty(r.video_source_metadata?.heygen_video_id)
+      && !['posted','rejected','archived'].includes((r.status ?? '').toLowerCase())).length
+  }
+  console.log(`   ${COLORS.cyan}pending HeyGen jobs — content_calendar:${COLORS.reset} ${ccPendingCount}`)
+  if (ccPendingCount > 0) {
+    console.log(`     ${COLORS.dim}via media_metadata:${COLORS.reset} ${ccPendingViaMetadata}`)
+    console.log(`     ${COLORS.dim}via legacy media_error:${COLORS.reset} ${ccPendingViaMediaError}`)
+  }
+  console.log(`   ${COLORS.cyan}pending HeyGen jobs — campaign_assets:${COLORS.reset}  ${caPendingCount}`)
+
+  // Completed video_url count — rows where HeyGen finished and the URL landed.
+  let completedHeygenContent = 0
+  if (migration032Applied) {
+    const { count } = await supabase
+      .from('content_calendar')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_source', 'heygen')
+      .eq('media_status', 'ready')
+      .not('video_url', 'is', null)
+    completedHeygenContent = count ?? 0
+  }
+  const { count: completedHeygenCampaign } = await supabase
+    .from('campaign_assets')
+    .select('id', { count: 'exact', head: true })
+    .eq('video_source', 'heygen')
+    .not('video_url', 'is', null)
+  console.log(`   ${COLORS.green}completed HeyGen video_urls — content_calendar:${COLORS.reset} ${completedHeygenContent}`)
+  console.log(`   ${COLORS.green}completed HeyGen video_urls — campaign_assets:${COLORS.reset}  ${completedHeygenCampaign ?? 0}`)
+
+  // TikTok rows passing media readiness (no longer blocked).
+  const tiktokTotal = unposted.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length
+  const tiktokBlocked = blockedByMedia.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length
+  const tiktokPassing = tiktokTotal - tiktokBlocked
+  console.log(`   ${COLORS.cyan}TikTok unposted passing media readiness:${COLORS.reset} ${tiktokPassing} of ${tiktokTotal}`)
+  console.log(`   ${COLORS.red}TikTok still blocked — no video script:${COLORS.reset}   ${videoWithoutScript.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length}`)
+  console.log()
+
   // 7. posted_at snapshot AFTER.
   const { count: postedAfter } = await supabase
     .from('content_calendar')
