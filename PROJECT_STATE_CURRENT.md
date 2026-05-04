@@ -1,14 +1,152 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14L.2.1 deployed + Pexels image generation/write-back applied successfully. Phase 14L.2.2 in working tree — single-video HeyGen pilot scaffold: migration 033 (`media_metadata` JSONB), pilot-mode guards on the worker (refuses `--limit>1` with `--provider=heygen`), `--id` pin, polling script reads `media_metadata.heygen_video_id` first. Default mode remains DRY-RUN. No HeyGen call fired in this phase. No mutations. No platform calls.)
-**Last known good commit:** `98204ef` — "Phase 14L.2.1: real Pexels OpenAI HeyGen provider integration with strict flag matrix"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.1 deployed and verified**; Supabase migrations 017-032 applied; **migration 033 pending**; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14L.2.2 deployed and HeyGen single-video pilot completed successfully — row `71c25664…` rendered and `video_url` applied. Phase 14L.2.3 in working tree — permanent video storage hardening: completion path copies HeyGen MP4 to Supabase Storage before writing `video_url`; new `--repair-temp-urls` scanner; diagnostic warns on `heygen.ai` host URLs. Default mode remains DRY-RUN. No HeyGen call fired in this phase; no provider/storage writes; live posting still BLOCKED.)
+**Last known good commit:** `e0f013d` — "Phase 14L.2.2: HeyGen single-video pilot scaffold with migration 033 media metadata"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.2 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L.2.2 sets up the controlled pilot to render exactly one HeyGen video for a single TikTok row that already has a real `video_script`. The worker refuses any HeyGen run with `--limit > 1` during the pilot. Live posting endpoints (Facebook/Instagram/TikTok/X) are not touched. Operator approval is required before the single `--generate --apply` HeyGen call.
+**Live posting status:** STILL BLOCKED. Phase 14L.2.3 hardens video storage so completed HeyGen MP4 files are downloaded and re-uploaded into the Supabase `media` bucket before `video_url` is persisted. The 1 pilot row currently sitting on a HeyGen temp URL (`files2.heygen.ai`) is identified by the new diagnostic and repaired by `check-video-generation-status.js --repair-temp-urls`. The remaining 4 HeyGen-eligible rows are NOT yet queued — they will be once storage hardening is verified.
 
 ---
 
-## Phase 14L.2.2 — HeyGen Single-Video Pilot (in working tree, 2026-05-03 — migration 033 pending; no HeyGen call fired)
+## Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (in working tree, 2026-05-03 — no provider/storage writes; `--apply` not run)
+
+### Why this phase exists
+
+The HeyGen single-video pilot in Phase 14L.2.2 succeeded — row `71c25664-38a7-4bc3-80b5-326bfc36c54d` rendered, `media_status='ready'`, `video_url` populated. But the URL persisted is a HeyGen-hosted signed URL (`https://files2.heygen.ai/aws_pacific/avatar_tmp/...?Expires=...&Signature=...`) that expires in ~24 hours. If we let Instagram or TikTok ingest that URL after expiry, the post would 403. Before queuing the remaining 4 HeyGen renders, we need to copy completed MP4s into Supabase Storage and persist the permanent public URL.
+
+### Storage helper — reused or created
+
+**Created** a video-specific helper. The existing `downloadAndStoreImage` in `scripts/generate-missing-media.js` is hardcoded to `image/jpeg` + `.jpg`, so it doesn't fit. The new helper `downloadAndStoreVideo(supabase, remoteUrl, objectPath)` lives in `scripts/check-video-generation-status.js` and uses the same `media` bucket pattern with `contentType: 'video/mp4'` + `upsert: true` (so an interrupted re-run can complete cleanly).
+
+### Storage path scheme
+
+| Source | Path |
+|---|---|
+| `content_calendar` (organic) | `media/content/<platform>/<row_id>-<heygen_video_id>.mp4` |
+| `campaign_assets` | `media/campaigns/video/<asset_id>-<heygen_video_id>.mp4` |
+
+The dynamic segments (`platform`, `row_id`, `video_id`) are sanitized to `[a-zA-Z0-9-]` only, so a stray value can't escape the bucket prefix.
+
+### How the existing pilot's HeyGen temp URL gets repaired
+
+`scripts/check-video-generation-status.js --repair-temp-urls` (DRY-RUN by default):
+1. Scans `content_calendar` and `campaign_assets` for rows with non-null `video_url` whose host ends in `heygen.ai` and whose status is not posted/rejected/archived (preserves history).
+2. For each row, prints the planned destination path under `media/`.
+3. With `--apply`, downloads the MP4 from the temp URL while it's still valid, uploads to the Supabase `media` bucket, then `UPDATE … SET video_url = '<supabase public url>'` and merges `{ heygen_temp_url, storage_path, public_url, repaired_at, repaired_by }` into `media_metadata` (or `video_source_metadata` for campaign rows) for forensics.
+4. NEVER touches `status`, `posted_at`, `posting_status`, `posting_gate_approved`, `queued_for_posting_at`, or any platform API.
+
+The diagnostic dry-run identified exactly **1 content_calendar row** needing repair (the pilot row `71c25664…`); 0 campaign_asset rows.
+
+### Files added / changed
+
+| File | Status | Purpose |
+|---|---|---|
+| `scripts/check-video-generation-status.js` | **changed** | New `downloadAndStoreVideo` helper; new `buildVideoObjectPath`; new `isHeyGenTempUrl` predicate; completion path now copies MP4 to Supabase Storage before writing `video_url`; on storage failure leaves row at `media_status='pending'` (per spec, not 'failed' — the HeyGen render did succeed, only the storage step blew up); new `--repair-temp-urls` mode (DRY-RUN + `--apply`); merges `heygen_temp_url` / `storage_path` / `public_url` into metadata. |
+| `scripts/diagnose-media-readiness.js` | **changed** | New section `6f. Temporary HeyGen video URLs` — counts unposted rows whose `video_url` is on `heygen.ai`, prints repair command. |
+
+### Behavioral details
+
+- Completion path now writes the **permanent Supabase URL** to `video_url`. The original HeyGen signed URL is preserved in `media_metadata.heygen_temp_url` (for content_calendar) or `video_source_metadata.heygen_temp_url` (for campaign_assets) so a future engineer can correlate the render with the asset.
+- **Storage-failure handling matches the spec**: if download or upload fails during normal completion, the row stays at `media_status='pending'` so a re-run picks it back up; `media_status='failed'` is reserved for HeyGen render failures (the actual provider returned `status='failed'`), not storage hiccups.
+- **`upsert: true`** on the storage upload — keeps re-runs idempotent. A path like `content/tiktok/<id>-<vid>.mp4` is deterministic per (row, render), so re-running `--apply` after a flaky network blip simply re-writes the same object.
+- The repair mode preserves the legacy temp URL in metadata. If the pilot row was already posted somewhere, the operator could still trace the original render source.
+
+### Migration created?
+
+**No.** Migration 033 (`content_calendar.media_metadata` JSONB) shipped in Phase 14L.2.2 and is already applied. Phase 14L.2.3 only adds new keys to existing JSONB columns — no schema change.
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS (clean)
+- `npm run build` → ✅ PASS (`Compiled successfully in 10.5s`)
+- `node scripts/check-video-generation-status.js` → ✅ PASS — Phase 14L.2.3 banner, 0 pending jobs, exit clean
+- `node scripts/check-video-generation-status.js --repair-temp-urls` → ✅ PASS — flagged 1 content_calendar row (pilot `71c25664…`), 0 campaign_assets, dry-run skip count = 1, posted_at unchanged
+- `node scripts/diagnose-media-readiness.js` → ✅ PASS — section 6f shows `1 content_calendar row on heygen.ai temp URLs`; recommends repair command
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+### Provider APIs called?
+
+**No.** The polling DRY-RUN exits before calling HeyGen (no pending jobs to poll). The repair DRY-RUN does not call HeyGen — it only reads DB rows and prints destinations. Zero Pexels / OpenAI / HeyGen calls.
+
+### Rows mutated?
+
+**No.** posted_at row count: 22 → 22 across all script runs. No `UPDATE` was issued.
+
+### Platform APIs called?
+
+**No.** Zero Facebook / Instagram / TikTok / X / email API calls.
+
+### Exact repair command
+
+```bash
+# DRY-RUN — list rows that need repair, show planned destinations:
+node scripts/check-video-generation-status.js --repair-temp-urls
+
+# (operator-approved) Actually download + upload + rewrite video_url:
+node scripts/check-video-generation-status.js --repair-temp-urls --apply
+```
+
+The pilot row `71c25664…` has its temp URL pinned by signature `Expires=1778527238` (~Mar 11, 2026) — well within the 24h window from when the pilot completed, so the source URL is currently still valid.
+
+### Exact remaining 4-video batch command (NOT yet authorized)
+
+The 4 remaining script-eligible rows are: `b378c767…`, `a42b8a02…`, `3e6879da…`, `41f3fa6a…`. Until storage hardening is verified, the worker still enforces `--limit=1` for `--provider=heygen` (Phase 14L.2.2 pilot guard). After Phase 14L.2.3 is verified end-to-end (one repair run + one new render), the next phase will drop that guard and run the batch. The intended batch command — **DO NOT RUN UNTIL OPERATOR APPROVES** — would look like:
+
+```bash
+# Per-row, one at a time (still --limit=1 enforced today):
+node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=1 --id=b378c767-45d9-476c-aecc-dfce96be6568
+node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=1 --id=a42b8a02-ff71-4ef3-b9cb-8c08ac207a47
+node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=1 --id=3e6879da-2308-4d01-9806-6a35e6cf051c
+node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=1 --id=41f3fa6a-a271-4a18-9db0-43ef83d8e613
+
+# Then poll + permanent-storage write:
+node scripts/check-video-generation-status.js --apply
+```
+
+A future Phase 14L.2.4 will drop the per-row `--id=` pin and the `--limit=1` enforcement once the new pilot succeeds.
+
+### Risks and deferred items
+
+- **Storage failure leaves row at `pending`.** Operator must re-run `--apply` after fixing the underlying issue (network / Storage permissions). Today's content has no rows in this state.
+- **Repair runs while temp URL is still valid.** If a row's HeyGen URL has already expired, the download will fail and the repair skips it. We can't recover the video without re-rendering — but we still have `media_metadata.heygen_video_id`, so a re-render via HeyGen status endpoint is possible (not implemented in Phase 14L.2.3).
+- **Storage cost.** Each TikTok MP4 is roughly 5–15MB at HeyGen's 720x1280 default. 5 pilot videos ≈ 50–75MB. Negligible vs. Supabase free-tier limits today, but worth tracking when batch sizes grow.
+- **Public bucket exposure.** The `media` bucket is already public-read (used by `weekly-content` cron for Pexels images and by `generate-content` route for in-page previews). HeyGen videos posted to social are public-by-design.
+
+### Migration application instructions
+
+**None.** Migration 033 already applied in production.
+
+### Deploy instructions
+
+1. Confirm `git push origin main` returns `Everything up-to-date` on the second push.
+2. `npx vercel --prod --yes` — no `vercel.json` change.
+3. (operator-approved) Run `node scripts/check-video-generation-status.js --repair-temp-urls --apply` to migrate the 1 existing pilot row off the HeyGen temp URL.
+4. Run the diagnostic again — expect section 6f to report 0 temp URLs.
+
+### Smoke-test checklist
+
+- [ ] Push code; deploy via Vercel
+- [ ] (operator-approved) `node scripts/check-video-generation-status.js --repair-temp-urls --apply` — expect `repaired: 1`, posted_at unchanged at 22, the pilot row's `video_url` flips from `files2.heygen.ai/...` to `<supabase>.supabase.co/storage/.../media/content/tiktok/71c25664-...mp4`
+- [ ] `node scripts/diagnose-media-readiness.js` — section 6f shows `✓ no temporary HeyGen URLs found`
+- [ ] Open `/dashboard/content` — pilot row's media badge still says `Media ready`; preview image / playback (where supported) loads from the Supabase URL
+
+### Required approvals before running
+
+- **`--repair-temp-urls --apply`** — explicit operator authorization in chat. Reads from HeyGen's CDN (no HeyGen API call counted; just an MP4 download), writes to Supabase Storage and rewrites 1 DB row.
+- **HeyGen batch (4 remaining rows)** — explicit operator authorization in chat. After repair is verified, the operator may run the four per-row commands above (still `--limit=1` per command).
+
+### Recommended next step
+
+**Phase 14L.2.4 — drop the per-row `--id=` pin and `--limit=1` enforcement after the storage repair succeeds + at least one new HeyGen render lands cleanly through the hardened pipeline.** Concrete order:
+1. Run the repair on the pilot row.
+2. Run one of the four remaining HeyGen renders (e.g. `b378c767…`); poll; verify the permanent Supabase URL lands on `video_url`.
+3. Drop the pilot guard in `scripts/generate-missing-media.js` (the refusal block on `--provider=heygen --limit>1`); allow `--limit=4`; queue all four remaining HeyGen renders in one invocation.
+4. Tighten `weekly-content/route.ts` to author a `video_script` for new organic TikTok rows, unblocking the 25 still-stuck rows.
+5. After the queue drains and TikTok readiness is at parity with Instagram, ship Phase 14K.1 (live autoposter).
+
+---
+
+## Phase 14L.2.2 — HeyGen Single-Video Pilot (deployed `e0f013d`; migration 033 applied; pilot row `71c25664…` rendered + `video_url` applied 2026-05-03)
 
 ### What this phase ships
 

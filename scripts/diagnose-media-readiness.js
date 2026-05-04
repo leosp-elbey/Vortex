@@ -468,6 +468,46 @@ async function main() {
   console.log(`   ${COLORS.red}TikTok still blocked — no video script:${COLORS.reset}   ${videoWithoutScript.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length}`)
   console.log()
 
+  // Phase 14L.2.3 — temporary HeyGen URL warning. video_url values
+  // hosted on heygen.ai are signed and expire (~24h); they MUST be
+  // copied into Supabase Storage before the row can be safely posted.
+  console.log(`${COLORS.bold}6f. Temporary HeyGen video URLs (Phase 14L.2.3)${COLORS.reset}`)
+  function isHeyGenTempUrl(u) {
+    if (typeof u !== 'string') return false
+    try { return new URL(u).hostname.endsWith('heygen.ai') } catch { return false }
+  }
+  let ccTempUrls = 0
+  if (migration032Applied) {
+    const { data: ccVideos } = await supabase
+      .from('content_calendar')
+      .select('id, video_url, status, posted_at')
+      .not('video_url', 'is', null)
+      .is('posted_at', null)
+      .limit(1000)
+    ccTempUrls = (ccVideos ?? []).filter(r =>
+      isHeyGenTempUrl(r.video_url) &&
+      !['posted','rejected','archived'].includes((r.status ?? '').toLowerCase())
+    ).length
+  }
+  const { data: caVideos } = await supabase
+    .from('campaign_assets')
+    .select('id, video_url, status')
+    .not('video_url', 'is', null)
+    .limit(1000)
+  const caTempUrls = (caVideos ?? []).filter(r =>
+    isHeyGenTempUrl(r.video_url) &&
+    !['posted','rejected','archived'].includes((r.status ?? '').toLowerCase())
+  ).length
+  if (ccTempUrls === 0 && caTempUrls === 0) {
+    console.log(`   ${COLORS.green}✓ no temporary HeyGen URLs found${COLORS.reset}`)
+  } else {
+    console.log(`   ${COLORS.red}⚠ content_calendar rows on heygen.ai temp URLs:${COLORS.reset} ${ccTempUrls}`)
+    console.log(`   ${COLORS.red}⚠ campaign_assets rows on heygen.ai temp URLs:${COLORS.reset}  ${caTempUrls}`)
+    console.log(`   ${COLORS.dim}Run: node scripts/check-video-generation-status.js --repair-temp-urls${COLORS.reset}`)
+    console.log(`   ${COLORS.dim}     (default DRY-RUN; pass --apply to actually rewrite URLs)${COLORS.reset}`)
+  }
+  console.log()
+
   // 7. posted_at snapshot AFTER.
   const { count: postedAfter } = await supabase
     .from('content_calendar')

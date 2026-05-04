@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.2.1 deployed and Pexels image write-back applied — Instagram media gap cleared. Phase 14L.2.2 in working tree — single-video HeyGen pilot scaffold: migration 033 (`media_metadata` JSONB), pilot guards on the worker (refuses `--limit>1` with `--provider=heygen`), `--id` pin, polling reads `media_metadata.heygen_video_id`. Default mode remains DRY-RUN. No HeyGen call fired in this phase. No mutations. No platform calls.)
-**Last code-shipping commit:** `98204ef` (Phase 14L.2.1: real Pexels OpenAI HeyGen provider integration with strict flag matrix)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.1 deployed and verified on prod** · **Phase 14L.2.2 in working tree** — single-video HeyGen pilot scaffold + migration 033. Live posting still BLOCKED. Worker refuses bulk HeyGen during the pilot. Operator approval required before the single `--generate --apply` HeyGen call.
+**Last updated:** 2026-05-03 (Phase 14L.2.2 deployed; HeyGen pilot row `71c25664…` rendered and `video_url` applied. Phase 14L.2.3 in working tree — permanent video storage hardening: completion path copies HeyGen MP4 to Supabase Storage; new `--repair-temp-urls` mode finds + fixes rows still on `heygen.ai` temp URLs; diagnostic warns when any exist. Default mode remains DRY-RUN. No HeyGen call fired. No mutations. No platform calls.)
+**Last code-shipping commit:** `e0f013d` (Phase 14L.2.2: HeyGen single-video pilot scaffold with migration 033 media metadata)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.2 deployed and verified on prod** · **Phase 14L.2.3 in working tree** — permanent video storage hardening + `--repair-temp-urls` scanner. Live posting still BLOCKED. Remaining 4 HeyGen videos NOT yet queued — operator approval required after storage hardening verified.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,32 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2.2 — HeyGen Single-Video Pilot (in working tree, 2026-05-03 — migration 033 pending; no HeyGen call fired).**
+**Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (in working tree, 2026-05-03 — no provider calls; no mutations; no platform calls).**
+
+Phase 14L.2.2 deployed at `e0f013d`. Migration 033 applied. The HeyGen single-video pilot succeeded — content_calendar row `71c25664-38a7-4bc3-80b5-326bfc36c54d` rendered, polled, and `video_url` was applied. TikTok passing media readiness: 1 of 30. Posted_at unchanged at 22.
+
+Phase 14L.2.3 hardens video storage before queuing the remaining 4 HeyGen renders. The pilot row's `video_url` is currently a HeyGen-hosted signed URL (`https://files2.heygen.ai/...?Expires=...&Signature=...`) that will expire — Instagram/TikTok would 403 on it. The completion path now downloads the MP4 and re-uploads it to Supabase Storage so `video_url` is a permanent self-hosted URL.
+
+**Built in 14L.2.3 (no provider calls, no mutations):**
+- [x] `scripts/check-video-generation-status.js` — new `downloadAndStoreVideo` helper (mirrors the Pexels image pattern but with `video/mp4` + `upsert: true`); deterministic `buildVideoObjectPath` (`media/content/<platform>/<row>-<vid>.mp4` or `media/campaigns/video/<asset>-<vid>.mp4`); `isHeyGenTempUrl(url)` predicate (matches any `*.heygen.ai` host). Completion path now copies the MP4 to Supabase Storage **before** writing `video_url`; on storage failure leaves the row at `media_status='pending'` (per spec — the HeyGen render did succeed; only the storage step blew up; a re-run will retry). The original temp URL is preserved in `media_metadata.heygen_temp_url` (or `video_source_metadata.heygen_temp_url` for campaign rows) for forensics. New `--repair-temp-urls` mode (DRY-RUN + `--apply`) scans both tables for `heygen.ai`-hosted `video_url` values and rewrites them.
+- [x] `scripts/diagnose-media-readiness.js` — new section `6f. Temporary HeyGen video URLs` — counts unposted rows whose `video_url` is on `heygen.ai`, prints the repair command. Detected 1 such row (the pilot).
+
+**Dry-run results:**
+- `node scripts/check-video-generation-status.js`: 0 pending HeyGen jobs (Phase 14L.2.3 banner; `No platform calls. No DB writes. No Storage writes.`).
+- `node scripts/check-video-generation-status.js --repair-temp-urls`: 1 content_calendar row (the pilot) flagged with planned destination `media/content/tiktok/71c25664-38a7-4bc3-80b5-326bfc36c54d-d0611cdd7a1649379ab61a7a93c263fa.mp4`; 0 campaign_assets rows; posted_at unchanged at 22.
+- `node scripts/diagnose-media-readiness.js`: section 6f reports `⚠ content_calendar rows on heygen.ai temp URLs: 1`; recommends repair command. Migration 033 ✓ applied. Posted_at unchanged at 22.
+
+**No migration created.** Migration 033 (`content_calendar.media_metadata` JSONB) shipped in Phase 14L.2.2 and is already applied in production. Phase 14L.2.3 only adds new keys to existing JSONB columns.
+
+**Live posting still BLOCKED.** Phase 14L.2.3 only adds storage hardening. No HeyGen call fired in this phase. Once approved:
+1. Push + deploy
+2. (operator-approved) `node scripts/check-video-generation-status.js --repair-temp-urls --apply` → migrates the 1 pilot row off `files2.heygen.ai`; `video_url` becomes a Supabase public URL
+3. (operator-approved, after repair verified) Queue the 4 remaining HeyGen renders one at a time via `--id=<uuid>` — pilot guard still requires `--limit=1` per call
+4. Phase 14L.2.4 will drop the `--limit=1` enforcement once the new pipeline is verified end-to-end
+
+---
+
+### Pre-Phase-14L.2.3: Phase 14L.2.2 — HeyGen Single-Video Pilot (saved + pushed `e0f013d`; migration 033 applied; pilot row `71c25664…` rendered + `video_url` applied 2026-05-03).
 
 Phase 14L.2.1 deployed at `98204ef`. Pexels image generation + Supabase Storage write-back ran safely; Instagram media gap is now 0 of 26 (was 3 of 26). Diagnostic baseline: 30 of 107 unposted rows still blocked, all "missing required video_url for TikTok"; 5 rows ready for HeyGen (have script), 25 still blocked-no-script; 0 HeyGen jobs awaiting poll; posted_at unchanged at 22.
 
