@@ -1,10 +1,192 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14L deployed + verified at `810999e`. Phase 14L.1 in working tree — tracking URL backfill script + media generation planner, both dry-run only. No mutations. No platform calls.)
-**Last known good commit:** `810999e` — "Phase 14L: media readiness gate and caption legacy-link cleanup script"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14L deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14L.1 backfill + caption cleanup applied successfully. Phase 14L.2 in working tree — migration 032, media_status field, and DRY-RUN media-generation worker scaffold. No mutations. No platform calls. No provider API calls.)
+**Last known good commit:** `7e8ec63` — "Phase 14L.1: tracking URL backfill and media generation planner dry-run only"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.1 deployed + applied**; Supabase migrations 017-031 applied; **migration 032 pending**; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L.1 prepares two unblockers (tracking URL backfill, media generation planner) but takes no action until explicitly approved. Live autoposter (Phase 14K.1) does not start until backfill is applied + media generation is built and run.
+**Live posting status:** STILL BLOCKED. Phase 14L.2 lands the storage shape (migration 032 adds `content_calendar.video_url` + `media_status` + worker fields), threads the new columns through both gates, and ships a DRY-RUN media-generation worker scaffold with provider stubs. Real Pexels / OpenAI image / HeyGen integration is intentionally deferred to Phase 14L.2.1 with explicit operator approval. Live autoposter (Phase 14K.1) does not start until media generation is wired and a worker run produces non-empty `media_status='ready'` populations on Instagram + TikTok rows.
+
+---
+
+## Phase 14L.2 — Media Generation Storage + Worker Foundation (in working tree, 2026-05-03 — migration 032 pending; --apply mode is a stub)
+
+### What this phase ships
+
+Phase 14L (deployed `810999e`) gated posting on media readiness. Phase 14L.1 (deployed `7e8ec63`) backfilled branded tracking URLs + cleaned up legacy caption links. Phase 14L.2 adds the storage and worker scaffold needed before a real generation worker can populate `image_url` / `video_url` on the rows blocked by the media gate.
+
+The two preflight problems Phase 14L surfaced — Instagram rows missing image, TikTok rows missing video — could not be fixed without a place to land the generated URLs. Organic TikTok rows had no `content_calendar.video_url` column; organic rows generally had no per-row generation state. Migration 032 closes that gap.
+
+### Migration 032 — `032_add_video_url_and_media_status_to_content_calendar.sql`
+
+**Status: pending — must be applied before this code is deployed.** Without 032 applied, the `content_calendar` SELECTs in `posting-gate.ts`, `autoposter-gate.ts`, and `dashboard/content/page.tsx` will return `42703` ("column does not exist") for `video_url` / `media_status` / `media_error`. The two scripts (diagnose, generate) gracefully fall back to legacy SELECTs and warn; the API routes and dashboard do not.
+
+What 032 adds:
+
+| Column | Type | Default | Purpose |
+|---|---|---|---|
+| `video_url` | TEXT | NULL | public URL of generated/attached video media (was missing — organic TikTok rows had nowhere to land) |
+| `media_status` | TEXT | `'pending'` | per-row state: `pending` / `ready` / `failed` / `skipped` (CHECK-constrained) |
+| `media_generated_at` | TIMESTAMPTZ | NULL | timestamp the worker last wrote a media URL |
+| `media_source` | TEXT | NULL | provider label: `pexels` / `openai-image` / `heygen` / `manual` (free-text — CHECK deferred until provider list stabilizes) |
+| `media_error` | TEXT | NULL | most recent worker error (worker truncates to 1000 chars before insert) |
+
+Plus a backfill: rows that already have `image_url` or `video_url` populated and aren't in a terminal state get `media_status='ready'` so the gate's "trust but verify" check passes the same as before. CHECK constraint and partial indexes (`media_status WHERE NULL OR pending OR failed`, `media_generated_at WHERE NOT NULL`) are added at the end. All operations idempotent (ADD COLUMN IF NOT EXISTS, DROP CONSTRAINT IF EXISTS, CREATE INDEX IF NOT EXISTS).
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql` | Schema + backfill + indexes for the worker queue. |
+| `scripts/generate-missing-media.js` | DRY-RUN media-generation worker scaffold. `--dry-run` (default) or `--apply` / `--generate` (intentional stub — refuses to call provider APIs and exits with code 3 so CI can't accidentally enable generation by passing the flag). Mirrors `media-readiness.ts` rules; groups work by (campaign × platform × asset_type × target table); reports per-platform recommended provider; gracefully falls back to legacy SELECT if migration 032 hasn't been applied yet. Reports `media_status` distribution + posted_at no-mutation cross-check. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `src/lib/media-readiness.ts` | New `MediaStatus` type ('pending'/'ready'/'failed'/'skipped'); `MediaReadinessRow` gains optional `media_status` + `media_error`; `MediaReadinessResult` gains `media_status` field and the new `'failed'` outcome; `validateMediaReadiness` short-circuits on `media_status='failed'` (with `media_error` detail), blocks `media_status='skipped'` only on platforms that hard-require media, and verifies `media_status='ready'` rows actually carry a URL ("trust but verify"); `getMediaReadinessLabel` adds `'Media failed'` label. |
+| `src/lib/posting-gate.ts` | `PostingGateRow` gains optional `media_status` / `media_error`; `POSTING_GATE_ROW_SELECT_WITH_MEDIA` extended to include row-level `image_url`, `video_url`, `media_status`, `media_error`; `flattenJoined` now prefers the joined campaign_asset URLs but falls back to row-level columns from migration 032 (organic rows). Both `getPostingGateBlockReason` and `validateManualPostingGate` pass `media_status` + `media_error` into `validateMediaReadiness`. |
+| `src/lib/autoposter-gate.ts` | `ContentCalendarRow` gains `media_status` + `media_error`; ROW_SELECT extended with the new columns; `flattenAutoposterRow` does the campaign_asset → row-level fallback merge; `validateAutoposterCandidate` passes both new fields into the validator. |
+| `src/app/dashboard/content/page.tsx` | `ExtendedContentItem` gains `video_url` / `media_status` / `media_error`; SELECT extended; `MEDIA_BADGE_STYLES` gains `failed: 'bg-rose-100 text-rose-700'`; `computeMediaReadiness` passes `media_status` + `media_error` and falls back to row-level `video_url` for organic rows. No new buttons added. |
+| `scripts/diagnose-media-readiness.js` | Detects whether migration 032 is applied and runs in either mode; reports `media_status` distribution; new "rows ready after media" count; mirrors the new validator rules (failed/skipped/trust-but-verify). |
+
+### Migration created?
+
+**Yes — `supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql`.** Apply BEFORE deploying this code. Both scripts gracefully degrade if not yet applied; the API routes and dashboard SELECTs do not. See "Migration application" section at the bottom of this entry for the SQL verification queries.
+
+### Media readiness rules after this patch
+
+| Input | Behavior |
+|---|---|
+| `media_status === 'failed'` | Blocks unconditionally with `media error: <media_error>` if available, else `media generation failed` |
+| `media_status === 'skipped'` + platform requires media + no URL present | Blocks with `media_status='skipped' but platform <p> requires media` |
+| `media_status === 'skipped'` + text-OK platform | Passes (text-only allowed) |
+| `media_status === 'ready'` + URL present | Passes |
+| `media_status === 'ready'` + URL missing on required-media platform | Blocks with `media_status='ready' but no image_url/video_url present` |
+| `media_status === 'pending'` or `null` | No effect on its own; platform rule + image_prompt check decide |
+| Instagram missing both image_url AND video_url | Blocks `missing required image_url for Instagram` |
+| TikTok missing video_url | Blocks `missing required video_url for TikTok` |
+| `image_prompt` set + no image_url | Blocks `campaign media prompt exists but generated media is missing` |
+| `video_prompt` set + no video_url | Same canonical message |
+| Facebook / Twitter text-only | Passes — `'text-only-allowed'` outcome |
+
+### Worker behavior
+
+`scripts/generate-missing-media.js` ships as a planner today. Its real-world effects:
+
+- DEFAULTS to dry-run. `--dry-run` flag is accepted explicitly for clarity.
+- `--apply` / `--generate` is a stub: prints a clear "stubbed in Phase 14L.2 — provider integration deferred to 14L.2.1" notice and exits with code 3 so CI cannot interpret it as success.
+- Walks unposted, gate-eligible candidates and recommends a provider per group:
+  - Image → Pexels (PEXELS_API_KEY) → OpenAI image (OPENAI_API_KEY) fallback
+  - Video → HeyGen (HEYGEN_API_KEY) when `video_script` or `video_prompt` is non-empty
+  - Video without script → reports `⚠ blocked: video script missing` so the operator can fix the upstream content generator first
+- Snapshots `posted_at` row count BEFORE and AFTER to prove zero mutations.
+- Falls back to legacy SELECT if migration 032 hasn't been applied; the `media_status` distribution report shows `n/a` in that case.
+
+### Real provider / platform calls?
+
+**No.** No Pexels, OpenAI, HeyGen, Supabase Storage upload, or platform API was invoked by this phase's code. The diagnose + generate scripts only run `SELECT` queries.
+
+### Rows mutated?
+
+**No.** posted_at row count snapshot before/after each script run is unchanged at 22. No `INSERT` / `UPDATE` / `DELETE` was issued by this phase's code paths.
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS (clean)
+- `npm run build` → ✅ PASS (`Compiled successfully in 26.8s`; route table unchanged — no new routes added in this phase)
+- `node scripts/diagnose-media-readiness.js` → ✅ PASS (run pre-migration; reports schema gap + 39 rows blocked, 68 ready, posted_at unchanged at 22)
+- `node scripts/generate-missing-media.js` → ✅ PASS dry-run (107 scanned, 68 covered, 9 image-only, 23 video-only, 7 both, 25 video blocked-no-script, posted_at unchanged at 22)
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated to this phase. Same TypeError("Converting circular structure to JSON") as in 14K / 14L.
+
+### Diagnostic results (pre-migration baseline, 2026-05-03)
+
+```
+0. Migration 032: not yet applied (banner shown)
+1. Caption legacy-link debt: 0  (Phase 14L.1 cleanup landed)
+2. Branded tracking_url:    8  (Phase 14L.1 backfill landed)
+3. Instagram media gap:     3 of 26 unposted IG rows missing both
+4. TikTok video gap:        30 of 30 unposted TikTok rows missing video
+5. Prompt without media:    0
+6. Total blocked:           39 of 107 unposted
+   30  missing required video_url for TikTok
+   14  campaign media prompt exists but generated media is missing
+    3  missing required image_url for Instagram
+6b. media_status distribution: n/a — migration 032 not applied
+6c. ready/text-only-allowed:   68 of 107
+7. posted_at unchanged (22 → 22)
+```
+
+### Risks
+
+- **Migration 032 must apply before the code deploys.** API routes and the dashboard SELECT the new columns; without 032 they will throw 500s on the `posting-gate` paths and the `/dashboard/content` page will fail to load. Order: apply 032 → deploy code.
+- **--apply is a stub.** A future engineer who removes the stop-and-exit block must take care that the worker writes `media_status='ready'` AND a non-empty URL atomically; otherwise the gate's "trust but verify" rule will refuse to post the row.
+- **Organic video remains blocked at the source.** 25 unposted organic TikTok rows have no `video_script` and HeyGen needs one. The worker will refuse those even after provider wiring; the upstream weekly-content generator must be extended to author scripts before HeyGen can do anything.
+- **`media_source` is free-text by design.** A CHECK constraint deferred until provider list stabilizes. Worker code is the only writer; misspelled labels will land but won't break anything.
+- **`media_status` defaults to `'pending'` for new rows.** That's intentional but means rows created BEFORE 032's backfill ran will be classified `'ready'` (because they have URLs) while rows created AFTER will start `'pending'` even when the weekly-content cron immediately sets `image_url`. The weekly-content cron should be updated in Phase 14L.2.1 to set `media_status='ready'` + `media_source='pexels'` + `media_generated_at=now()` after `fetchAndStoreImage` succeeds. Until then, organic rows from the weekly cron are correctly classified by the gate (they have URL → 'trust but verify' passes), but the `media_status` column stays at `'pending'`.
+
+### Migration application instructions
+
+Apply the migration **before** deploying the code change (default ordering — code references new columns the migration creates).
+
+Open the Supabase SQL Editor and paste the contents of `supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql`. Run it. It is idempotent — re-running on an already-migrated DB is a no-op for every operation.
+
+### Verification SQL (paste into Supabase SQL Editor after applying 032)
+
+```sql
+-- 1. Confirm columns exist
+SELECT column_name, data_type, column_default
+FROM information_schema.columns
+WHERE table_name = 'content_calendar'
+  AND column_name IN ('video_url', 'media_status', 'media_generated_at', 'media_source', 'media_error')
+ORDER BY column_name;
+-- Expect 5 rows.
+
+-- 2. Confirm CHECK constraint
+SELECT conname FROM pg_constraint
+WHERE conname = 'content_calendar_media_status_check';
+-- Expect 1 row.
+
+-- 3. Confirm partial indexes
+SELECT indexname FROM pg_indexes
+WHERE tablename = 'content_calendar'
+  AND indexname IN ('idx_content_calendar_media_status', 'idx_content_calendar_media_generated_at');
+-- Expect 2 rows.
+
+-- 4. Confirm backfill landed
+SELECT media_status, count(*) FROM content_calendar GROUP BY media_status ORDER BY 2 DESC;
+-- Expect rows with image_url/video_url to be 'ready'; the rest NULL or 'pending'.
+
+-- 5. posted_at row count cross-check (must equal 22)
+SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL;
+```
+
+### Deploy instructions
+
+After migration 032 is verified above:
+
+1. Push commit + ensure `git push origin main` returns "Everything up-to-date".
+2. Deploy: `npx vercel --prod --yes` (no `vercel.json` change; no new cron registration).
+3. Open `/dashboard/content` while signed in as admin — confirm the page loads (the SELECT now includes `video_url`, `media_status`, `media_error`).
+
+### Smoke-test checklist
+
+- [ ] Apply migration 032 in Supabase SQL Editor
+- [ ] Run verification SQL queries 1-5 above and confirm expected counts
+- [ ] Deploy code
+- [ ] Open `/dashboard/content` — confirm page loads, badges render (no console errors)
+- [ ] Confirm at least one previously-failing-gate row still shows the correct refusal reason (the validator's behavior should not regress)
+- [ ] Run `node scripts/diagnose-media-readiness.js` against prod env — expect "Migration 032 applied ✓" banner; `media_status` distribution should show non-trivial `'ready'` count; posted_at unchanged at 22
+- [ ] Run `node scripts/generate-missing-media.js` (DRY-RUN) — expect a clean group breakdown; posted_at unchanged at 22
+- [ ] Confirm `SELECT count(*) FROM content_calendar WHERE posted_at IS NOT NULL` is still 22
+
+### Recommended next phase
+
+**Phase 14L.2.1 — Wire real provider integrations into `scripts/generate-missing-media.js`.** Concrete order:
+1. Implement Pexels image fetch + Supabase Storage re-upload (mirror `fetchAndStoreImage` in `weekly-content/route.ts`); land the public URL in `image_url` and set `media_status='ready'`, `media_source='pexels'`, `media_generated_at=now()`.
+2. Implement OpenAI image fallback for Pexels misses.
+3. Implement HeyGen video generation, but only for rows with a `video_script` or `video_prompt`. Document upstream that organic TikTok rows need scripts authored first (extend the weekly-content cron's prompt to include a TikTok video script).
+4. Update `weekly-content/route.ts` to set `media_status='ready'` + `media_source='pexels'` after `fetchAndStoreImage` succeeds, so new organic rows don't sit at `'pending'` while having a URL.
+5. After enough rows clear the gate, ship Phase 14K.1 (live autoposter) — at that point the gate will block anything that still doesn't have media.
 
 ---
 

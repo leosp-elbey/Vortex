@@ -60,15 +60,31 @@ function nonEmpty(v) {
   return typeof v === 'string' && v.trim().length > 0
 }
 
+function normalizeMediaStatus(input) {
+  if (!input || typeof input !== 'string') return null
+  const v = input.trim().toLowerCase()
+  return ['pending', 'ready', 'failed', 'skipped'].includes(v) ? v : null
+}
+
 function validateMediaReadinessJs(row) {
   const rule = getRule(row.platform)
   const has_image = nonEmpty(row.image_url)
   const has_video = nonEmpty(row.video_url)
   const reasons = []
   const platformLabel = row.platform ? row.platform.toLowerCase().trim() : ''
+  const media_status = normalizeMediaStatus(row.media_status)
+  const platformRequiresMedia = rule.image === 'required' || rule.video === 'required'
+
+  // Phase 14L.2 — media_status short-circuits.
+  if (media_status === 'failed') {
+    const detail = nonEmpty(row.media_error) ? `: ${row.media_error.trim()}` : ''
+    reasons.push(`media generation failed${detail}`)
+  } else if (media_status === 'skipped' && platformRequiresMedia && !has_image && !has_video) {
+    reasons.push(`media_status='skipped' but platform ${platformLabel || 'this platform'} requires media`)
+  }
+
   if (rule.either_satisfies) {
-    const hardRequired = rule.image === 'required' || rule.video === 'required'
-    if (hardRequired && !has_image && !has_video) {
+    if (platformRequiresMedia && !has_image && !has_video) {
       if (platformLabel === 'instagram') reasons.push('missing required image_url for Instagram')
       else reasons.push(`missing required image_url or video_url for ${platformLabel || 'this platform'}`)
     }
@@ -92,9 +108,17 @@ function validateMediaReadinessJs(row) {
       reasons.push('campaign media prompt exists but generated media is missing')
     }
   }
-  if (reasons.length > 0) return { outcome: 'missing', blocked: true, reasons, has_image, has_video }
-  if (has_image || has_video) return { outcome: 'ready', blocked: false, reasons: [], has_image, has_video }
-  return { outcome: 'text-only-allowed', blocked: false, reasons: [], has_image, has_video }
+  if (media_status === 'ready' && platformRequiresMedia && !has_image && !has_video) {
+    if (!reasons.some(r => r.startsWith('missing required'))) {
+      reasons.push(`media_status='ready' but no image_url/video_url present`)
+    }
+  }
+  if (reasons.length > 0) {
+    const outcome = media_status === 'failed' ? 'failed' : 'missing'
+    return { outcome, blocked: true, reasons, has_image, has_video, media_status }
+  }
+  if (has_image || has_video) return { outcome: 'ready', blocked: false, reasons: [], has_image, has_video, media_status }
+  return { outcome: 'text-only-allowed', blocked: false, reasons: [], has_image, has_video, media_status }
 }
 
 function loadEnvLocal() {
@@ -157,27 +181,62 @@ async function main() {
     .select('id', { count: 'exact', head: true })
     .not('posted_at', 'is', null)
 
-  // Pull the joined rows.
-  const { data: rows, error } = await supabase
-    .from('content_calendar')
-    .select(
-      'id, status, platform, caption, image_prompt, tracking_url, campaign_asset_id, posted_at, ' +
-      'campaign_asset:campaign_assets!campaign_asset_id(id, image_url, video_url, asset_type)'
-    )
-    .order('created_at', { ascending: false })
-    .limit(5000)
-
-  if (error) {
-    console.error(`${COLORS.red}Query failed:${COLORS.reset} ${error.message}`)
-    process.exit(2)
+  // Pull the joined rows. Phase 14L.2 — also try to read the row-level
+  // image_url / video_url / media_status / media_error / media_generated_at
+  // / media_source columns from migration 032. If migration 032 hasn't been
+  // applied, retry with the legacy SELECT and flag the schema gap.
+  let rows = null
+  let migration032Applied = true
+  {
+    const res = await supabase
+      .from('content_calendar')
+      .select(
+        'id, status, platform, caption, image_prompt, tracking_url, campaign_asset_id, posted_at, ' +
+        'image_url, video_url, media_status, media_error, media_generated_at, media_source, ' +
+        'campaign_asset:campaign_assets!campaign_asset_id(id, image_url, video_url, asset_type)'
+      )
+      .order('created_at', { ascending: false })
+      .limit(5000)
+    if (res.error) {
+      const msg = res.error.message ?? String(res.error)
+      const looksLikeSchemaGap =
+        msg.includes('media_status') ||
+        msg.includes('media_error') ||
+        msg.includes('media_generated_at') ||
+        msg.includes('media_source') ||
+        msg.includes('content_calendar.video_url')
+      if (looksLikeSchemaGap) {
+        migration032Applied = false
+        const fallback = await supabase
+          .from('content_calendar')
+          .select(
+            'id, status, platform, caption, image_prompt, tracking_url, campaign_asset_id, posted_at, image_url, ' +
+            'campaign_asset:campaign_assets!campaign_asset_id(id, image_url, video_url, asset_type)'
+          )
+          .order('created_at', { ascending: false })
+          .limit(5000)
+        if (fallback.error) {
+          console.error(`${COLORS.red}Fallback query failed:${COLORS.reset} ${fallback.error.message}`)
+          process.exit(2)
+        }
+        rows = fallback.data
+      } else {
+        console.error(`${COLORS.red}Query failed:${COLORS.reset} ${msg}`)
+        process.exit(2)
+      }
+    } else {
+      rows = res.data
+    }
   }
 
   const all = (rows ?? []).map(r => {
     const ca = Array.isArray(r.campaign_asset) ? (r.campaign_asset[0] ?? null) : (r.campaign_asset ?? null)
     return {
       ...r,
-      image_url: ca?.image_url ?? null,
-      video_url: ca?.video_url ?? null,
+      // Phase 14L.2 — campaign_asset URLs win when present (carry provenance);
+      // row-level URLs from migration 032 are the fallback for organic rows.
+      image_url: ca?.image_url ?? r.image_url ?? null,
+      video_url: ca?.video_url ?? r.video_url ?? null,
       campaign_asset: ca,
     }
   })
@@ -208,6 +267,15 @@ async function main() {
     for (const reason of reasons) blockedReasons[reason] = (blockedReasons[reason] ?? 0) + 1
   }
 
+  console.log(`${COLORS.bold}0. Migration 032 (content_calendar.video_url + media_status) status${COLORS.reset}`)
+  if (migration032Applied) {
+    console.log(`   ${COLORS.green}✓ applied — content_calendar.video_url + media_status columns present${COLORS.reset}`)
+  } else {
+    console.log(`   ${COLORS.yellow}· not applied — running with legacy SELECT (no row-level video_url)${COLORS.reset}`)
+    console.log(`   ${COLORS.dim}Apply supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql${COLORS.reset}`)
+  }
+  console.log()
+
   console.log(`${COLORS.bold}1. Caption legacy-link debt${COLORS.reset}`)
   console.log(`   ${COLORS.yellow}unposted rows containing 'myvortex365.com/leosp':${COLORS.reset} ${captionsWithLegacy.length}`)
   console.log()
@@ -235,6 +303,32 @@ async function main() {
   for (const [reason, count] of Object.entries(blockedReasons).sort((a, b) => b[1] - a[1])) {
     console.log(`     ${COLORS.dim}${count}${COLORS.reset}  ${reason}`)
   }
+  console.log()
+
+  // Phase 14L.2 — distribution of media_status across unposted rows + count
+  // of rows that pass the validator outright. Only meaningful when migration
+  // 032 is applied; surface a "n/a" line otherwise.
+  console.log(`${COLORS.bold}6b. media_status distribution (Phase 14L.2)${COLORS.reset}`)
+  if (migration032Applied) {
+    const byMediaStatus = { null: 0, pending: 0, ready: 0, failed: 0, skipped: 0 }
+    for (const r of unposted) {
+      const ms = normalizeMediaStatus(r.media_status)
+      if (ms === null) byMediaStatus.null++
+      else byMediaStatus[ms]++
+    }
+    console.log(`   ${COLORS.dim}null     :${COLORS.reset} ${byMediaStatus.null}`)
+    console.log(`   ${COLORS.dim}pending  :${COLORS.reset} ${byMediaStatus.pending}`)
+    console.log(`   ${COLORS.green}ready    :${COLORS.reset} ${byMediaStatus.ready}`)
+    console.log(`   ${COLORS.red}failed   :${COLORS.reset} ${byMediaStatus.failed}`)
+    console.log(`   ${COLORS.dim}skipped  :${COLORS.reset} ${byMediaStatus.skipped}`)
+  } else {
+    console.log(`   ${COLORS.dim}n/a — migration 032 not applied${COLORS.reset}`)
+  }
+  console.log()
+
+  const readyAfterMedia = unposted.length - blockedByMedia.length
+  console.log(`${COLORS.bold}6c. Rows ready after media (would pass validateMediaReadiness)${COLORS.reset}`)
+  console.log(`   ${COLORS.green}ready / text-only-allowed:${COLORS.reset} ${readyAfterMedia} of ${unposted.length}`)
   console.log()
 
   // 7. posted_at snapshot AFTER.

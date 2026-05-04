@@ -53,10 +53,16 @@ export interface ContentCalendarRow {
   // campaign_assets via campaign_asset_id (image_url / video_url) and
   // from the row's own image_prompt column. video_prompt has no source
   // today and stays null.
+  // Phase 14L.2 — also reads row-level image_url / video_url / media_status /
+  // media_error from content_calendar (migration 032). Organic rows have no
+  // campaign_asset to JOIN against, so the row-level columns are their only
+  // source of media.
   image_url: string | null
   video_url: string | null
   image_prompt: string | null
   video_prompt: string | null
+  media_status: string | null
+  media_error: string | null
 }
 
 export interface AutoposterEligibleRow {
@@ -103,21 +109,31 @@ interface GetEligibleOptions {
 // dry-run media-readiness gate can run. `image_prompt` is a real column
 // on content_calendar (legacy organic-image generator). `video_prompt`
 // has no source today and is omitted; the validator treats it as null.
+// Phase 14L.2 — also pulls row-level image_url / video_url / media_status /
+// media_error (migration 032) so organic rows have a media surface and the
+// gate can read worker-set status.
 const ROW_SELECT =
-  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
+  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, image_prompt, image_url, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
 
 interface RawJoinedAutoposterRow extends Omit<ContentCalendarRow, 'image_url' | 'video_url' | 'video_prompt'> {
+  // Row-level columns held separately so the merge below can prefer the
+  // joined campaign_asset's URLs while falling back to the row-level ones.
+  image_url?: string | null
+  video_url?: string | null
   campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | null
 }
 
 function flattenAutoposterRow(raw: RawJoinedAutoposterRow): ContentCalendarRow {
   const asset = raw.campaign_asset ?? null
+  const { image_url: rowImage, video_url: rowVideo, ...rest } = raw
   return {
-    ...raw,
-    image_url: asset?.image_url ?? null,
-    video_url: asset?.video_url ?? null,
-    image_prompt: raw.image_prompt ?? null,
+    ...rest,
+    image_url: asset?.image_url ?? rowImage ?? null,
+    video_url: asset?.video_url ?? rowVideo ?? null,
+    image_prompt: rest.image_prompt ?? null,
     video_prompt: null,
+    media_status: rest.media_status ?? null,
+    media_error: rest.media_error ?? null,
   }
 }
 
@@ -177,7 +193,13 @@ export async function getAutoposterEligibleRows(
   // array of related rows; the runtime returns a single object (or null) for
   // a 1:1 FK relation. Cast through unknown so flattenAutoposterRow can do
   // the right thing whether it sees an object or an array.
+  // Phase 14L.2 — row-level image_url / video_url / media_status / media_error
+  // come from content_calendar directly (migration 032).
   const rawRows = ((data ?? []) as unknown) as Array<RawJoinedAutoposterRow & {
+    image_url?: string | null
+    video_url?: string | null
+    media_status?: string | null
+    media_error?: string | null
     campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | { image_url: string | null; video_url: string | null; asset_type: string | null }[] | null
   }>
   const rows: ContentCalendarRow[] = rawRows.map(raw => {
@@ -246,6 +268,7 @@ export function validateAutoposterCandidate(row: ContentCalendarRow): string | n
   }
   // Phase 14L — media readiness. Run last so platform / caption / tracking
   // failures surface first with their specific messages.
+  // Phase 14L.2 — also passes media_status / media_error.
   const media = validateMediaReadiness({
     platform: row.platform,
     image_url: row.image_url,
@@ -253,6 +276,8 @@ export function validateAutoposterCandidate(row: ContentCalendarRow): string | n
     image_prompt: row.image_prompt,
     video_prompt: row.video_prompt,
     campaign_asset_id: row.campaign_asset_id,
+    media_status: row.media_status,
+    media_error: row.media_error,
   })
   if (media.blocked && media.reasons.length > 0) {
     return media.reasons[0]

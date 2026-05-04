@@ -25,6 +25,11 @@ type ExtendedContentItem = ContentCalendarItem & {
   // Phase 14L — media readiness inputs. `image_prompt` is on content_calendar
   // directly; `image_url` / `video_url` come from the joined campaign_asset.
   image_prompt?: string | null
+  // Phase 14L.2 — row-level video_url + media_status / media_error from
+  // migration 032. Optional because legacy rows may pre-date the migration.
+  video_url?: string | null
+  media_status?: string | null
+  media_error?: string | null
   campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | null
 }
 
@@ -52,17 +57,22 @@ function getPostingGateBlockReason(item: ExtendedContentItem): string | null {
 function computeMediaReadiness(item: ExtendedContentItem) {
   return validateMediaReadiness({
     platform: item.platform,
+    // Phase 14L.2 — campaign_asset URL still wins (carries provenance);
+    // fall back to row-level URL added by migration 032 for organic rows.
     image_url: item.campaign_asset?.image_url ?? item.image_url ?? null,
-    video_url: item.campaign_asset?.video_url ?? null,
+    video_url: item.campaign_asset?.video_url ?? item.video_url ?? null,
     image_prompt: item.image_prompt ?? null,
     video_prompt: null,
     campaign_asset_id: item.campaign_asset_id ?? null,
+    media_status: item.media_status ?? null,
+    media_error: item.media_error ?? null,
   })
 }
 
 const MEDIA_BADGE_STYLES: Record<MediaReadinessOutcome, string> = {
   ready: 'bg-emerald-50 text-emerald-700',
   missing: 'bg-amber-50 text-amber-700',
+  failed: 'bg-rose-100 text-rose-700',
   'text-only-allowed': 'bg-slate-100 text-slate-700',
 }
 
@@ -91,7 +101,7 @@ export default function ContentPage() {
     // Phase 14L — join campaign_assets to surface media readiness in the UI.
     supabase
       .from('content_calendar')
-      .select('*, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+      .select('*, image_prompt, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
       .order('created_at', { ascending: false })
       .then(({ data }) => setContent((data || []) as unknown as ExtendedContentItem[]))
   }, [])
@@ -105,7 +115,7 @@ export default function ContentPage() {
       const supabase = createClient()
       const { data } = await supabase
         .from('content_calendar')
-        .select('*, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+        .select('*, image_prompt, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
         .order('created_at', { ascending: false })
       setContent((data || []) as unknown as ExtendedContentItem[])
       show(`Generated ${result.generated} posts · ${result.images_generated ?? 0} images created`)

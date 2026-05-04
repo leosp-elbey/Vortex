@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L deployed + verified at `810999e`. Phase 14L.1 in working tree — tracking URL backfill script + media generation planner, both dry-run only. No mutations. No platform calls.)
-**Last code-shipping commit:** `810999e` (Phase 14L media readiness gate + caption cleanup script)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L deployed and verified on prod** · **Phase 14L.1 in working tree** — tracking URL backfill + media generation planner, both DRY-RUN ONLY. Live autoposter (Phase 14K.1) does NOT start until backfill is applied AND a media-generation worker (Phase 14L.2) is built and run.
+**Last updated:** 2026-05-03 (Phase 14L.1 backfill + caption cleanup applied successfully. Phase 14L.2 in working tree — migration 032 + media_status field + DRY-RUN media-generation worker scaffold. No mutations. No platform calls. No provider API calls.)
+**Last code-shipping commit:** `7e8ec63` (Phase 14L.1: tracking URL backfill and media generation planner dry-run only)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.1 deployed + applied on prod** · **Phase 14L.2 in working tree** — migration 032 (content_calendar.video_url + media_status), validator wiring, DRY-RUN media-generation worker scaffold. `--apply` mode is intentionally a stub. Live autoposter (Phase 14K.1) does NOT start until provider integrations land in Phase 14L.2.1 and at least one worker run produces `media_status='ready'` populations on Instagram + TikTok rows.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,41 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.1 — Media Generation + Tracking URL Materialization Preflight (in working tree, 2026-05-03 — DRY-RUN scripts only, no mutations).**
+**Phase 14L.2 — Media Generation Storage + Worker Foundation (in working tree, 2026-05-03 — migration 032 pending; --apply mode is a stub).**
+
+Phase 14L.1 backfill applied successfully: 8 content_calendar + 8 campaign_assets rows now carry branded VortexTrips tracking URLs; 7 unposted captions had legacy `myvortex365.com/leosp` rewritten; visible legacy links in unposted rows are now 0; posted_at row count unchanged at 22.
+
+Phase 14L.2 lands the storage shape for the next preflight problem: 39 unposted rows are still blocked by the media gate (3 IG missing both, 30 TikTok missing video, 14 prompt-without-media). Without a place to land generated URLs on organic rows, the worker has nothing to write to. Migration 032 fixes that:
+
+- Adds `content_calendar.video_url` (was absent — organic TikTok rows had nowhere to land)
+- Adds `content_calendar.media_status` (`pending` / `ready` / `failed` / `skipped` with CHECK constraint)
+- Adds `content_calendar.media_generated_at`, `media_source`, `media_error`
+- Backfills `media_status='ready'` for rows that already carry a media URL
+- Idempotent (IF NOT EXISTS / DROP IF EXISTS); partial indexes on the worker queue
+
+**Built in 14L.2 (no mutations, no provider calls):**
+- [x] `supabase/migrations/032_add_video_url_and_media_status_to_content_calendar.sql` — schema + backfill + indexes. Pending application.
+- [x] `src/lib/media-readiness.ts` — new `MediaStatus` type; new `'failed'` outcome; `validateMediaReadiness` short-circuits on `'failed'`, blocks `'skipped'` only when platform requires media, and verifies `'ready'` actually has a URL.
+- [x] `src/lib/posting-gate.ts` — `PostingGateRow` + `POSTING_GATE_ROW_SELECT_WITH_MEDIA` extended with `media_status` / `media_error` and row-level `image_url` / `video_url`. `flattenJoined` prefers campaign_asset URLs, falls back to row-level columns.
+- [x] `src/lib/autoposter-gate.ts` — `ContentCalendarRow` + ROW_SELECT extended; `flattenAutoposterRow` does the same merge; `validateAutoposterCandidate` passes the new fields.
+- [x] `scripts/generate-missing-media.js` — DRY-RUN worker scaffold. Mirrors media-readiness rules, groups by (campaign × platform × asset_type × target table), recommends Pexels/OpenAI/HeyGen per group, gracefully degrades when migration 032 is unapplied. `--apply` is a stub that exits non-zero so CI can't enable generation accidentally.
+- [x] `scripts/diagnose-media-readiness.js` — adds migration-032-applied detection, `media_status` distribution, "rows ready after media" count. Mirrors the new validator rules.
+- [x] `src/app/dashboard/content/page.tsx` — `MEDIA_BADGE_STYLES` gains the `'failed'` rose badge; SELECT pulls the new columns; `computeMediaReadiness` passes `media_status` + `media_error`.
+
+**Dry-run results (pre-migration baseline):**
+- Diagnostic: 0 caption legacy links left, 8 branded tracking URLs, 39 of 107 unposted rows blocked, 68 ready or text-only-allowed; posted_at unchanged at 22.
+- Generator: 107 scanned, 68 covered, 9 image-only, 23 video-only, 7 both, 25 video blocked by missing script; PEXELS / OPENAI / HEYGEN keys all present; posted_at unchanged at 22.
+
+**Live posting still BLOCKED.** Phase 14L.2 only ships storage shape + worker scaffold. No provider API was called. Once approved:
+1. Apply migration 032 in Supabase SQL Editor (run verification SQL afterwards)
+2. Deploy code (after migration confirmed applied)
+3. Phase 14L.2.1 — wire real Pexels / OpenAI / HeyGen integration into `scripts/generate-missing-media.js`; remove the `--apply` stub; extend `weekly-content/route.ts` to set `media_status='ready'` after `fetchAndStoreImage` succeeds
+4. Run worker; populate `media_status='ready'` on IG + TikTok rows
+5. Then Phase 14K.1 (live autoposter) becomes runnable
+
+---
+
+### Pre-Phase-14L.2: Phase 14L.1 — Media Generation + Tracking URL Materialization Preflight (saved + pushed `7e8ec63`; backfill + caption cleanup applied 2026-05-03).
 
 Phase 14L deployed at `810999e`. Diagnostic surfaced two outstanding blockers before Phase 14K.1 (live autoposter) can start:
 
@@ -51,6 +85,8 @@ Phase 14L deployed at `810999e`. Diagnostic surfaced two outstanding blockers be
 2. `node scripts/cleanup-legacy-caption-links.js --apply` → captions are rewritten to use the branded URL
 3. Build a media generation worker (Phase 14L.2) → populates `campaign_assets.image_url` / `.video_url` so visual-platform rows pass the gate
 4. Then Phase 14K.1 (live autoposter) becomes runnable
+
+---
 
 ---
 

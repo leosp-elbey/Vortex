@@ -43,12 +43,19 @@ export interface PostingGateRow {
   // sub-check treats the row as "no media available" (which blocks platforms
   // that require media). Campaign rows get these from a JOIN against
   // campaign_assets via content_calendar.campaign_asset_id; organic rows
-  // currently have no source for image_url/video_url and will be flagged
-  // missing on visual platforms.
+  // pull image_url / video_url straight from content_calendar (Phase 14L.2 —
+  // migration 032 added video_url + media_status to content_calendar so
+  // organic rows have a parallel media surface).
   image_url?: string | null
   video_url?: string | null
   image_prompt?: string | null
   video_prompt?: string | null
+  // Phase 14L.2 — media generation state from migration 032. NULL on rows
+  // that predate the migration; treated as "no opinion" (platform rules
+  // apply). 'failed' / 'skipped' / 'ready' have explicit refusal logic in
+  // validateMediaReadiness.
+  media_status?: string | null
+  media_error?: string | null
 }
 
 export interface EligibilityResult {
@@ -97,16 +104,17 @@ export function getPostingGateBlockReason(row: PostingGateRow): string | null {
   }
 
   // Phase 14L — media readiness gate. Run only when media inputs were plumbed
-  // through (image_url / video_url / *_prompt fields present on the row). When
-  // ALL media inputs are undefined, assume the caller didn't fetch them and
-  // skip — the manual posting validator below will catch it on the post path.
-  // When at least one is defined (or the platform has hard requirements), let
-  // validateMediaReadiness decide.
+  // through (image_url / video_url / *_prompt / media_status fields present
+  // on the row). When ALL media inputs are undefined, assume the caller
+  // didn't fetch them and skip — the manual posting validator below will
+  // catch it on the post path. When at least one is defined (or the platform
+  // has hard requirements), let validateMediaReadiness decide.
   const mediaInputsPresent =
     row.image_url !== undefined ||
     row.video_url !== undefined ||
     row.image_prompt !== undefined ||
-    row.video_prompt !== undefined
+    row.video_prompt !== undefined ||
+    row.media_status !== undefined
   if (mediaInputsPresent) {
     const media = validateMediaReadiness({
       platform: row.platform,
@@ -115,6 +123,8 @@ export function getPostingGateBlockReason(row: PostingGateRow): string | null {
       image_prompt: row.image_prompt ?? null,
       video_prompt: row.video_prompt ?? null,
       campaign_asset_id: row.campaign_asset_id ?? null,
+      media_status: row.media_status ?? null,
+      media_error: row.media_error ?? null,
     })
     if (media.blocked && media.reasons.length > 0) {
       return media.reasons[0]
@@ -262,6 +272,7 @@ export function validateManualPostingGate(
   // For real platform-poster routes, missing required media (e.g. an
   // Instagram row without image_url) blocks here so the route never tries
   // to publish a "naked" post.
+  // Phase 14L.2 — also consults media_status / media_error.
   if (!options.bookkeepingOnly) {
     const media = validateMediaReadiness({
       platform: row.platform,
@@ -270,6 +281,8 @@ export function validateManualPostingGate(
       image_prompt: row.image_prompt ?? null,
       video_prompt: row.video_prompt ?? null,
       campaign_asset_id: row.campaign_asset_id ?? null,
+      media_status: row.media_status ?? null,
+      media_error: row.media_error ?? null,
     })
     if (media.blocked) {
       for (const r of media.reasons) reasons.push(r)
@@ -408,10 +421,17 @@ async function writeAudit(opts: AuditWriteOpts): Promise<{ ok: boolean; reason: 
 // generation flow). `video_prompt` has no source today; it stays absent
 // from the SELECT and the validator treats it as null.
 //
+// Phase 14L.2 — adds row-level image_url / video_url / media_status /
+// media_error from content_calendar (migration 032). Organic rows have no
+// campaign_asset row to JOIN against, so the row-level columns are the
+// only source of media for them. Campaign rows still prefer the linked
+// asset's URLs (it carries `asset_type` + provenance metadata) and fall
+// back to the row-level columns when the asset has not been generated yet.
+//
 // EXPORTED so manual-poster routes can use the same SELECT and pass a
 // consistent shape to validateManualPostingGate.
 export const POSTING_GATE_ROW_SELECT_WITH_MEDIA =
-  'id, status, platform, caption, posting_status, posting_gate_approved, posting_gate_approved_at, posting_gate_approved_by, posting_gate_notes, queued_for_posting_at, manual_posting_only, posting_block_reason, posted_at, campaign_asset_id, tracking_url, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
+  'id, status, platform, caption, posting_status, posting_gate_approved, posting_gate_approved_at, posting_gate_approved_by, posting_gate_notes, queued_for_posting_at, manual_posting_only, posting_block_reason, posted_at, campaign_asset_id, tracking_url, image_prompt, image_url, video_url, media_status, media_error, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
 
 const ROW_SELECT = POSTING_GATE_ROW_SELECT_WITH_MEDIA
 
@@ -419,6 +439,11 @@ type CampaignAssetJoin = { image_url: string | null; video_url: string | null; a
 
 interface RawJoinedRow extends Omit<PostingGateRow, 'image_url' | 'video_url'> {
   image_prompt?: string | null
+  // Row-level media columns from migration 032. Captured separately from the
+  // flattened image_url/video_url so the merge below can prefer the joined
+  // campaign_asset values while still falling back to row-level columns.
+  image_url?: string | null
+  video_url?: string | null
   campaign_asset?: CampaignAssetJoin | CampaignAssetJoin[] | null
 }
 
@@ -430,19 +455,25 @@ interface RawJoinedRow extends Omit<PostingGateRow, 'image_url' | 'video_url'> {
  * Supabase-js types the joined relation as an array (it can't statically
  * tell that `campaign_asset_id` is unique). At runtime a 1:1 FK returns a
  * single object. Handle both shapes defensively.
+ *
+ * Phase 14L.2 — when the campaign_asset row has no media yet, fall back to
+ * the row-level image_url/video_url (migration 032). Organic rows always
+ * read from the row-level columns because they have no campaign_asset.
  */
 function flattenJoined(raw: RawJoinedRow | null): PostingGateRow | null {
   if (!raw) return null
-  const { campaign_asset, ...rest } = raw
+  const { campaign_asset, image_url: rowImage, video_url: rowVideo, ...rest } = raw
   const asset: CampaignAssetJoin | null = Array.isArray(campaign_asset)
     ? (campaign_asset[0] ?? null)
     : (campaign_asset ?? null)
   return {
     ...rest,
-    image_url: asset?.image_url ?? null,
-    video_url: asset?.video_url ?? null,
+    image_url: asset?.image_url ?? rowImage ?? null,
+    video_url: asset?.video_url ?? rowVideo ?? null,
     image_prompt: rest.image_prompt ?? null,
     video_prompt: null,
+    media_status: rest.media_status ?? null,
+    media_error: rest.media_error ?? null,
   }
 }
 

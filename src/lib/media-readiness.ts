@@ -95,9 +95,46 @@ export interface MediaReadinessRow {
    * campaign plan's "media_required" flag (added in a future phase).
    */
   media_required?: boolean | null
+  /**
+   * Phase 14L.2 — `content_calendar.media_status`. When the worker has run,
+   * this is one of 'pending' | 'ready' | 'failed' | 'skipped'. NULL on rows
+   * that predate migration 032 OR were never picked up by the worker; in
+   * that case the validator falls back to the platform-rule check below.
+   *
+   * Block rules:
+   *   'failed'  → block with `media_error` if available
+   *   'skipped' → block when the platform requires media; pass otherwise
+   *   'ready'   → still verify image_url/video_url exists (column trusts but verifies)
+   *   'pending' → no block on its own; platform rule decides
+   *   null      → no block on its own; platform rule decides
+   */
+  media_status?: MediaStatus | string | null
+  /**
+   * Phase 14L.2 — most recent worker error. Only consulted when
+   * media_status === 'failed'. Free-text; no length cap here (the worker
+   * truncates to 1000 chars before insert).
+   */
+  media_error?: string | null
 }
 
-export type MediaReadinessOutcome = 'ready' | 'missing' | 'text-only-allowed'
+export type MediaReadinessOutcome = 'ready' | 'missing' | 'text-only-allowed' | 'failed'
+
+/**
+ * Phase 14L.2 — per-row media generation state, sourced from
+ * content_calendar.media_status (migration 032). NULL is treated as
+ * "no opinion" (platform rules apply as before 14L.2). 'ready' still
+ * requires the underlying URL to actually be present — the gate trusts
+ * the column but verifies.
+ */
+export type MediaStatus = 'pending' | 'ready' | 'failed' | 'skipped'
+
+export const MEDIA_STATUS_VALUES: readonly MediaStatus[] = ['pending', 'ready', 'failed', 'skipped'] as const
+
+export function normalizeMediaStatus(input: string | null | undefined): MediaStatus | null {
+  if (!input || typeof input !== 'string') return null
+  const v = input.trim().toLowerCase()
+  return (MEDIA_STATUS_VALUES as readonly string[]).includes(v) ? (v as MediaStatus) : null
+}
 
 export interface MediaReadinessResult {
   outcome: MediaReadinessOutcome
@@ -110,6 +147,8 @@ export interface MediaReadinessResult {
   /** Convenience flags for UI. */
   has_image: boolean
   has_video: boolean
+  /** Phase 14L.2 — resolved media_status (null when row didn't carry one). */
+  media_status: MediaStatus | null
 }
 
 function nonEmpty(v: string | null | undefined): boolean {
@@ -123,6 +162,12 @@ function nonEmpty(v: string | null | undefined): boolean {
  *   "missing required image_url for Instagram"
  *   "missing required video_url for TikTok"
  *   "campaign media prompt exists but generated media is missing"
+ *
+ * Phase 14L.2 — also consults `media_status` (migration 032):
+ *   'failed'  → block with `media_error` if available
+ *   'skipped' → block when platform requires media; otherwise text-only OK
+ *   'ready'   → still verifies image_url/video_url exists ("trust but verify")
+ *   'pending' / null → falls through to platform-rule check
  */
 export function validateMediaReadiness(row: MediaReadinessRow): MediaReadinessResult {
   const rule = getRequiredMediaForPlatform(row.platform)
@@ -130,11 +175,23 @@ export function validateMediaReadiness(row: MediaReadinessRow): MediaReadinessRe
   const has_video = nonEmpty(row.video_url)
   const reasons: string[] = []
   const platformLabel = row.platform ? row.platform.toLowerCase().trim() : ''
+  const media_status = normalizeMediaStatus(row.media_status as string | null | undefined)
+  const platformRequiresMedia = rule.image === 'required' || rule.video === 'required'
+
+  // 0. media_status short-circuits — Phase 14L.2.
+  // 'failed' is unconditional: the worker tried, the operator should fix the
+  // upstream cause before posting. 'skipped' only blocks when the platform
+  // actually requires media; on text-OK platforms it's a no-op.
+  if (media_status === 'failed') {
+    const detail = nonEmpty(row.media_error) ? `: ${row.media_error!.trim()}` : ''
+    reasons.push(`media generation failed${detail}`)
+  } else if (media_status === 'skipped' && platformRequiresMedia && !has_image && !has_video) {
+    reasons.push(`media_status='skipped' but platform ${platformLabel || 'this platform'} requires media`)
+  }
 
   // 1. Platform-level required media.
   if (rule.either_satisfies) {
-    const hardRequired = rule.image === 'required' || rule.video === 'required'
-    if (hardRequired && !has_image && !has_video) {
+    if (platformRequiresMedia && !has_image && !has_video) {
       // Phrase the message around image_url — matches the Phase 14L spec
       // example for Instagram. Falls back to a generic phrase if a future
       // platform with either_satisfies + required is added.
@@ -174,13 +231,24 @@ export function validateMediaReadiness(row: MediaReadinessRow): MediaReadinessRe
     }
   }
 
+  // 4. Phase 14L.2 — "trust but verify" for media_status='ready'. If the
+  // worker claimed success but the URL is missing on a platform that needs
+  // it, surface that explicitly. (When platform doesn't need media, an empty
+  // URL alongside 'ready' is harmless.)
+  if (media_status === 'ready' && platformRequiresMedia && !has_image && !has_video) {
+    if (!reasons.some(r => r.startsWith('missing required'))) {
+      reasons.push(`media_status='ready' but no image_url/video_url present`)
+    }
+  }
+
   if (reasons.length > 0) {
-    return { outcome: 'missing', blocked: true, reasons, rule, has_image, has_video }
+    const outcome: MediaReadinessOutcome = media_status === 'failed' ? 'failed' : 'missing'
+    return { outcome, blocked: true, reasons, rule, has_image, has_video, media_status }
   }
   if (has_image || has_video) {
-    return { outcome: 'ready', blocked: false, reasons: [], rule, has_image, has_video }
+    return { outcome: 'ready', blocked: false, reasons: [], rule, has_image, has_video, media_status }
   }
-  return { outcome: 'text-only-allowed', blocked: false, reasons: [], rule, has_image, has_video }
+  return { outcome: 'text-only-allowed', blocked: false, reasons: [], rule, has_image, has_video, media_status }
 }
 
 export interface PerPlatformReadinessCounts {
@@ -234,12 +302,14 @@ export function summarizeMediaReadiness(rows: MediaReadinessRow[]): MediaReadine
 
 /**
  * Convenience label for the dashboard's small media-status badge:
- *   'ready'     → "Media ready"
- *   'missing'   → "Media missing"
- *   'text-only' → "Text-only allowed"
+ *   'ready'             → "Media ready"
+ *   'missing'           → "Media missing"
+ *   'failed'            → "Media failed"
+ *   'text-only-allowed' → "Text-only allowed"
  */
 export function getMediaReadinessLabel(outcome: MediaReadinessOutcome): string {
   if (outcome === 'ready') return 'Media ready'
   if (outcome === 'missing') return 'Media missing'
+  if (outcome === 'failed') return 'Media failed'
   return 'Text-only allowed'
 }
