@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { TwitterApi } from 'twitter-api-v2'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { validateManualPostingGate } from '@/lib/posting-gate'
+import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
 
 const TWITTER_MAX_LENGTH = 280
 
@@ -57,18 +57,23 @@ export async function POST(request: NextRequest) {
   if (!content_id) return NextResponse.json({ error: 'content_id required' }, { status: 400 })
 
   const admin = createAdminClient()
-  const { data: post, error: fetchErr } = await admin
+  // Phase 14L — joined fetch so the gate sees image_url / video_url.
+  const { data: rawPost, error: fetchErr } = await admin
     .from('content_calendar')
-    .select('*')
+    .select(`hashtags, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
     .eq('id', content_id)
     .single()
 
-  if (fetchErr || !post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+  if (fetchErr || !rawPost) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+
+  const post = flattenPostingGateRow(rawPost)
+  if (!post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
 
   // Phase 14K.0.5 — manual-posting gate. Must pass BEFORE any platform call
   // or status mutation. Subsumes the legacy `status === 'approved'` check.
   // Returns 403 with structured reasons; route never touches the platform if
-  // the gate refuses.
+  // the gate refuses. Phase 14L — gate also runs validateMediaReadiness
+  // (Twitter is text-OK, so absence of media is not a block here).
   const gate = validateManualPostingGate(post, { supportedPlatforms: ['twitter'] })
   if (!gate.allowed) {
     return NextResponse.json(
@@ -85,7 +90,8 @@ export async function POST(request: NextRequest) {
       accessSecret,
     })
 
-    const text = buildTweetText(post.caption ?? '', post.hashtags ?? null)
+    const rawHashtags = (rawPost as unknown as { hashtags?: string[] | null }).hashtags
+    const text = buildTweetText(post.caption ?? '', rawHashtags ?? null)
 
     let mediaId: string | null = null
     if (post.image_url) {

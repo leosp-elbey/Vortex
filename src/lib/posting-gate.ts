@@ -11,6 +11,7 @@
 // Server-side only (uses createAdminClient).
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { validateMediaReadiness } from '@/lib/media-readiness'
 
 export type PostingStatus = 'idle' | 'ready' | 'blocked'
 
@@ -36,6 +37,18 @@ export interface PostingGateRow {
   campaign_asset_id?: string | null
   tracking_url?: string | null
   manual_posting_only?: boolean | null
+
+  // Phase 14L — media readiness inputs. Optional because legacy callers may
+  // not have plumbed them through yet; when absent, the media-readiness
+  // sub-check treats the row as "no media available" (which blocks platforms
+  // that require media). Campaign rows get these from a JOIN against
+  // campaign_assets via content_calendar.campaign_asset_id; organic rows
+  // currently have no source for image_url/video_url and will be flagged
+  // missing on visual platforms.
+  image_url?: string | null
+  video_url?: string | null
+  image_prompt?: string | null
+  video_prompt?: string | null
 }
 
 export interface EligibilityResult {
@@ -81,6 +94,31 @@ export function getPostingGateBlockReason(row: PostingGateRow): string | null {
   }
   if (row.campaign_asset_id && !row.tracking_url) {
     return 'Campaign-originated row is missing a tracking_url. Re-push from the campaign dashboard to materialize it.'
+  }
+
+  // Phase 14L — media readiness gate. Run only when media inputs were plumbed
+  // through (image_url / video_url / *_prompt fields present on the row). When
+  // ALL media inputs are undefined, assume the caller didn't fetch them and
+  // skip — the manual posting validator below will catch it on the post path.
+  // When at least one is defined (or the platform has hard requirements), let
+  // validateMediaReadiness decide.
+  const mediaInputsPresent =
+    row.image_url !== undefined ||
+    row.video_url !== undefined ||
+    row.image_prompt !== undefined ||
+    row.video_prompt !== undefined
+  if (mediaInputsPresent) {
+    const media = validateMediaReadiness({
+      platform: row.platform,
+      image_url: row.image_url ?? null,
+      video_url: row.video_url ?? null,
+      image_prompt: row.image_prompt ?? null,
+      video_prompt: row.video_prompt ?? null,
+      campaign_asset_id: row.campaign_asset_id ?? null,
+    })
+    if (media.blocked && media.reasons.length > 0) {
+      return media.reasons[0]
+    }
   }
   return null
 }
@@ -218,6 +256,26 @@ export function validateManualPostingGate(
     }
   }
 
+  // Phase 14L — media readiness. Skipped in bookkeeping-only mode because
+  // the route doesn't actually call a platform API; the operator already
+  // posted via the platform's own UI and is just recording the result.
+  // For real platform-poster routes, missing required media (e.g. an
+  // Instagram row without image_url) blocks here so the route never tries
+  // to publish a "naked" post.
+  if (!options.bookkeepingOnly) {
+    const media = validateMediaReadiness({
+      platform: row.platform,
+      image_url: row.image_url ?? null,
+      video_url: row.video_url ?? null,
+      image_prompt: row.image_prompt ?? null,
+      video_prompt: row.video_prompt ?? null,
+      campaign_asset_id: row.campaign_asset_id ?? null,
+    })
+    if (media.blocked) {
+      for (const r of media.reasons) reasons.push(r)
+    }
+  }
+
   return {
     allowed: reasons.length === 0,
     reasons,
@@ -343,17 +401,69 @@ async function writeAudit(opts: AuditWriteOpts): Promise<{ ok: boolean; reason: 
   }
 }
 
-const ROW_SELECT =
-  'id, status, platform, caption, posting_status, posting_gate_approved, posting_gate_approved_at, posting_gate_approved_by, posting_gate_notes, queued_for_posting_at, manual_posting_only, posting_block_reason, posted_at, campaign_asset_id, tracking_url'
+// Phase 14L — joined select. `campaign_asset` is a 1:1 relation through
+// content_calendar.campaign_asset_id; we pull image_url / video_url from
+// the linked asset so the gate can run media-readiness checks. The
+// `image_prompt` column lives directly on content_calendar (legacy organic
+// generation flow). `video_prompt` has no source today; it stays absent
+// from the SELECT and the validator treats it as null.
+//
+// EXPORTED so manual-poster routes can use the same SELECT and pass a
+// consistent shape to validateManualPostingGate.
+export const POSTING_GATE_ROW_SELECT_WITH_MEDIA =
+  'id, status, platform, caption, posting_status, posting_gate_approved, posting_gate_approved_at, posting_gate_approved_by, posting_gate_notes, queued_for_posting_at, manual_posting_only, posting_block_reason, posted_at, campaign_asset_id, tracking_url, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
+
+const ROW_SELECT = POSTING_GATE_ROW_SELECT_WITH_MEDIA
+
+type CampaignAssetJoin = { image_url: string | null; video_url: string | null; asset_type: string | null }
+
+interface RawJoinedRow extends Omit<PostingGateRow, 'image_url' | 'video_url'> {
+  image_prompt?: string | null
+  campaign_asset?: CampaignAssetJoin | CampaignAssetJoin[] | null
+}
+
+/**
+ * Phase 14L — flatten the joined campaign_asset into top-level image_url /
+ * video_url so downstream validators see a single shape. Returning a
+ * PostingGateRow keeps the interface stable across the codebase.
+ *
+ * Supabase-js types the joined relation as an array (it can't statically
+ * tell that `campaign_asset_id` is unique). At runtime a 1:1 FK returns a
+ * single object. Handle both shapes defensively.
+ */
+function flattenJoined(raw: RawJoinedRow | null): PostingGateRow | null {
+  if (!raw) return null
+  const { campaign_asset, ...rest } = raw
+  const asset: CampaignAssetJoin | null = Array.isArray(campaign_asset)
+    ? (campaign_asset[0] ?? null)
+    : (campaign_asset ?? null)
+  return {
+    ...rest,
+    image_url: asset?.image_url ?? null,
+    video_url: asset?.video_url ?? null,
+    image_prompt: rest.image_prompt ?? null,
+    video_prompt: null,
+  }
+}
+
+/**
+ * EXPORTED helper for manual-poster routes. Takes the raw `*, campaign_asset:campaign_assets(...)`
+ * shape supabase returned and flattens it into a PostingGateRow that
+ * `validateManualPostingGate` will accept.
+ */
+export function flattenPostingGateRow(raw: unknown): PostingGateRow | null {
+  if (!raw || typeof raw !== 'object') return null
+  return flattenJoined(raw as RawJoinedRow)
+}
 
 async function loadRow(supabase: ReturnType<typeof createAdminClient>, id: string): Promise<PostingGateRow | null> {
   const { data, error } = await supabase
     .from('content_calendar')
     .select(ROW_SELECT)
     .eq('id', id)
-    .maybeSingle<PostingGateRow>()
+    .maybeSingle<RawJoinedRow>()
   if (error) throw new Error(`content_calendar lookup failed: ${error.message}`)
-  return data ?? null
+  return flattenJoined(data)
 }
 
 /**
@@ -425,10 +535,10 @@ export async function markReadyForPosting(opts: MarkReadyOptions): Promise<GateA
     .update(payload)
     .eq('id', opts.contentCalendarId)
     .select(ROW_SELECT)
-    .maybeSingle<PostingGateRow>()
+    .maybeSingle<RawJoinedRow>()
   if (error) return bareResult(false, `update failed: ${error.message}`, row)
 
-  const finalRow = updated ?? row
+  const finalRow = flattenJoined(updated) ?? row
   const auditRes = await writeAudit({
     supabase,
     contentCalendarId: opts.contentCalendarId,
@@ -477,10 +587,10 @@ export async function removeFromPostingQueue(opts: UnqueueOptions): Promise<Gate
     .update(payload)
     .eq('id', opts.contentCalendarId)
     .select(ROW_SELECT)
-    .maybeSingle<PostingGateRow>()
+    .maybeSingle<RawJoinedRow>()
   if (error) return bareResult(false, `update failed: ${error.message}`, row)
 
-  const finalRow = updated ?? row
+  const finalRow = flattenJoined(updated) ?? row
   const auditRes = await writeAudit({
     supabase,
     contentCalendarId: opts.contentCalendarId,

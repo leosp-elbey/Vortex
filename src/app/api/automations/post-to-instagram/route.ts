@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { validateManualPostingGate } from '@/lib/posting-gate'
+import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
 
 const IG_ACCOUNT_ID = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID
 const IG_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN
@@ -94,16 +94,25 @@ export async function POST(request: NextRequest) {
   if (!content_id) return NextResponse.json({ error: 'content_id required' }, { status: 400 })
 
   const admin = createAdminClient()
-  const { data: post, error: fetchErr } = await admin
+  // Phase 14L — fetch with hashtags (for caption building) plus the joined
+  // SELECT so the gate sees image_url/video_url from the linked campaign_assets row.
+  const { data: rawPost, error: fetchErr } = await admin
     .from('content_calendar')
-    .select('*')
+    .select(`hashtags, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
     .eq('id', content_id)
     .single()
 
-  if (fetchErr || !post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+  if (fetchErr || !rawPost) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+
+  // Flatten campaign_asset join into top-level image_url / video_url before
+  // invoking the gate.
+  const post = flattenPostingGateRow(rawPost)
+  if (!post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
 
   // Phase 14K.0.5 — manual-posting gate. Must pass BEFORE any platform call
   // or status mutation. Subsumes the legacy `status === 'approved'` check.
+  // Phase 14L — gate now also runs validateMediaReadiness, so an Instagram
+  // row with no image_url returns 403 here instead of falling into Meta's API.
   const gate = validateManualPostingGate(post, { supportedPlatforms: ['instagram'] })
   if (!gate.allowed) {
     return NextResponse.json(
@@ -113,10 +122,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const hashtags = post.hashtags?.map((h: string) => `#${h}`).join(' ') ?? ''
-    const caption = `${post.caption}\n\n${hashtags}`.trim()
+    const rawHashtags = (rawPost as unknown as { hashtags?: string[] | null }).hashtags
+    const hashtags = rawHashtags?.map((h: string) => `#${h}`).join(' ') ?? ''
+    const caption = `${post.caption ?? ''}\n\n${hashtags}`.trim()
 
-    const containerId = await createMediaContainer(caption, post.image_url ?? undefined)
+    // Image URL — sourced from the linked campaign_asset (Phase 14L).
+    const imageUrl = post.image_url ?? undefined
+    const containerId = await createMediaContainer(caption, imageUrl)
     await waitForContainerReady(containerId)
     const igPostId = await publishContainer(containerId)
 

@@ -5,6 +5,11 @@ import { formatDate, getStatusColor } from '@/lib/utils'
 import type { ContentCalendarItem } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { useToast, Toaster } from '@/components/ui/toast'
+import {
+  validateMediaReadiness,
+  getMediaReadinessLabel,
+  type MediaReadinessOutcome,
+} from '@/lib/media-readiness'
 
 type ExtendedContentItem = ContentCalendarItem & {
   image_url?: string | null
@@ -17,11 +22,17 @@ type ExtendedContentItem = ContentCalendarItem & {
   posting_block_reason?: string | null
   campaign_asset_id?: string | null
   tracking_url?: string | null
+  // Phase 14L — media readiness inputs. `image_prompt` is on content_calendar
+  // directly; `image_url` / `video_url` come from the joined campaign_asset.
+  image_prompt?: string | null
+  campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | null
 }
 
 // Phase 14J — Mirror of `getPostingGateBlockReason` from src/lib/posting-gate.ts.
 // Kept in sync by hand; if the rules diverge the dashboard's UI hint may differ
 // from the API rejection but the API always wins (reason flows back via toast).
+// Phase 14L — also runs validateMediaReadiness so the operator sees the same
+// "missing required image_url for Instagram" reason the API would surface.
 function getPostingGateBlockReason(item: ExtendedContentItem): string | null {
   if (item.status === 'rejected') return 'Row is rejected.'
   if (item.status === 'posted') return 'Already posted.'
@@ -29,7 +40,30 @@ function getPostingGateBlockReason(item: ExtendedContentItem): string | null {
   if (!item.platform) return 'No platform set.'
   if (!item.caption) return 'No caption.'
   if (item.campaign_asset_id && !item.tracking_url) return 'Missing tracking_url — re-push from the campaign dashboard.'
+  const media = computeMediaReadiness(item)
+  if (media.blocked && media.reasons[0]) return media.reasons[0]
   return null
+}
+
+/**
+ * Phase 14L — pull media readiness inputs from the row (joined campaign_asset
+ * for image/video URL; row's own image_prompt) and run the shared validator.
+ */
+function computeMediaReadiness(item: ExtendedContentItem) {
+  return validateMediaReadiness({
+    platform: item.platform,
+    image_url: item.campaign_asset?.image_url ?? item.image_url ?? null,
+    video_url: item.campaign_asset?.video_url ?? null,
+    image_prompt: item.image_prompt ?? null,
+    video_prompt: null,
+    campaign_asset_id: item.campaign_asset_id ?? null,
+  })
+}
+
+const MEDIA_BADGE_STYLES: Record<MediaReadinessOutcome, string> = {
+  ready: 'bg-emerald-50 text-emerald-700',
+  missing: 'bg-amber-50 text-amber-700',
+  'text-only-allowed': 'bg-slate-100 text-slate-700',
 }
 
 const platformEmoji: Record<string, string> = {
@@ -54,8 +88,12 @@ export default function ContentPage() {
 
   useEffect(() => {
     const supabase = createClient()
-    supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
-      .then(({ data }) => setContent((data || []) as ExtendedContentItem[]))
+    // Phase 14L — join campaign_assets to surface media readiness in the UI.
+    supabase
+      .from('content_calendar')
+      .select('*, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setContent((data || []) as unknown as ExtendedContentItem[]))
   }, [])
 
   const handleGenerate = async () => {
@@ -65,8 +103,11 @@ export default function ContentPage() {
       const result = await res.json()
       if (!res.ok) throw new Error(result.error || 'Failed to generate')
       const supabase = createClient()
-      const { data } = await supabase.from('content_calendar').select('*').order('created_at', { ascending: false })
-      setContent((data || []) as ExtendedContentItem[])
+      const { data } = await supabase
+        .from('content_calendar')
+        .select('*, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)')
+        .order('created_at', { ascending: false })
+      setContent((data || []) as unknown as ExtendedContentItem[])
       show(`Generated ${result.generated} posts · ${result.images_generated ?? 0} images created`)
     } catch (err) {
       show(err instanceof Error ? err.message : 'Failed to generate content', 'error')
@@ -213,7 +254,13 @@ export default function ContentPage() {
             <p>No content yet. Click &quot;Generate This Week&quot; to create posts with AI-generated images.</p>
           </div>
         ) : (
-          content.map((item) => (
+          content.map((item) => {
+            // Phase 14L — compute media readiness once per row so the same
+            // outcome drives the badge AND the post-button gate.
+            const media = computeMediaReadiness(item)
+            const mediaBadgeLabel = getMediaReadinessLabel(media.outcome)
+            const previewImage = item.campaign_asset?.image_url ?? item.image_url ?? null
+            return (
             <div key={item.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="p-6">
                 <div className="flex items-start justify-between gap-4">
@@ -221,9 +268,9 @@ export default function ContentPage() {
                   {/* Left: image + content */}
                   <div className="flex items-start gap-4 flex-1 min-w-0">
                     {/* Image preview or platform icon */}
-                    {item.image_url ? (
+                    {previewImage ? (
                       <img
-                        src={item.image_url}
+                        src={previewImage}
                         alt="Post image"
                         className="w-20 h-20 rounded-lg object-cover flex-shrink-0 border border-gray-100"
                       />
@@ -241,11 +288,17 @@ export default function ContentPage() {
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusColor(item.status)}`}>
                           {item.status}
                         </span>
-                        {item.image_url && (
+                        {previewImage && (
                           <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">
                             🎨 AI Image
                           </span>
                         )}
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${MEDIA_BADGE_STYLES[media.outcome]}`}
+                          title={media.reasons[0] ?? mediaBadgeLabel}
+                        >
+                          {mediaBadgeLabel}
+                        </span>
                         <span className="text-xs text-gray-400">Week of {formatDate(item.week_of)}</span>
                       </div>
 
@@ -305,10 +358,14 @@ export default function ContentPage() {
                       <>
                         {/* Phase 14K.0.5 — gate platform-Post + Mark Posted buttons.
                             Approved-but-idle rows show ONLY Mark Ready; platform
-                            posting buttons appear after Mark Ready passes the gate. */}
+                            posting buttons appear after Mark Ready passes the gate.
+                            Phase 14L — also hide platform Post buttons when media
+                            readiness is blocked. Mark Posted (bookkeeping) stays
+                            visible because the operator may have posted manually
+                            via the platform's own UI. */}
                         {item.posting_status === 'ready' && item.posting_gate_approved === true && (
                           <>
-                            {item.platform === 'instagram' && (
+                            {!media.blocked && item.platform === 'instagram' && (
                               <button
                                 onClick={() => postToInstagram(item)}
                                 className="text-xs bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg hover:bg-pink-200 transition-colors font-medium"
@@ -316,7 +373,7 @@ export default function ContentPage() {
                                 📸 Post to IG
                               </button>
                             )}
-                            {item.platform === 'facebook' && (
+                            {!media.blocked && item.platform === 'facebook' && (
                               <button
                                 onClick={() => postToFacebook(item)}
                                 className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors font-medium"
@@ -324,7 +381,7 @@ export default function ContentPage() {
                                 👥 Post to FB
                               </button>
                             )}
-                            {item.platform === 'tiktok' && (
+                            {!media.blocked && item.platform === 'tiktok' && (
                               <a
                                 href="https://www.tiktok.com/creator-center/upload"
                                 target="_blank"
@@ -334,13 +391,21 @@ export default function ContentPage() {
                                 🎵 Upload to TikTok
                               </a>
                             )}
-                            {item.platform === 'twitter' && (
+                            {!media.blocked && item.platform === 'twitter' && (
                               <button
                                 onClick={() => postToTwitter(item)}
                                 className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium"
                               >
                                 🐦 Post to X
                               </button>
+                            )}
+                            {media.blocked && (
+                              <span
+                                className="text-[10px] text-amber-700 italic max-w-[160px] text-right"
+                                title={media.reasons.join('; ')}
+                              >
+                                Post hidden — {media.reasons[0]}
+                              </span>
                             )}
                             <button
                               onClick={() => updateStatus(item.id, 'posted')}
@@ -403,7 +468,8 @@ export default function ContentPage() {
                 </div>
               </div>
             </div>
-          ))
+            )
+          })
         )}
       </div>
 

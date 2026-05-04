@@ -1,8 +1,58 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14K.0.5 closed. Phase 14K.0.6 in working tree — closes `/api/content` PATCH bypass for the `→ posted` transition; typecheck + build pass; awaiting commit + deploy.)
-**Last known good commit:** `0c81df2` — "Phase 14K.0.5: gate manual platform-post routes"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14K.0.5 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14K.0.6 saved + pushed. Phase 14L in working tree — media-readiness library, posting-gate media check, caption legacy-link cleanup, dashboard media badge; typecheck + build pending verification; live posting still BLOCKED.)
+**Last known good commit:** `6b86b1a` — "Phase 14K.0.6: gate /api/content PATCH ->posted transition with validateManualPostingGate(bookkeepingOnly)"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14K.0.6 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+
+**Live posting status:** STILL BLOCKED. Phase 14L gates posting on (1) branded captions and (2) media readiness. Live autoposter (Phase 14K.1) does not start until both blockers are clean and 14L deploys cleanly.
+
+---
+
+## Phase 14L — Media Readiness + Caption Link Finalization (in working tree, 2026-05-03 — pre-flight blocker for live autoposter; live posting still disabled)
+
+Phase 14L closes two pre-flight blockers identified before Phase 14K.1 (live autoposter):
+
+1. **Visible captions** can still contain `https://myvortex365.com/leosp` even when `tracking_url` is correctly branded. Public social posts must show the `vortextrips.com/t/<slug>` link, not the backend portal URL.
+2. **Media readiness**: rows have no enforcement that an Instagram post has an image, that a TikTok post has a video, or that a row whose campaign attached an image_prompt actually has the resolved image_url before posting.
+
+### Files added / changed
+
+| File | Status | Purpose |
+|---|---|---|
+| `src/lib/media-readiness.ts` | **new** | Pure validators: `getRequiredMediaForPlatform`, `validateMediaReadiness`, `summarizeMediaReadiness`, `getMediaReadinessLabel` |
+| `src/lib/posting-gate.ts` | **changed** | `PostingGateRow` gains optional `image_url`/`video_url`/`image_prompt`/`video_prompt`; `getPostingGateBlockReason` and `validateManualPostingGate` now run media readiness; exported `POSTING_GATE_ROW_SELECT_WITH_MEDIA` and `flattenPostingGateRow` so platform-poster routes can fetch the joined shape consistently |
+| `src/lib/autoposter-gate.ts` | **changed** | `ContentCalendarRow` gains media inputs; ROW_SELECT now joins `campaign_assets`; `validateAutoposterCandidate` runs media readiness as final check |
+| `src/app/api/automations/post-to-instagram/route.ts` | **changed** | SELECT joins campaign_asset; uses flattened row for gate + image_url |
+| `src/app/api/automations/post-to-facebook/route.ts` | **changed** | Same pattern |
+| `src/app/api/automations/post-to-twitter/route.ts` | **changed** | Same pattern |
+| `src/app/api/content/route.ts` | **changed** | Bookkeeping-mode gate uses joined SELECT (media check skipped per spec) |
+| `src/app/dashboard/content/page.tsx` | **changed** | Renders "Media ready / Media missing / Text-only allowed" badge per row; hides per-platform Post buttons when `media.blocked` |
+| `scripts/cleanup-legacy-caption-links.js` | **new** | Safe one-shot cleanup. `--dry-run` (default) or `--apply`. Only touches unposted rows with branded `tracking_url`; preserves hashtags + copy; never modifies posted/rejected/archived rows |
+| `scripts/diagnose-media-readiness.js` | **new** | Read-only diagnostic; reports caption legacy-link debt, branded-URL count, IG/TikTok media gaps, prompt-without-media rows, total blocked count, posted_at no-mutation cross-check |
+
+### Migration created?
+
+**No.** All Phase 14L work uses existing columns + a JOIN through `content_calendar.campaign_asset_id` to `campaign_assets`. No schema changes.
+
+### Media readiness rules by platform
+
+| Platform | Image | Video | Either-satisfies |
+|---|---|---|---|
+| Instagram | required | required | **yes** (image OR video posts both work) |
+| TikTok | none | required | no — must be video |
+| YouTube | none | required | no |
+| Facebook | recommended | recommended | yes — text-only allowed |
+| Twitter / X | recommended | recommended | yes — text-only allowed |
+| Threads / LinkedIn | recommended | recommended | yes |
+| Email / SMS / Web | none | none | n/a |
+
+**Prompt-without-resolution rule:** for every platform, if `image_prompt` is non-empty and `image_url` is empty (or `video_prompt` non-empty + `video_url` empty), the gate refuses with `"campaign media prompt exists but generated media is missing"`.
+
+### Live posting
+
+Still BLOCKED. Phase 14L only ADDS gate refusals; it does not loosen any existing rule. Phase 14K.1 (live autoposter) requires both:
+- `node scripts/cleanup-legacy-caption-links.js --apply` to run cleanly with verification SQL returning 0
+- Media generation worker (future phase) to populate `campaign_assets.image_url` / `.video_url` so Instagram and TikTok rows actually pass the gate
 
 ---
 

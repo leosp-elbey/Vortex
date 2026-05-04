@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14J.2 + 14J.2.1 closed and prod-verified — branded redirect resolves with redirect_reason=campaign_cta_url, no VortexTrips 404. Phase 14K starting in DRY-RUN ONLY mode — autoposter eligibility surfacing, no live posts.)
-**Last code-shipping commit:** `dec7bb3` (Phase 14J.2.1 hardened redirect)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14J.2.1 deployed and verified on prod** · **Phase 14K starting (DRY-RUN ONLY)** — autoposter eligibility helper + manual-curl cron + dashboard dry-run note + diagnostic script. Hobby plan is at the 4-cron limit, so this dry-run route is NOT registered in `vercel.json` — it's invoked manually during this phase.
+**Last updated:** 2026-05-03 (Phase 14K.0.6 saved + pushed `6b86b1a`. Phase 14L in working tree — media-readiness validator + caption legacy-link cleanup + dashboard media badge; LIVE POSTING STILL DISABLED.)
+**Last code-shipping commit:** `6b86b1a` (Phase 14K.0.6 generic PATCH gate)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14K.0.6 deployed and verified on prod** · **Phase 14L in working tree** — media readiness library + caption-link cleanup + dashboard media badge. Live autoposter (Phase 14K.1) does NOT start until Phase 14L deploys cleanly AND the legacy-caption cleanup script has been applied.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,32 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14K.0.6 — Close `/api/content` PATCH bypass for `→ posted` (in working tree, 2026-05-03 — typecheck + build pass; awaiting commit + deploy).**
+**Phase 14L — Media Readiness + Caption Link Finalization (in working tree, 2026-05-03 — pre-flight blocker before Phase 14K.1 live autoposter).**
+
+Two pre-flight blockers identified before Phase 14K.1:
+
+1. Captions can still contain visible `https://myvortex365.com/leosp` even when `tracking_url` is correctly branded. Public posts must show `vortextrips.com/t/<slug>`.
+2. Media readiness is unenforced — Instagram rows can reach `posting_status='ready'` without an image_url, TikTok rows without a video_url. Live posting would fail at the platform API.
+
+**Built in 14L:**
+- [x] `src/lib/media-readiness.ts` — pure validators: `getRequiredMediaForPlatform`, `validateMediaReadiness`, `summarizeMediaReadiness`, `getMediaReadinessLabel`. Per-platform rules: IG = image OR video required, TikTok = video required, FB/Twitter = text-only OK.
+- [x] `src/lib/posting-gate.ts` — `PostingGateRow` extended with optional `image_url`/`video_url`/`image_prompt`/`video_prompt`; both `getPostingGateBlockReason` and `validateManualPostingGate` now run `validateMediaReadiness`. Bookkeeping-only mode skips the media check (operator may have posted manually). Exported `POSTING_GATE_ROW_SELECT_WITH_MEDIA` and `flattenPostingGateRow` so platform routes share a single fetch shape.
+- [x] `src/lib/autoposter-gate.ts` — `ContentCalendarRow` extended; ROW_SELECT joins campaign_assets; `validateAutoposterCandidate` runs media readiness as the final check.
+- [x] `src/app/api/automations/post-to-{instagram,facebook,twitter}/route.ts` — switched to the joined SELECT + `flattenPostingGateRow` so the gate sees the linked campaign_asset.image_url / video_url.
+- [x] `src/app/api/content/route.ts` — bookkeeping path uses joined SELECT for shape consistency.
+- [x] `src/app/dashboard/content/page.tsx` — renders "Media ready / Media missing / Text-only allowed" badge per row; per-platform Post buttons hidden when `media.blocked`. Mark Posted (bookkeeping) stays visible.
+- [x] `scripts/cleanup-legacy-caption-links.js` — `--dry-run` (default) or `--apply`. Only touches unposted rows with branded `tracking_url`; preserves hashtags + copy; never modifies posted/rejected/archived rows; prints verification SQL.
+- [x] `scripts/diagnose-media-readiness.js` — read-only. Reports caption legacy-link debt, branded-URL count, IG/TikTok media gaps, prompt-without-media count, total blocked count, and posted_at no-mutation cross-check.
+
+**No migrations created.** Phase 14L uses existing columns + the JOIN through `content_calendar.campaign_asset_id`.
+
+**Live posting still BLOCKED.** Phase 14L only ADDS gate refusals; no existing rule was loosened. Phase 14K.1 (live autoposter) will not begin until:
+- The caption cleanup script is applied (`--apply` returns 0 from the verification SQL)
+- A media-generation worker is built that populates `campaign_assets.image_url` / `.video_url` so visual-platform rows can pass the gate
+
+---
+
+### Pre-Phase-14L: Phase 14K.0.6 — Closed `/api/content` PATCH bypass for `→ posted` (saved + pushed `6b86b1a`).
 
 Phase 14K.0.5 shipped (`0c81df2`). The 3 manual platform-post routes are now gated. The last remaining bypass was `/api/content` PATCH — Mark Posted bookkeeping could still curl-flip a non-ready row to `status='posted'`. Phase 14K.0.6 closes that gap.
 

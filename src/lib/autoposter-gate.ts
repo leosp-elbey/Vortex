@@ -12,6 +12,7 @@
 // Server-only — uses createAdminClient. Do not import from client components.
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { validateMediaReadiness } from '@/lib/media-readiness'
 
 /**
  * Phase 14K — feature flag gate. MUST stay false for the entirety of Phase
@@ -48,6 +49,14 @@ export interface ContentCalendarRow {
   posted_at: string | null
   week_of: string | null
   created_at: string
+  // Phase 14L — media readiness inputs. Sourced from a JOIN against
+  // campaign_assets via campaign_asset_id (image_url / video_url) and
+  // from the row's own image_prompt column. video_prompt has no source
+  // today and stays null.
+  image_url: string | null
+  video_url: string | null
+  image_prompt: string | null
+  video_prompt: string | null
 }
 
 export interface AutoposterEligibleRow {
@@ -89,8 +98,28 @@ interface GetEligibleOptions {
   now?: Date
 }
 
+// Phase 14L — joined select. `campaign_asset` is a 1:1 relation via
+// content_calendar.campaign_asset_id; we pull image_url/video_url so the
+// dry-run media-readiness gate can run. `image_prompt` is a real column
+// on content_calendar (legacy organic-image generator). `video_prompt`
+// has no source today and is omitted; the validator treats it as null.
 const ROW_SELECT =
-  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at'
+  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, image_prompt, campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
+
+interface RawJoinedAutoposterRow extends Omit<ContentCalendarRow, 'image_url' | 'video_url' | 'video_prompt'> {
+  campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | null
+}
+
+function flattenAutoposterRow(raw: RawJoinedAutoposterRow): ContentCalendarRow {
+  const asset = raw.campaign_asset ?? null
+  return {
+    ...raw,
+    image_url: asset?.image_url ?? null,
+    video_url: asset?.video_url ?? null,
+    image_prompt: raw.image_prompt ?? null,
+    video_prompt: null,
+  }
+}
 
 /**
  * Walk through content_calendar candidates and split them into eligible vs.
@@ -144,7 +173,20 @@ export async function getAutoposterEligibleRows(
     throw new Error(`autoposter eligibility query failed: ${error.message}`)
   }
 
-  const rows = (data ?? []) as ContentCalendarRow[]
+  // Phase 14L — supabase-js types the joined `campaign_asset` field as an
+  // array of related rows; the runtime returns a single object (or null) for
+  // a 1:1 FK relation. Cast through unknown so flattenAutoposterRow can do
+  // the right thing whether it sees an object or an array.
+  const rawRows = ((data ?? []) as unknown) as Array<RawJoinedAutoposterRow & {
+    campaign_asset?: { image_url: string | null; video_url: string | null; asset_type: string | null } | { image_url: string | null; video_url: string | null; asset_type: string | null }[] | null
+  }>
+  const rows: ContentCalendarRow[] = rawRows.map(raw => {
+    // Normalize: if supabase returns an array, take the first element (1:1 FK).
+    const asset = Array.isArray(raw.campaign_asset)
+      ? (raw.campaign_asset[0] ?? null)
+      : (raw.campaign_asset ?? null)
+    return flattenAutoposterRow({ ...raw, campaign_asset: asset })
+  })
   const eligible: AutoposterEligibleRow[] = []
   const skipped: AutoposterSkippedRow[] = []
 
@@ -201,6 +243,19 @@ export function validateAutoposterCandidate(row: ContentCalendarRow): string | n
   }
   if (row.campaign_asset_id && !(row.tracking_url && row.tracking_url.trim())) {
     return 'campaign-originated row missing tracking_url'
+  }
+  // Phase 14L — media readiness. Run last so platform / caption / tracking
+  // failures surface first with their specific messages.
+  const media = validateMediaReadiness({
+    platform: row.platform,
+    image_url: row.image_url,
+    video_url: row.video_url,
+    image_prompt: row.image_prompt,
+    video_prompt: row.video_prompt,
+    campaign_asset_id: row.campaign_asset_id,
+  })
+  if (media.blocked && media.reasons.length > 0) {
+    return media.reasons[0]
   }
   return null
 }

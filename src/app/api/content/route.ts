@@ -14,10 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { validateManualPostingGate } from '@/lib/posting-gate'
-
-const POSTING_GATE_ROW_SELECT =
-  'id, status, platform, caption, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, posting_block_reason'
+import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
 
 export async function PATCH(request: NextRequest) {
   const supabase = await createClient()
@@ -33,15 +30,23 @@ export async function PATCH(request: NextRequest) {
   // skipping only platform/caption checks (this route doesn't post anywhere).
   // Other status transitions (approve, reject, reset) are NOT gated.
   if (status === 'posted') {
-    const { data: row, error: fetchErr } = await supabase
+    // Phase 14L — joined fetch so the gate sees the same shape as the
+    // platform-poster routes. Bookkeeping mode skips the media-readiness
+    // check anyway, but consistent SELECT keeps the gate input uniform.
+    const { data: rawRow, error: fetchErr } = await supabase
       .from('content_calendar')
-      .select(POSTING_GATE_ROW_SELECT)
+      .select(POSTING_GATE_ROW_SELECT_WITH_MEDIA)
       .eq('id', id)
       .maybeSingle()
 
     if (fetchErr) {
       return NextResponse.json({ error: `lookup failed: ${fetchErr.message}` }, { status: 500 })
     }
+    if (!rawRow) {
+      return NextResponse.json({ error: 'Row not found' }, { status: 404 })
+    }
+
+    const row = flattenPostingGateRow(rawRow)
     if (!row) {
       return NextResponse.json({ error: 'Row not found' }, { status: 404 })
     }
