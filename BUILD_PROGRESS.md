@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14K.0.6 saved + pushed `6b86b1a`. Phase 14L in working tree — media-readiness validator + caption legacy-link cleanup + dashboard media badge; LIVE POSTING STILL DISABLED.)
-**Last code-shipping commit:** `6b86b1a` (Phase 14K.0.6 generic PATCH gate)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14K.0.6 deployed and verified on prod** · **Phase 14L in working tree** — media readiness library + caption-link cleanup + dashboard media badge. Live autoposter (Phase 14K.1) does NOT start until Phase 14L deploys cleanly AND the legacy-caption cleanup script has been applied.
+**Last updated:** 2026-05-03 (Phase 14L deployed + verified at `810999e`. Phase 14L.1 in working tree — tracking URL backfill script + media generation planner, both dry-run only. No mutations. No platform calls.)
+**Last code-shipping commit:** `810999e` (Phase 14L media readiness gate + caption cleanup script)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L deployed and verified on prod** · **Phase 14L.1 in working tree** — tracking URL backfill + media generation planner, both DRY-RUN ONLY. Live autoposter (Phase 14K.1) does NOT start until backfill is applied AND a media-generation worker (Phase 14L.2) is built and run.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,33 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L — Media Readiness + Caption Link Finalization (in working tree, 2026-05-03 — pre-flight blocker before Phase 14K.1 live autoposter).**
+**Phase 14L.1 — Media Generation + Tracking URL Materialization Preflight (in working tree, 2026-05-03 — DRY-RUN scripts only, no mutations).**
+
+Phase 14L deployed at `810999e`. Diagnostic surfaced two outstanding blockers before Phase 14K.1 (live autoposter) can start:
+
+1. 7 unposted rows still contain visible `myvortex365.com/leosp` AND have `tracking_url IS NULL`, so the cleanup script can't rewrite them.
+2. 75 rows are blocked by media readiness (no image_url for Instagram, no video_url for TikTok, or `image_prompt` set without resolved `image_url`).
+
+**Investigation result:** all 7 null-tracking rows are campaign-originated under one campaign (`art-basel-miami-beach` 2026). Their `campaign_assets.tracking_url` is also null — they predate the Phase 14H.1 push-to-calendar tracking-URL materialization. Every field needed by `buildCampaignTrackingUrl` (event_slug, event_year, wave, asset_type, assetId, platform) is recoverable.
+
+**Built in 14L.1 (no mutations yet):**
+- [x] `scripts/inspect-null-tracking-rows.js` — read-only ground-truth inspection. Confirmed all 7 are campaign-linked under one campaign.
+- [x] `scripts/backfill-content-calendar-tracking-urls.js` — `--dry-run` (default) or `--apply`. Mirrors `buildCampaignTrackingUrl` in plain JS. Only touches unposted rows where `campaign_asset_id` is set, `tracking_url` is null, `posted_at` is null, and status is not posted/rejected/archived. UPDATEs re-check the safety filter inline. Back-fills `campaign_assets.tracking_url` only when null. `posted_at` no-mutation cross-check + verification SQL.
+- [x] `scripts/plan-media-generation.js` — read-only. Groups missing-media rows by (campaign × platform × asset_type), recommends Pexels (→ OpenAI image fallback) for images, HeyGen for video, reports key presence. Surfaces the `content_calendar.video_url` schema gap that organic TikTok rows hit.
+
+**Dry-run results:**
+- Backfill: 8 rows eligible (the 7 with legacy links + 1 more), 0 skipped, all under Art Basel campaign.
+- Media planner: 79 rows scanned → 47 already covered, 9 image-only, 16 video-only, 7 need both. PEXELS / OPENAI / HEYGEN keys all present.
+
+**Live posting still BLOCKED.** Phase 14L.1 only writes scripts. No `--apply` was run. Once approved:
+1. `node scripts/backfill-content-calendar-tracking-urls.js --apply` → 8 campaign rows get branded `vortextrips.com/t/...` URLs
+2. `node scripts/cleanup-legacy-caption-links.js --apply` → captions are rewritten to use the branded URL
+3. Build a media generation worker (Phase 14L.2) → populates `campaign_assets.image_url` / `.video_url` so visual-platform rows pass the gate
+4. Then Phase 14K.1 (live autoposter) becomes runnable
+
+---
+
+### Pre-Phase-14L.1: Phase 14L — Media Readiness + Caption Link Finalization (saved + pushed `810999e`).
 
 Two pre-flight blockers identified before Phase 14K.1:
 

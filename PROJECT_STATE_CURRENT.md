@@ -1,14 +1,60 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14K.0.6 saved + pushed. Phase 14L in working tree — media-readiness library, posting-gate media check, caption legacy-link cleanup, dashboard media badge; typecheck + build pending verification; live posting still BLOCKED.)
-**Last known good commit:** `6b86b1a` — "Phase 14K.0.6: gate /api/content PATCH ->posted transition with validateManualPostingGate(bookkeepingOnly)"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14K.0.6 deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14L deployed + verified at `810999e`. Phase 14L.1 in working tree — tracking URL backfill script + media generation planner, both dry-run only. No mutations. No platform calls.)
+**Last known good commit:** `810999e` — "Phase 14L: media readiness gate and caption legacy-link cleanup script"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L deployed and verified**; Supabase migrations 017-031 applied; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L gates posting on (1) branded captions and (2) media readiness. Live autoposter (Phase 14K.1) does not start until both blockers are clean and 14L deploys cleanly.
+**Live posting status:** STILL BLOCKED. Phase 14L.1 prepares two unblockers (tracking URL backfill, media generation planner) but takes no action until explicitly approved. Live autoposter (Phase 14K.1) does not start until backfill is applied + media generation is built and run.
 
 ---
 
-## Phase 14L — Media Readiness + Caption Link Finalization (in working tree, 2026-05-03 — pre-flight blocker for live autoposter; live posting still disabled)
+## Phase 14L.1 — Media Generation + Tracking URL Materialization Preflight (in working tree, 2026-05-03 — dry-run scripts only, no mutations, no platform calls)
+
+### Why tracking_url was null on those 7 rows
+
+All 7 unposted rows with the legacy `myvortex365.com/leosp` link in their captions are **campaign-originated** — every one links back via `campaign_asset_id` to a `campaign_assets` row whose `campaign_id` is `7ca6bc3f-5cb2-4bdf-9883-1470a31c8a8f` ("Art Basel Miami Beach" 2026, slug `art-basel-miami-beach`, cta_url `https://myvortex365.com/leosp`).
+
+Both `content_calendar.tracking_url` AND the linked `campaign_assets.tracking_url` are null on every one of them, which means they were inserted by a code path that ran **before Phase 14H.1** added tracking-URL materialization in `push-to-calendar` — or via an earlier asset-generator path that bypassed the helper. Phase 14H.1 only retroactively fills the row's tracking URL when a NEW push happens; it does not back-fill historical rows.
+
+The fix is mechanical: every field `buildCampaignTrackingUrl` needs (event_slug, event_year, wave, asset_type, assetId, platform) is recoverable from the asset → campaign chain. Backfill is safe.
+
+### Files added (this phase)
+
+| File | Purpose |
+|---|---|
+| `scripts/backfill-content-calendar-tracking-urls.js` | Resolution + writer. `--dry-run` (default) or `--apply`. Only touches unposted rows whose `campaign_asset_id` is set and `tracking_url` is null. Mirrors `buildCampaignTrackingUrl` logic in plain JS. Defensively re-checks the safety filter inside each UPDATE so a row that flips status mid-run is left alone. Back-fills `campaign_assets.tracking_url` only when currently null. Posted_at no-mutation cross-check. Verification SQL at the end. |
+| `scripts/plan-media-generation.js` | Read-only planner. Groups missing-media rows by (campaign × platform × asset_type), picks recommended source per group (Pexels → OpenAI image fallback for images, HeyGen for video), and reports key presence (PEXELS / OPENAI / HEYGEN). Surfaces a `content_calendar.video_url` schema gap that organic TikTok rows hit. No API calls; no mutations. |
+| `scripts/inspect-null-tracking-rows.js` | One-shot ground-truth inspection used to confirm all 7 rows are campaign-originated under one campaign. Read-only. Kept in repo for future debugging. |
+
+### Backfill dry-run results
+
+- 79 unposted rows have `tracking_url IS NULL`
+  - 71 organic (no `campaign_asset_id` — NOT backfillable; they never had a campaign tracking URL by design)
+  - **8 campaign-linked, all eligible**, all under the Art Basel campaign
+- Skipped: 0
+- Proposed URLs all resolve to `https://www.vortextrips.com/t/art-basel-miami-beach?utm_source=<platform>&utm_medium=event_campaign&utm_campaign=art-basel-miami-beach_2026_W<wave>&utm_content=social_post_<8charAssetId>`
+- `posted_at` count unchanged (22 → 22)
+
+### Media generation plan (dry-run)
+
+- 79 rows scanned → 47 already covered, 9 image-only, 16 video-only, 7 need both
+- Groups identified:
+  - Organic TikTok: 7 image + 21 video → image=Pexels(→OpenAI), video=HeyGen
+  - Organic Twitter: 5 image → Pexels
+  - Art Basel IG (asset_type=social_post, target table=campaign_assets): 2 image → Pexels
+  - Art Basel TikTok (asset_type=social_post, target table=campaign_assets): 2 video → HeyGen
+  - Organic FB: 1 image → Pexels
+  - Organic IG: 1 image → Pexels
+- All three generation API keys present (PEXELS_API_KEY, OPENAI_API_KEY, HEYGEN_API_KEY)
+- **Schema gap:** organic TikTok rows have no `content_calendar.video_url` column to land a generated URL. A follow-on phase must add the column OR route organic video through `campaign_assets` first.
+
+### Live posting
+
+Still BLOCKED. Phase 14L.1 only writes scripts; nothing has been applied. Once the operator approves `--apply` on the backfill, the 8 Art Basel rows can pass the cleanup script's branded-prefix gate; the legacy-link cleanup can then rewrite their captions. Media generation remains DRY-RUN until a generation worker is built (Phase 14L.2).
+
+---
+
+## Phase 14L — Media Readiness + Caption Link Finalization (deployed and verified, 2026-05-03 — commit `810999e`)
 
 Phase 14L closes two pre-flight blockers identified before Phase 14K.1 (live autoposter):
 
