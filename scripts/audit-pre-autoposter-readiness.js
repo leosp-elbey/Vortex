@@ -481,6 +481,75 @@ async function main() {
   }
 
   // ============================================================
+  // Check 9 — posted_at invariant (Phase 14M.2)
+  //
+  // Database invariant: every row with status='posted' must also carry a
+  // non-null posted_at, and vice versa. Without this, dashboards counting
+  // "posts shipped" via `status='posted'` will diverge from analytics
+  // queries that read posted_at, and bookkeeping audits will silently
+  // miss broken Mark Posted clicks.
+  //
+  // Per spec:
+  //   - status='posted' AND posted_at IS NULL  →  FAIL (this is what the
+  //     pre-Phase-14M.2 /api/content PATCH bug produced; the route fix +
+  //     scripts/repair-posted-at-invariants.js are the closure)
+  //   - status != 'posted' AND posted_at IS NOT NULL  →  WARN, NOT FAIL
+  //     (one historical artifact pre-dates this audit; clean up via the
+  //     repair script with explicit --repair-legacy-id flag)
+  // ============================================================
+  {
+    const { count: postedNoTs } = await supabase
+      .from('content_calendar')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'posted')
+      .is('posted_at', null)
+    const { data: orphans1 } = await supabase
+      .from('content_calendar')
+      .select('id, platform, created_at')
+      .eq('status', 'posted')
+      .is('posted_at', null)
+      .limit(20)
+
+    const { count: tsNotPosted } = await supabase
+      .from('content_calendar')
+      .select('id', { count: 'exact', head: true })
+      .neq('status', 'posted')
+      .not('posted_at', 'is', null)
+    const { data: orphans2 } = await supabase
+      .from('content_calendar')
+      .select('id, platform, status, posted_at')
+      .neq('status', 'posted')
+      .not('posted_at', 'is', null)
+      .limit(20)
+
+    const failCount = postedNoTs ?? 0
+    const warnCount = tsNotPosted ?? 0
+    const pass = failCount === 0
+    const lines = [
+      `status='posted' AND posted_at IS NULL: ${failCount}  ${failCount > 0 ? COLORS.red + '(FAIL)' + COLORS.reset : '(OK)'}`,
+      `status != 'posted' AND posted_at IS NOT NULL: ${warnCount}  ${warnCount > 0 ? COLORS.yellow + '(WARN — historical artifact)' + COLORS.reset : '(OK)'}`,
+    ]
+    for (const r of orphans1 ?? []) {
+      lines.push(`  ${COLORS.red}✗${COLORS.reset} ${r.id} ${r.platform ?? '?'} — status=posted, posted_at=null  (FAIL)`)
+    }
+    for (const r of orphans2 ?? []) {
+      lines.push(`  ${COLORS.yellow}·${COLORS.reset} ${r.id} ${r.platform ?? '?'} status=${r.status} posted_at=${r.posted_at}  (WARN)`)
+    }
+    if (failCount > 0) {
+      lines.push(`${COLORS.dim}Repair the FAIL row(s) via: node scripts/repair-posted-at-invariants.js --apply${COLORS.reset}`)
+    }
+    record(
+      9,
+      `Posted_at invariant: status='posted' iff posted_at IS NOT NULL`,
+      pass,
+      pass
+        ? 'every status=posted row has a non-null posted_at'
+        : `${failCount} row(s) have status=posted but posted_at=null — Phase 14M.2 route fix + repair script close this`,
+      lines,
+    )
+  }
+
+  // ============================================================
   // Summary
   // ============================================================
   const passCount = checks.filter(c => c.pass).length

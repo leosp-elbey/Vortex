@@ -1,10 +1,139 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-05 (Phase 14M deployed at `b119a3e`; first live-platform pilots succeeded for Facebook + Instagram; TikTok pilot in progress; Twitter/X blocked on TikTok-side 402 billing/tier issue. Phase 14M.1 in working tree — TikTok OAuth callback route added so `/api/auth/tiktok/callback` no longer 404s. Token exchange deferred. No posting changes. No platform API calls in this phase.)
-**Last known good commit:** `b119a3e` — "Phase 14M: pre-autoposter posting readiness audit, 8 of 8 checks pass"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14M deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; first live posts on FB+IG completed 2026-05-05)
+**Last updated:** 2026-05-05 (Phase 14M.1 deployed `8b4da4c`; manual TikTok pilot completed live (operator clicked Upload→Creator Center→published→Mark Posted); discovered `/api/content` PATCH bug — Mark Posted set `status='posted'` but not `posted_at`. Phase 14M.2 in working tree: route fix + audit Check 9 invariant + repair script. No platform calls. No DB writes (DRY-RUN only). Live posting still BLOCKED on cron.)
+**Last known good commit:** `8b4da4c` — "Phase 14M.1: add TikTok OAuth callback route, no token exchange yet"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14M.1 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; first live posts on FB+IG+TikTok completed 2026-05-05)
 
-**Live posting status:** First live-platform pilot succeeded — **Facebook + Instagram** posts landed cleanly (`posted_at`: 22 → 24). **Twitter/X** attempt returned HTTP 402 (Twitter API tier/billing issue — non-blocking; row was rolled back to idle automatically). **TikTok** pilot row `9a9e2a52…` is currently Mark-Ready'd; awaiting operator's manual Creator Center upload + Mark Posted bookkeeping click. Cron stays disabled. Phase 14M.1 is purely additive: it removes the 404 on `/api/auth/tiktok/callback` to unblock TikTok Login Kit setup; **no token exchange yet**.
+**Live posting status:** Manual posting validated end-to-end across **Facebook + Instagram + TikTok** during this session. Twitter/X paused on Developer Portal billing (HTTP 402). Cron stays disabled. Phase 14M.2 closes a bookkeeping bug discovered immediately after the TikTok pilot: the Mark Posted route flipped `status='posted'` but didn't stamp `posted_at`. The fix + audit invariant + repair script all land in this phase; the repair runs DRY-RUN until explicitly authorized.
+
+---
+
+## Phase 14M.2 — Fix TikTok Mark Posted bookkeeping + posted_at invariant audit (in working tree, 2026-05-05 — code fix; audit Check 9; repair script DRY-RUN; no DB writes; no platform calls)
+
+### Why this phase exists
+
+Immediately after the successful TikTok manual pilot (operator clicked Mark Posted on row `9a9e2a52-941d-48bb-b9e7-db0f24f3bc69`), the audit revealed:
+- `posted_at` count stayed at 24 instead of incrementing to 25
+- The TikTok row had `status='posted'` ✓ but `posted_at` = `null` ❌
+
+Root cause was in [src/app/api/content/route.ts:65](src/app/api/content/route.ts#L65). The pre-existing PATCH route only ran `.update({ status })`, never stamping `posted_at`. The Phase 14K.0.6 gate guard was correct, but the UPDATE payload was incomplete. The Facebook + Instagram pilots landed cleanly because those routes (`/api/automations/post-to-{facebook,instagram}`) wrote both `status` and `posted_at` atomically; only the TikTok bookkeeping path used the buggy generic PATCH.
+
+A second anomaly was also discovered:
+- Row `a0bd9d16-1258-4abc-b007-8196ea7467c2` (instagram) has `status='approved'` but `posted_at` = `2026-04-23T22:29:30Z` — a historical artifact pre-dating Phase 14M.2 (likely a previously-posted row that was later Reset back to draft/approved without clearing `posted_at`).
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `src/app/api/content/route.ts` | When `status === 'posted'` AND the row's current `posted_at` is null, the same UPDATE now stamps `posted_at = new Date().toISOString()`. The gate-fetch already pulls the row (Phase 14L join), so we capture `posted_at` from there — no extra SELECT. Repeat clicks on an already-posted row preserve the original timestamp (idempotent). Other status transitions (approve / reject / reset) leave `posted_at` alone — per spec, the historical artifact path is reviewed via the repair script, not auto-cleared. |
+| `scripts/audit-pre-autoposter-readiness.js` | New **Check 9** — invariant `status='posted' iff posted_at IS NOT NULL`. **FAIL** when `status='posted' AND posted_at IS NULL`. **WARN** (not FAIL) when `status != 'posted' AND posted_at IS NOT NULL` so the historical artifact doesn't block the audit while still being visible. |
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `scripts/repair-posted-at-invariants.js` | One-shot DRY-RUN-default repair. Lists both anomaly types. With `--apply`, ONLY repairs the TikTok pilot row `9a9e2a52…` (stamps `posted_at = now()` or the operator-supplied `--timestamp=<iso>`). Other anomaly-(a) rows are listed but never auto-repaired — refusal is intentional per spec. Anomaly-(b) rows are listed; clearing one requires the explicit `--repair-legacy-id=<uuid>` flag AND the row must currently match anomaly (b). Defensive: every UPDATE includes a re-check of the anomaly condition (`.eq('status','posted').is('posted_at',null)`) so a row that flipped state mid-run is left alone. Snapshots `posted_at` count + `status='posted'` count before/after; verifies expected delta. **No platform calls, no `vercel.json` change, no `posting_status` / `status` mutations.** |
+
+### Audit Check 9 behavior
+
+Re-running the audit after these changes lands gives 9/9 only after the repair `--apply` runs:
+
+```
+9. [FAIL] Posted_at invariant: status='posted' iff posted_at IS NOT NULL
+   1 row(s) have status=posted but posted_at=null — Phase 14M.2 route fix + repair script close this
+   status='posted' AND posted_at IS NULL: 1  (FAIL)
+   status != 'posted' AND posted_at IS NOT NULL: 1  (WARN — historical artifact)
+     ✗ 9a9e2a52-941d-48bb-b9e7-db0f24f3bc69 tiktok — status=posted, posted_at=null  (FAIL)
+     · a0bd9d16-1258-4abc-b007-8196ea7467c2 instagram status=approved posted_at=2026-04-23T22:29:30Z  (WARN)
+```
+
+After `node scripts/repair-posted-at-invariants.js --apply` (operator-authorized only) the FAIL row becomes a normal posted row with `posted_at` stamped; Check 9 flips to PASS, audit becomes 9/9.
+
+### DRY-RUN repair output
+
+```
+Phase 14M.2 — Posted_at Invariant Repair [DRY-RUN]
+No platform calls. No DB writes.
+
+1. status='posted' AND posted_at IS NULL  (FAIL on count > 0)
+   total: 1
+   [pilot] 9a9e2a52-941d-48bb-b9e7-db0f24f3bc69  platform=tiktok  queued_at=2026-05-05T04:23:16Z  approved_at=2026-05-05T04:23:16Z
+
+2. status != 'posted' AND posted_at IS NOT NULL  (WARN — historical artifact)
+   total: 1
+   [legacy] a0bd9d16-1258-4abc-b007-8196ea7467c2  platform=instagram  status=approved  posted_at=2026-04-23T22:29:30Z
+
+3. Repair plan
+   (a-1) stamp posted_at on TikTok pilot 9a9e2a52-941d-48bb-b9e7-db0f24f3bc69
+         → posted_at = <now ISO>  (now() — pass --timestamp=<iso> to override)
+
+Summary
+   anomaly (a) status=posted/posted_at=null:  1
+   anomaly (b) status!=posted/posted_at set:  1
+   writes performed:                          0
+   posted_at count: 24 → 24  (delta 0)
+   status='posted' count: 24 → 24  (delta 0)
+```
+
+### Provider / platform / DB activity
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar / campaign_assets | 0 |
+| posted_at delta | 0 (24 → 24) |
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS — clean
+- `npm run build` → ⚠️ **`Compiled successfully in 26.4s`** for the route fix; ❌ FAIL at the page-data-collection stage for `/api/automations/quote-email` (Resend constructor error). **Not caused by Phase 14M.2.** The `vercel env pull --environment=production` earlier strips secret values to empty strings (Vercel CLI behavior — encrypted values aren't exposed). `RESEND_API_KEY` came back as `""` in `.env.local`, which broke a separate route's local build. Production deploys are unaffected because Vercel uses real values at deploy time. **Workaround for local builds:** restore your real Resend key in `.env.local` or set `RESEND_API_KEY=re_xxx` from your Resend dashboard.
+- `node scripts/audit-pre-autoposter-readiness.js` → ✅ PASS for Checks 1–8; ❌ Check 9 FAILS as expected (1 row in anomaly (a)); audit summary 8/9. Closes to 9/9 after the operator-approved repair.
+- `node scripts/repair-posted-at-invariants.js` → ✅ DRY-RUN — anomalies listed, repair plan printed, 0 writes
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+### Migration
+
+**None.** No schema changes.
+
+### Required approval before `--apply`
+
+- **`node scripts/repair-posted-at-invariants.js --apply`** — operator-authorized only. Stamps `posted_at = now()` on the TikTok pilot row `9a9e2a52…`. Defensive guards in the UPDATE refuse if the row's state changed mid-run.
+- **`--apply --timestamp=<iso>`** — supply a precise timestamp (e.g. matching when you actually clicked Mark Posted) instead of the current time.
+- **`--apply --repair-legacy-id=<uuid>`** — clears `posted_at` on a specific anomaly-(b) row. Use only after manually confirming the artifact is incorrect (the IG row may legitimately reflect a prior post that was later reset; clearing it would lose that historical record).
+
+### Deploy instructions
+
+1. Confirm `git push origin main` returns `Everything up-to-date` on the second push.
+2. `npx vercel --prod --yes` — the route fix lands on production. From this point, every Mark Posted click correctly stamps `posted_at` atomically.
+3. (operator-authorized, after deploy) `node scripts/repair-posted-at-invariants.js --apply` to close the existing TikTok pilot anomaly. Re-run the audit — expect 9/9.
+
+### Smoke-test checklist
+
+- [ ] Push code; deploy via Vercel
+- [ ] (operator-authorized) `node scripts/repair-posted-at-invariants.js --apply` → expect 1 write, posted_at delta = +1, status='posted' count unchanged
+- [ ] `node scripts/audit-pre-autoposter-readiness.js` → expect 9/9 PASS, posted_at = 25
+- [ ] (optional) Pick another approved row in the dashboard; click Mark Ready → click Mark Posted directly (without going through a platform Post button) → verify `posted_at` is set and `status='posted'` in the same UPDATE. This proves the route fix lands on prod.
+- [ ] Decision pending on `a0bd9d16…` legacy row — leave as WARN or clear with `--repair-legacy-id`
+
+### Recommended next step
+
+1. Land Phase 14M.2 in production (commit + push + deploy).
+2. Run the repair (`--apply`) to close the existing TikTok anomaly.
+3. Verify audit goes to 9/9.
+4. Resume the manual posting routine (FB + IG via Post buttons; TikTok via Creator Center + Mark Posted) — every future click should now write both columns atomically.
+5. Twitter/X remains paused awaiting Developer Portal billing fix.
+6. Optionally: Phase 14K-tt to ship the actual TikTok OAuth token-exchange helper (the redirect URI is already live).
+
+---
+
+## Phase 14M.1 — TikTok OAuth Callback Route (deployed `8b4da4c` 2026-05-05; manual TikTok pilot landed live)
+
+(See prior entries for the original spec — callback route added so `/api/auth/tiktok/callback` returns 307 instead of 404. Token exchange still deferred. Manual TikTok upload pilot completed during this session — a separate `posted_at` bookkeeping bug was discovered after Mark Posted; closure ships in Phase 14M.2 above.)
+
+---
+
+## Phase 14M.1 — TikTok OAuth Callback Route (original spec — preserved for history)
 
 ---
 

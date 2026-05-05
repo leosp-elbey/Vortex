@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-05 (Phase 14M deployed `b119a3e`; first live posts landed for **Facebook + Instagram** ✓; **Twitter/X** cleanly failed with HTTP 402 (Twitter API tier issue, not code); TikTok pilot row Mark-Ready'd, awaiting manual Creator Center upload + Mark Posted. Phase 14M.1 in working tree — TikTok OAuth callback route added so `/api/auth/tiktok/callback` returns 307 instead of 404. Token exchange deferred. No posting changes. No platform API calls.)
-**Last code-shipping commit:** `b119a3e` (Phase 14M: pre-autoposter posting readiness audit, 8 of 8 checks pass)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14M deployed and verified on prod** · **Phase 14M.1 in working tree** — TikTok OAuth callback route. Live FB + IG posting validated end-to-end (`posted_at` 22 → 24). Twitter/X awaiting Developer Portal billing fix. TikTok manual flow pilot in progress.
+**Last updated:** 2026-05-05 (Phase 14M.1 deployed `8b4da4c`; manual TikTok pilot landed live (FB + IG + TikTok all posted on platforms). Phase 14M.2 in working tree — closes a `/api/content` PATCH bookkeeping bug discovered after the TikTok Mark Posted click. Route fix + audit Check 9 invariant + repair script. DRY-RUN only. No DB writes. No platform calls.)
+**Last code-shipping commit:** `8b4da4c` (Phase 14M.1: add TikTok OAuth callback route, no token exchange yet)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14M.1 deployed and verified on prod** · **Phase 14M.2 in working tree** — atomic posted_at fix + 9th audit check + repair tool. Manual posting validated live across FB + IG + TikTok. Twitter/X paused on Developer Portal billing.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,34 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14M.1 — TikTok OAuth Callback Route (in working tree, 2026-05-05 — no token exchange; no posting changes; no platform API calls).**
+**Phase 14M.2 — Fix TikTok Mark Posted bookkeeping + posted_at invariant audit (in working tree, 2026-05-05 — code fix; audit Check 9; repair script DRY-RUN; no DB writes; no platform calls).**
+
+Phase 14M.1 deployed at `8b4da4c`. Manual TikTok pilot completed live (operator clicked Upload to TikTok → Creator Center → published → Mark Posted). Phase 14M's audit caught a real bookkeeping bug immediately after: TikTok pilot row `9a9e2a52…` had `status='posted'` but `posted_at=null`. Root cause was the `/api/content` PATCH route's UPDATE only including `status`, never `posted_at`.
+
+**Built in 14M.2 (no DB writes, no platform calls):**
+- [x] `src/app/api/content/route.ts` — when `status === 'posted'` AND the row's current `posted_at` is null, the same UPDATE now stamps `posted_at = new Date().toISOString()`. The gate-fetch already pulls the row, so we capture `posted_at` from there. Repeat clicks preserve the original timestamp (idempotent). Other transitions (approve/reject/reset) leave `posted_at` alone — per spec, the historical-artifact path is reviewed via the repair script, not auto-cleared.
+- [x] `scripts/audit-pre-autoposter-readiness.js` — new **Check 9** invariant `status='posted' iff posted_at IS NOT NULL`. **FAIL** when `status='posted' AND posted_at IS NULL`. **WARN** (not FAIL) when `status != 'posted' AND posted_at IS NOT NULL` so the historical artifact stays visible without blocking the audit.
+- [x] `scripts/repair-posted-at-invariants.js` — DRY-RUN-default. With `--apply`, ONLY repairs the TikTok pilot row `9a9e2a52…` (stamps `posted_at = now()` or `--timestamp=<iso>`). Other anomaly-(a) rows are listed but never auto-repaired (refusal is intentional per spec — narrow scope). Anomaly-(b) clearing requires explicit `--repair-legacy-id=<uuid>` flag AND the row must currently match anomaly (b). UPDATEs include defensive re-checks of the anomaly condition so a row that flipped state mid-run is left alone.
+
+**Audit results (current state, before repair):**
+- Checks 1–8: ✅ PASS
+- Check 9: ❌ FAIL — 1 row in anomaly (a) (TikTok pilot `9a9e2a52…`); 1 row in anomaly (b) WARN (legacy IG `a0bd9d16…`)
+- Audit summary: 8/9 — closes to 9/9 after the operator-approved repair
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (24 → 24).
+
+**Live posting still BLOCKED on cron.** Manual posting validated end-to-end on FB + IG + TikTok in this session. Twitter/X paused on Developer Portal billing (HTTP 402). Once Phase 14M.2 deploys + the repair runs, Check 9 closes and every future Mark Posted click writes both columns atomically.
+
+**Next steps (operator-authorized):**
+1. Commit + push + deploy Phase 14M.2
+2. Run `node scripts/repair-posted-at-invariants.js --apply` to close the existing TikTok anomaly (posted_at: 24 → 25)
+3. Re-run audit → expect 9/9 PASS
+4. Decide whether to clear the legacy IG `a0bd9d16…` row's `posted_at` (separate `--repair-legacy-id` invocation)
+5. Resume normal posting routine — every future Mark Posted click correctly stamps `posted_at`
+
+---
+
+### Pre-Phase-14M.2: Phase 14M.1 — TikTok OAuth Callback Route (saved + pushed `8b4da4c`; manual TikTok pilot landed live in this session 2026-05-05).
 
 Phase 14M deployed at `b119a3e`. After deploy, the operator exercised the live posting chain for the first time:
 - ✅ Facebook pilot row `30a95acf…` posted via `/api/automations/post-to-facebook` → live on the Vortex Trips Page (verified visually)
