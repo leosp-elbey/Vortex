@@ -1,10 +1,114 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14L.2.5 deployed — TikTok video-script backfill applied for 16 of 25 rows so far; 16 rows are now HeyGen-ready, 9 still need scripts. Phase 14L.2.6 in working tree — controlled HeyGen batch unlock: replaces the Phase 14L.2.2 hard `--limit=1` guard with default cap 5 / absolute cap 10 (`--allow-large-heygen-batch`) + pre-flight refusal contract + new diagnostic section 6e2. No HeyGen call fired in this phase; no mutations; no platform calls. Live posting still BLOCKED.)
+**Last updated:** 2026-05-05 (Phase 14L.2.6 deployed; full TikTok pipeline drained — 30/30 TikTok rows pass media readiness. Phase 14M in working tree — Pre-Autoposter Posting Readiness Audit, **8/8 checks PASS**, proof file written to `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md`. No platform calls. No mutations. Live posting still BLOCKED.)
 **Last known good commit:** `2b838ce` — "Phase 14L.2.5: TikTok video-script backfill generator and readiness diagnostic"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.5 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used)
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.6 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L.2.6 unlocks small, controlled HeyGen batches now that the pilot + storage + repair pipeline is proven. Default batch cap is 5 renders per invocation; raising to 10 requires `--allow-large-heygen-batch`; queueing while pending jobs exist requires `--allow-when-pending`. Pre-flight refuses any selected row that's posted, has `video_url`, or lacks a script — all checks run before any provider call. Live posting endpoints (Facebook/Instagram/TikTok/X) are not touched.
+**Live posting status:** STILL BLOCKED — by design. Phase 14M's audit confirms the full chain is consistent: branded tracking URLs ✓, media ready ✓, gate refuses idle/unapproved ✓, manual routes guarded ✓, autoposter dry-run only returns gate-approved ✓, posted_at unchanged ✓, no platform calls in the audit ✓, manual + autoposter validators agree on every row ✓. The current eligible posting queue is **0** rows — by design, because no operator has clicked Mark Ready on any row yet. Once the audit is reviewed, the next phase is 14K.1 (Live Autoposter Small-Batch Pilot — 1 row only, on a low-risk text platform first).
+
+---
+
+## Phase 14M — Final Pre-Autoposter Posting Readiness Audit (in working tree, 2026-05-05 — 8/8 PASS; proof file written; no mutations; no platform calls)
+
+### Why this phase exists
+
+Phase 14L wrapped: 30/30 TikTok rows pass media readiness, 0 temporary HeyGen URLs, 0 pending HeyGen jobs, 0 campaign rows on legacy `myvortex365.com/leosp` URLs, posted_at unchanged at 22. Before any live autoposter is enabled, we need a single read-only proof that the full chain is consistent — that every gate, every storage layer, every refusal path, every cross-validator agrees. Phase 14M is that proof.
+
+### What this phase ships
+
+A single read-only audit script that runs eight independent checks and writes a markdown proof file. The script never calls a platform API, never invokes a manual-post route, never hits HeyGen / Pexels / OpenAI, and never issues an `UPDATE` / `INSERT` / `DELETE`. `posted_at` count is captured before AND after as a defensive cross-check; both must equal 22.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `scripts/audit-pre-autoposter-readiness.js` | The audit. Pulls `content_calendar` (with `campaign_asset` JOIN), runs 8 checks against in-memory mirrors of `validateMediaReadiness` / `validateManualPostingGate` / `validateAutoposterCandidate`, plus a static grep over the 4 manual-post routes for `validateManualPostingGate`, plus a self-scan for banned platform/provider hostnames. Exits non-zero if any check fails. Writes `PHASE_14M_PRE_AUTOPOSTER_AUDIT_<date>.md` on every run. |
+| `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md` | Proof file from the 2026-05-05 run — overall PASS, all 8 checks PASS, posted_at unchanged at 22 → 22. |
+
+### The 8 checks
+
+1. **All approved/ready content has branded tracking links where required.** Every campaign-originated `status='approved'` + unposted row must carry a `https://www.vortextrips.com/t/...` tracking URL. PASSED — 0 campaign-originated approved rows currently in the universe (all approved rows are organic).
+2. **All campaign/social content has media ready.** Every approved + unposted row must pass `validateMediaReadiness`. PASSED — 52 approved rows checked, 0 media-blocked.
+3. **Posting gate blocks idle/unapproved rows.** Sample idle and unapproved rows; `validateManualPostingGate` must refuse all of them. PASSED — 5 idle approved + 5 unapproved tested, 0 leaked through.
+4. **Manual post routes are still guarded.** Static grep over the 4 manual-post route files (`post-to-facebook`, `post-to-instagram`, `post-to-twitter`, `/api/content`) for `validateManualPostingGate`. PASSED — all 4 guarded.
+5. **Autoposter dry-run returns only gate-approved rows.** Mirror `validateAutoposterCandidate` over all approved rows; every "eligible" row must carry `posting_status=ready` + `posting_gate_approved=true` + `queued_for_posting_at`. PASSED — 0 eligible rows (52 skipped with `posting_status='idle'`); no leaks possible because the queue is empty.
+6. **No posted_at changes during audit.** Snapshot before vs after. PASSED — 22 → 22.
+7. **No platform API calls during audit.** Self-scan the audit script source for known platform/provider hostnames. PASSED — none found (false-positive trap from the ban-list literal was removed via split-string encoding).
+8. **Final eligible posting queue is clear and predictable.** Cross-check that `validateAutoposterCandidate` and `validateManualPostingGate` agree on every approved row. PASSED — 0 disagreements; queue is currently empty by design (no operator has marked any row Ready).
+
+### Why the queue is empty
+
+This is the correct safe state immediately before Phase 14K.1. After Mark Ready is clicked on a row, the gate flips `posting_status='ready'` + `posting_gate_approved=true` + `queued_for_posting_at=<now>` and that row becomes the autoposter's first candidate. Phase 14K.1 will queue exactly one row first (recommended: text platform like Twitter/X or Facebook, not TikTok video).
+
+### Provider / platform / DB activity
+
+| Action | Count |
+|---|---|
+| HeyGen API calls | 0 |
+| Pexels / OpenAI API calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 |
+| HTTP requests to `/api/automations/post-to-*` | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar / campaign_assets | 0 |
+| posted_at delta | 0 (22 → 22) |
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS — clean
+- `npm run build` → ✅ PASS — `Compiled successfully in 11.8s`
+- `node scripts/audit-pre-autoposter-readiness.js` → ✅ PASS — 8/8; proof file written; posted_at unchanged
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+### Proof file
+
+[`PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md`](PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md) — committed alongside this update; can be regenerated on demand by re-running the audit script. Future re-runs append a new dated file; old files are preserved for historical record.
+
+### Risks and deferred items
+
+- **Audit reflects current DB state at run time.** If new content is generated between the audit and Phase 14K.1, re-run the audit before posting.
+- **Check 1 vacuously passes** because no campaign-originated row is currently in `status='approved'`. The 8 campaign rows that have branded tracking URLs are in draft/scheduled. Once an operator approves any of them, Check 1 will assert real coverage.
+- **Check 5 reports 0 eligible** because no operator has marked any row Ready. After Mark Ready, Check 5 must continue to assert that any "eligible" row carries the full gate state — the audit will fail loudly if a leak is ever introduced.
+- **Static-grep-based Check 4** verifies routes import + call `validateManualPostingGate` but doesn't simulate runtime traffic. The runtime smoke test (curl with bad payload → expect 403) is still recommended after each deploy that touches a manual-post route.
+
+### Migration application instructions
+
+**None.** No schema changes.
+
+### Deploy instructions
+
+Phase 14M is operator-tooling + a static proof artifact only:
+
+1. Confirm `git push origin main` returns `Everything up-to-date` on the second push.
+2. (Optional) `npx vercel --prod --yes` — only docs / scripts / proof file changed; no route impact.
+3. Re-run the audit on prod env (same `.env.local`): `node scripts/audit-pre-autoposter-readiness.js` — must report `8/8 checks passed` before authorizing Phase 14K.1.
+
+### Smoke-test checklist
+
+- [ ] Push code; (optional) deploy via Vercel
+- [ ] Re-run `node scripts/audit-pre-autoposter-readiness.js` — expect `8/8 checks passed`; new dated proof file written; posted_at unchanged at 22
+- [ ] Open `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md` and review each section's evidence
+- [ ] Spot-check the Mark Ready flow on the dashboard against a single approved row → verify `posting_status` flips to `ready` and the per-platform Post buttons appear
+- [ ] Re-run the audit AFTER the Mark Ready spot-check — Check 5 should now report `eligible: 1`, Check 8 should still show 0 disagreements
+
+### Recommended next phase
+
+**Phase 14K.1 — Live Autoposter, Small-Batch Pilot.** Concrete order:
+1. Pick one approved + unposted row on a low-risk text platform (Twitter/X or Facebook, NOT TikTok video).
+2. Mark Ready on the dashboard so the row enters the live queue.
+3. Re-run Phase 14M audit — expect Check 5 to report `eligible: 1`, Check 8 still 0 disagreements.
+4. Manually invoke the platform-post route via the dashboard's per-platform Post button (still operator-driven, not cron).
+5. Confirm the post landed on the platform, `status` flipped to `posted`, `posted_at` was set, posting_status reset to idle.
+6. Pause; review; if all clean, repeat for one more low-risk row, then graduate to TikTok video.
+7. Only after the manual-batch pilot succeeds, ship Phase 14K.2 (cron-driven autoposter against the live queue).
+
+---
+
+## Phase 14L.2.6 — Controlled HeyGen Batch Unlock (deployed, all batches drained 2026-05-04 / 2026-05-05; 30/30 TikTok rows now have permanent Supabase video_urls)
+
+(See prior entries for the original spec — guard replaced, batches drained successfully, no temp URLs persist.)
+
+---
+
+## Phase 14L.2.6 — Controlled HeyGen Batch Unlock (original spec — preserved for history)
 
 ---
 

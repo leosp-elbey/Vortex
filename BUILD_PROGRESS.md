@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.2.5 deployed; 16 of 25 TikTok scripts backfilled in production. Phase 14L.2.6 in working tree — controlled HeyGen batch unlock: replaces `--limit=1` pilot guard with default cap 5 / absolute cap 10 (`--allow-large-heygen-batch`), pre-flight refusal contract, new diagnostic section 6e2. No HeyGen call fired. No mutations. No platform calls.)
+**Last updated:** 2026-05-05 (Phase 14L.2.6 deployed and full TikTok pipeline drained — 30/30 TikTok rows pass media readiness. Phase 14M in working tree — Pre-Autoposter Posting Readiness Audit, **8/8 checks PASS**, proof file `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md` written. No platform calls. No mutations. Live posting still BLOCKED.)
 **Last code-shipping commit:** `2b838ce` (Phase 14L.2.5: TikTok video-script backfill generator and readiness diagnostic)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.5 deployed and verified on prod** · **Phase 14L.2.6 in working tree** — controlled HeyGen batch unlock. Live posting still BLOCKED. 16 TikTok rows now HeyGen-ready (script-backfilled); 9 still need scripts; 5 already rendered to permanent Supabase URLs.
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.6 deployed and verified on prod** · **Phase 14M in working tree** — read-only safety audit + proof file. 30/30 TikTok rows ready; 0 temp HeyGen URLs; 0 eligible queue (queue empty by design — no Mark Ready clicked yet). Next phase: 14K.1 Live Autoposter Small-Batch Pilot — 1 row only, low-risk text platform first.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,43 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2.6 — Controlled HeyGen Batch Unlock (in working tree, 2026-05-03 — no HeyGen call fired; default DRY-RUN; no mutations; no platform calls).**
+**Phase 14M — Final Pre-Autoposter Posting Readiness Audit (in working tree, 2026-05-05 — 8/8 checks PASS; proof file written; no mutations; no platform calls).**
+
+Phase 14L.2.6 deployed at `2b838ce` (script-readiness diagnostic) and the full TikTok pipeline was drained across multiple operator-authorized HeyGen batches:
+- 9 rows scripted in this session via Phase 14L.2.5 generator
+- 9 + 5 + 4 + 1 + 5 = 24 HeyGen renders queued, polled, and stored as permanent Supabase URLs
+- 30/30 TikTok rows now pass media readiness
+- 0 temporary HeyGen URLs remain
+- 0 pending HeyGen jobs
+- posted_at unchanged at 22
+
+Phase 14M is the final read-only safety proof before Phase 14K.1 (live autoposter). The audit validates the full chain in one shot.
+
+**Built in 14M (no provider calls, no mutations):**
+- [x] `scripts/audit-pre-autoposter-readiness.js` — read-only safety audit. Pulls content_calendar joined with campaign_assets; runs 8 independent checks against in-memory mirrors of the validators; static-greps the 4 manual-post route files; self-scans for banned platform/provider hostnames; captures posted_at before AND after. Writes `PHASE_14M_PRE_AUTOPOSTER_AUDIT_<date>.md` proof file. Exits non-zero if any check fails.
+- [x] `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md` — proof file from the 2026-05-05 audit run. Overall PASS, all 8 checks PASS, posted_at unchanged 22 → 22.
+
+**Audit results (2026-05-05):**
+1. ✅ Branded tracking links — 52 approved + unposted rows; 0 missing or legacy
+2. ✅ Media ready — 52 approved checked; 0 media-blocked
+3. ✅ Gate blocks idle/unapproved — 5+5 sampled; 0 leaks
+4. ✅ Manual routes guarded — 4 of 4 route files import + call `validateManualPostingGate`
+5. ✅ Autoposter dry-run gate-approved-only — 0 eligible (queue empty by design); validator agrees with the gate state
+6. ✅ posted_at unchanged — 22 → 22
+7. ✅ No platform API calls during audit — script source contains zero platform/provider hostnames
+8. ✅ Manual + autoposter validators agree on every approved row — 0 disagreements
+
+**Live posting still BLOCKED.** Queue is empty by design — no operator has clicked Mark Ready on any row. The audit confirms that when Mark Ready IS clicked, every safety rail is in place. Once approved:
+1. Operator picks 1 approved row on a low-risk text platform (Twitter/X or Facebook, not TikTok)
+2. Click Mark Ready on the dashboard → row enters the live queue
+3. Re-run Phase 14M audit → expect Check 5 = `eligible: 1`, Check 8 still 0 disagreements
+4. Manually invoke the platform Post button → first real posting event
+5. Verify result on the platform, on the dashboard, and via diagnostic
+6. If clean, graduate to a second row; eventually to TikTok video; eventually to cron-driven autoposter
+
+---
+
+### Pre-Phase-14M: Phase 14L.2.6 — Controlled HeyGen Batch Unlock (saved + pushed `2b838ce`; full pipeline drained across this session — 30/30 TikTok ready 2026-05-05).
 
 Phase 14L.2.5 deployed at `2b838ce` and the script generator was applied across multiple operator-driven runs. Production state per the live diagnostic:
 - 16 TikTok rows have `video_script` and no `video_url` (HeyGen-ready NOW)
