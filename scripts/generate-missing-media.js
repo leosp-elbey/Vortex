@@ -1,5 +1,29 @@
 #!/usr/bin/env node
 /**
+ * Phase 14L.2.6 — Media generation worker (controlled HeyGen batch unlock).
+ *
+ * Replaces the Phase 14L.2.2 hard-coded `--limit=1` HeyGen pilot guard with
+ * a controlled batch cap:
+ *   - default cap: 5 HeyGen renders per invocation
+ *   - --allow-large-heygen-batch: lifts the cap to 10
+ *   - absolute ceiling: 10 (--limit=11+ is refused even with the flag)
+ *   - --videos-only --provider=auto follows the same caps (auto fans out to HeyGen)
+ *
+ * New flags:
+ *   --allow-large-heygen-batch  lift the cap from 5 to 10
+ *   --allow-when-pending        permit queueing while pending HeyGen jobs exist
+ *
+ * Pre-flight refusal contract for the HeyGen path (any provider=heygen run,
+ * or videos-only + provider=auto):
+ *   - refuses if --limit > the active cap
+ *   - refuses if pending HeyGen jobs exist (override with --allow-when-pending)
+ *   - refuses if any selected row is posted, has video_url, or has no script
+ *   - all checks run BEFORE any provider call
+ *
+ * Original Phase 14L.2.1 docs follow.
+ *
+ * --- ORIGINAL ---
+ *
  * Phase 14L.2.1 — Media generation worker.
  *
  * SAFETY MODES:
@@ -161,6 +185,11 @@ function recommend(row) {
   }
 }
 
+// Phase 14L.2.6 — batch caps for HeyGen. Default cap is 5 renders per
+// invocation; lifting to up to 10 requires --allow-large-heygen-batch.
+const HEYGEN_DEFAULT_BATCH_MAX = 5
+const HEYGEN_ABSOLUTE_BATCH_MAX = 10
+
 function parseArgs(argv) {
   const args = argv.slice(2)
   const flags = {
@@ -177,6 +206,13 @@ function parseArgs(argv) {
      *  considered for processing; matched against either content_calendar.id
      *  or campaign_asset_id. */
     id: null,
+    /** Phase 14L.2.6 — lift the default HeyGen batch cap (5) up to the
+     *  absolute cap (10). Required to use --limit > 5 with HeyGen. */
+    allowLargeHeygenBatch: false,
+    /** Phase 14L.2.6 — by default the HeyGen path refuses to queue when
+     *  pending HeyGen jobs already exist (avoids stacking renders before
+     *  the first batch lands). Set this flag to override. */
+    allowWhenPending: false,
   }
   for (const a of args) {
     if (a === '--apply') flags.apply = true
@@ -186,6 +222,8 @@ function parseArgs(argv) {
     else if (a === '--videos-only') flags.videosOnly = true
     else if (a === '--campaign-only') flags.campaignOnly = true
     else if (a === '--content-only') flags.contentOnly = true
+    else if (a === '--allow-large-heygen-batch') flags.allowLargeHeygenBatch = true
+    else if (a === '--allow-when-pending') flags.allowWhenPending = true
     else if (a.startsWith('--limit=')) {
       const n = Number(a.split('=')[1])
       if (Number.isFinite(n) && n > 0) flags.limit = Math.min(Math.floor(n), 50)
@@ -492,7 +530,7 @@ async function main() {
       : 'DRY-RUN'
 
   console.log()
-  console.log(`${COLORS.bold}Phase 14L.2.2 — Media Generation Worker [${mode}]${COLORS.reset}`)
+  console.log(`${COLORS.bold}Phase 14L.2.6 — Media Generation Worker [${mode}]${COLORS.reset}`)
   if (!flags.generate) {
     console.log(`${COLORS.dim}No provider API calls. No platform calls. No mutations.${COLORS.reset}`)
   } else if (!flags.apply) {
@@ -508,23 +546,28 @@ async function main() {
     process.exit(2)
   }
 
-  // Phase 14L.2.2 — pilot-mode enforcement for HeyGen.
-  // While the HeyGen pilot is in progress, every HeyGen run must be
-  // strictly capped at one render per invocation. Refuse anything that
-  // could queue more than one HeyGen render at a time.
-  if (flags.provider === 'heygen' && flags.limit !== 1) {
-    console.log(`${COLORS.red}Refused: --provider=heygen requires --limit=1 during the Phase 14L.2.2 pilot.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Bulk HeyGen generation is intentionally blocked. Re-run with --limit=1.${COLORS.reset}`)
-    process.exit(2)
-  }
-  // Auto-mode is permissive — but if the operator passes both --videos-only
-  // AND --provider=auto with a high limit, they could accidentally fan out
-  // HeyGen calls. Refuse the combination too; force them to either pick a
-  // specific provider or drop --videos-only.
-  if (flags.provider === 'auto' && flags.videosOnly && flags.limit > 1) {
-    console.log(`${COLORS.red}Refused: --videos-only + --provider=auto + --limit>1 could fan out HeyGen calls.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Use --provider=heygen --limit=1 for a single pilot render.${COLORS.reset}`)
-    process.exit(2)
+  // Phase 14L.2.6 — controlled HeyGen batch unlock.
+  //
+  // Replaces the Phase 14L.2.2 "must be --limit=1" pilot guard. HeyGen
+  // calls are now allowed in small batches:
+  //   - Default cap: 5 renders per invocation.
+  //   - With --allow-large-heygen-batch: up to 10 renders per invocation.
+  //   - --allow-large-heygen-batch CANNOT exceed 10 (hard ceiling).
+  //   - --videos-only + --provider=auto follows the same caps because the
+  //     auto path fans out to HeyGen for video rows.
+  const heygenPath = flags.provider === 'heygen' || (flags.provider === 'auto' && flags.videosOnly)
+  if (heygenPath) {
+    const cap = flags.allowLargeHeygenBatch ? HEYGEN_ABSOLUTE_BATCH_MAX : HEYGEN_DEFAULT_BATCH_MAX
+    if (flags.limit > cap) {
+      console.log(`${COLORS.red}Refused: HeyGen batch cap exceeded.${COLORS.reset}`)
+      console.log(`${COLORS.dim}--limit=${flags.limit} > ${cap}.${COLORS.reset}`)
+      if (!flags.allowLargeHeygenBatch && flags.limit <= HEYGEN_ABSOLUTE_BATCH_MAX) {
+        console.log(`${COLORS.dim}Pass --allow-large-heygen-batch to lift the cap from ${HEYGEN_DEFAULT_BATCH_MAX} to ${HEYGEN_ABSOLUTE_BATCH_MAX}.${COLORS.reset}`)
+      } else {
+        console.log(`${COLORS.dim}The absolute HeyGen batch ceiling is ${HEYGEN_ABSOLUTE_BATCH_MAX} renders per invocation. Re-run later for more.${COLORS.reset}`)
+      }
+      process.exit(2)
+    }
   }
 
   // 0. posted_at no-mutation snapshot.
@@ -611,14 +654,89 @@ async function main() {
     queue.push({ row: r, rec })
   }
 
+  // Phase 14L.2.6 — count pending HeyGen jobs (in-flight renders that
+  // haven't been polled to completion yet) so the operator sees them
+  // alongside the queue. By default the HeyGen path refuses to queue
+  // when ANY pending jobs exist; --allow-when-pending overrides.
+  let pendingHeygenJobs = 0
+  if (heygenPath) {
+    const { count: ccPending } = await supabase
+      .from('content_calendar')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_source', 'heygen')
+      .eq('media_status', 'pending')
+    const { data: caRows } = await supabase
+      .from('campaign_assets')
+      .select('id, video_source_metadata')
+      .eq('video_source', 'heygen')
+      .is('video_url', null)
+    const caPending = (caRows ?? []).filter(r => nonEmpty(r.video_source_metadata?.heygen_video_id)).length
+    pendingHeygenJobs = (ccPending ?? 0) + caPending
+  }
+
+  const heygenCap = heygenPath
+    ? (flags.allowLargeHeygenBatch ? HEYGEN_ABSOLUTE_BATCH_MAX : HEYGEN_DEFAULT_BATCH_MAX)
+    : null
+
   console.log(`${COLORS.bold}Queue${COLORS.reset}`)
   console.log(`   total scanned (unposted):  ${unposted.length}`)
   console.log(`   matched filters:           ${queue.length}`)
   console.log(`   limit:                     ${flags.limit}`)
   console.log(`   provider preference:       ${flags.provider}`)
+  if (heygenPath) {
+    console.log(`   heygen batch cap:          ${heygenCap}  ${flags.allowLargeHeygenBatch ? COLORS.dim + '(--allow-large-heygen-batch)' + COLORS.reset : COLORS.dim + '(default; --allow-large-heygen-batch lifts to ' + HEYGEN_ABSOLUTE_BATCH_MAX + ')' + COLORS.reset}`)
+    console.log(`   pending heygen jobs:       ${pendingHeygenJobs}  ${flags.allowWhenPending ? COLORS.dim + '(--allow-when-pending)' + COLORS.reset : ''}`)
+  }
   console.log()
 
+  // Phase 14L.2.6 — pre-flight refusals for the HeyGen path. These run
+  // BEFORE any provider call. The queue pre-filter already drops
+  // ineligible rows, but we also explicitly refuse the whole batch when
+  // pending jobs exist (operator must clear them first or override).
+  if (heygenPath && pendingHeygenJobs > 0 && !flags.allowWhenPending) {
+    console.log(`${COLORS.red}Refused: ${pendingHeygenJobs} pending HeyGen job(s) already in flight.${COLORS.reset}`)
+    console.log(`${COLORS.dim}Run scripts/check-video-generation-status.js --apply to land them, or pass --allow-when-pending to override.${COLORS.reset}`)
+    process.exit(2)
+  }
+
   const work = queue.slice(0, flags.limit)
+
+  // Phase 14L.2.6 — per-row sanity verification of the pre-flight contract.
+  // The pre-filter above already excludes these, but this defensive pass
+  // guarantees the contract holds even if a future refactor loosens the
+  // filter. Fails the run before any provider call if any selected row
+  // violates an invariant.
+  if (heygenPath && work.length > 0) {
+    const violations = []
+    for (const { row } of work) {
+      if (row.posted_at) {
+        violations.push({ id: row.id, reason: 'row is posted (has posted_at)' })
+        continue
+      }
+      const status = (row.status ?? '').toLowerCase()
+      if (TERMINAL_STATUSES.has(status)) {
+        violations.push({ id: row.id, reason: `row status='${row.status}' is terminal` })
+        continue
+      }
+      if (nonEmpty(row.video_url) || nonEmpty(row.asset_video_url)) {
+        violations.push({ id: row.id, reason: 'row already has video_url' })
+        continue
+      }
+      if (!nonEmpty(row.video_script) && !nonEmpty(row.video_prompt)) {
+        violations.push({ id: row.id, reason: 'row has no video_script / video_prompt' })
+        continue
+      }
+    }
+    if (violations.length > 0) {
+      console.log(`${COLORS.red}Refused: ${violations.length} selected row(s) violate the HeyGen pre-flight contract.${COLORS.reset}`)
+      for (const v of violations.slice(0, 10)) {
+        console.log(`   ${COLORS.dim}${v.id}${COLORS.reset} — ${v.reason}`)
+      }
+      if (violations.length > 10) console.log(`   ${COLORS.dim}… +${violations.length - 10} more${COLORS.reset}`)
+      console.log(`${COLORS.dim}No provider calls were made.${COLORS.reset}`)
+      process.exit(2)
+    }
+  }
   if (work.length === 0) {
     if (flags.provider === 'heygen' && flags.id) {
       console.log(`${COLORS.yellow}No eligible row for --id=${flags.id}.${COLORS.reset}`)
@@ -630,6 +748,23 @@ async function main() {
       console.log(`${COLORS.dim}Nothing to do. (queue empty after filters)${COLORS.reset}`)
     }
     process.exit(0)
+  }
+
+  // Phase 14L.2.6 — DRY-RUN preview for the HeyGen path: list each row
+  // that WOULD be queued, with its week_of and a short script preview.
+  // No provider call. No write.
+  if (heygenPath && !flags.generate) {
+    console.log(`${COLORS.bold}HeyGen rows that would be queued (DRY-RUN; --generate not set)${COLORS.reset}`)
+    for (const { row, rec } of work) {
+      const script = nonEmpty(row.video_script) ? row.video_script
+                   : nonEmpty(row.video_prompt) ? row.video_prompt
+                   : ''
+      const wc = script.trim().split(/\s+/).filter(Boolean).length
+      const preview = script.replace(/\s+/g, ' ').slice(0, 90)
+      console.log(`   ${COLORS.cyan}${row.id}${COLORS.reset}  platform=${row.platform}  week_of=${row.week_of}  status=${row.status}`)
+      console.log(`     ${COLORS.dim}target:${COLORS.reset} ${rec.target_table}  ${COLORS.dim}script:${COLORS.reset} ${wc} words · ${COLORS.dim}${preview}${preview.length < script.length ? '…' : ''}${COLORS.reset}`)
+    }
+    console.log()
   }
 
   // 4. Process each row.

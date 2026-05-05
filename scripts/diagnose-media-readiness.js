@@ -475,6 +475,38 @@ async function main() {
   console.log(`   ${COLORS.yellow}TikTok blocked — has video_script (HeyGen-ready next):${COLORS.reset}  ${tiktokBlockedHasScript}`)
   console.log()
 
+  // Phase 14L.2.6 — HeyGen batch eligibility section. Surfaces the exact
+  // batch the worker would build today and the active caps.
+  console.log(`${COLORS.bold}6e2. HeyGen batch eligibility (Phase 14L.2.6)${COLORS.reset}`)
+  const HEYGEN_DEFAULT_BATCH_MAX = 5
+  const HEYGEN_ABSOLUTE_BATCH_MAX = 10
+  // A row is HeyGen-batch-eligible when:
+  //   - posted_at is null + status is not terminal (already filtered into `unposted`)
+  //   - platform requires video (today: tiktok / youtube — only tiktok in this universe)
+  //   - video_url is empty (campaign_asset URL or row-level)
+  //   - video_script (or video_prompt) is non-empty
+  function getMergedVideoUrl(r) {
+    return r.video_url ?? r.campaign_asset?.video_url ?? null
+  }
+  const heygenEligible = unposted.filter(r => {
+    const platform = (r.platform ?? '').toLowerCase()
+    if (platform !== 'tiktok' && platform !== 'youtube') return false
+    if (nonEmpty(getMergedVideoUrl(r))) return false
+    return nonEmpty(r.video_script) || nonEmpty(r.video_prompt)
+  })
+  const heygenBlockedNoScript = unposted.filter(r => {
+    const platform = (r.platform ?? '').toLowerCase()
+    if (platform !== 'tiktok' && platform !== 'youtube') return false
+    if (nonEmpty(getMergedVideoUrl(r))) return false
+    return !nonEmpty(r.video_script) && !nonEmpty(r.video_prompt)
+  })
+  console.log(`   ${COLORS.cyan}HeyGen batch-eligible rows (have script, no video_url):${COLORS.reset} ${heygenEligible.length}`)
+  console.log(`   ${COLORS.dim}default batch cap:${COLORS.reset}                                   ${HEYGEN_DEFAULT_BATCH_MAX}`)
+  console.log(`   ${COLORS.dim}absolute batch cap (--allow-large-heygen-batch):${COLORS.reset}     ${HEYGEN_ABSOLUTE_BATCH_MAX}`)
+  console.log(`   ${COLORS.red}rows blocked — missing video_script:${COLORS.reset}                 ${heygenBlockedNoScript.length}`)
+  console.log(`   ${COLORS.dim}preview command:${COLORS.reset} node scripts/generate-missing-media.js --videos-only --provider=heygen --limit=${Math.min(HEYGEN_DEFAULT_BATCH_MAX, heygenEligible.length || HEYGEN_DEFAULT_BATCH_MAX)}`)
+  console.log()
+
   // Phase 14L.2.3 — temporary HeyGen URL warning. video_url values
   // hosted on heygen.ai are signed and expire (~24h); they MUST be
   // copied into Supabase Storage before the row can be safely posted.

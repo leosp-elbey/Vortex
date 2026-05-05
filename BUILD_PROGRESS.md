@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.2.4 complete — 4 remaining HeyGen videos queued, completed, and stored as permanent Supabase URLs. 5 of 30 TikTok rows pass media readiness. Phase 14L.2.5 in working tree — DRY-RUN script-backfill generator for the 25 TikTok rows missing `video_script`; new readiness diagnostic; media-readiness blocker breakdown. No AI call fired. No mutations. No platform calls.)
-**Last code-shipping commit:** `ec3fc3e` (Phase 14L.2.3: harden HeyGen video storage with Supabase re-upload and add temp-url repair scanner)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.4 deployed and verified on prod** · **Phase 14L.2.5 in working tree** — TikTok video-script backfill generator + readiness diagnostic. Live posting still BLOCKED. 25 TikTok rows blocked solely on missing script; this phase is the controlled DRY-RUN scaffold to fix that.
+**Last updated:** 2026-05-03 (Phase 14L.2.5 deployed; 16 of 25 TikTok scripts backfilled in production. Phase 14L.2.6 in working tree — controlled HeyGen batch unlock: replaces `--limit=1` pilot guard with default cap 5 / absolute cap 10 (`--allow-large-heygen-batch`), pre-flight refusal contract, new diagnostic section 6e2. No HeyGen call fired. No mutations. No platform calls.)
+**Last code-shipping commit:** `2b838ce` (Phase 14L.2.5: TikTok video-script backfill generator and readiness diagnostic)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.5 deployed and verified on prod** · **Phase 14L.2.6 in working tree** — controlled HeyGen batch unlock. Live posting still BLOCKED. 16 TikTok rows now HeyGen-ready (script-backfilled); 9 still need scripts; 5 already rendered to permanent Supabase URLs.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,39 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2.5 — Generate Missing TikTok Video Scripts (in working tree, 2026-05-03 — no AI call fired; default DRY-RUN; no mutations; no platform calls).**
+**Phase 14L.2.6 — Controlled HeyGen Batch Unlock (in working tree, 2026-05-03 — no HeyGen call fired; default DRY-RUN; no mutations; no platform calls).**
+
+Phase 14L.2.5 deployed at `2b838ce` and the script generator was applied across multiple operator-driven runs. Production state per the live diagnostic:
+- 16 TikTok rows have `video_script` and no `video_url` (HeyGen-ready NOW)
+- 9 TikTok rows still need scripts
+- 5 TikTok rows have permanent Supabase `video_url` (Phase 14L.2.4 + 14L.2.2 batch + pilot)
+- 0 pending HeyGen jobs
+- 0 temporary HeyGen URLs
+
+Phase 14L.2.6 unlocks small, controlled HeyGen batches now that the pipeline is proven end-to-end. The Phase 14L.2.2 hard `--limit=1` guard is replaced by a tiered cap with explicit refusal contracts.
+
+**Built in 14L.2.6 (no provider calls, no mutations):**
+- [x] `scripts/generate-missing-media.js` — new constants `HEYGEN_DEFAULT_BATCH_MAX=5` and `HEYGEN_ABSOLUTE_BATCH_MAX=10`. New flags `--allow-large-heygen-batch` (lifts cap from 5 to 10) and `--allow-when-pending` (overrides the pending-jobs refusal). Old `flags.limit !== 1` guard replaced with cap-aware logic that applies to both `--provider=heygen` and `--videos-only --provider=auto`. New pending-HeyGen-jobs query + refusal block. Defensive per-row invariant pass that refuses the batch with per-row reasons before any provider call (rows that are posted, have `video_url`, or lack a script). New DRY-RUN preview block that lists each candidate row's id / platform / week_of / status and a 90-char script preview. Banner updated to "Phase 14L.2.6".
+- [x] `scripts/diagnose-media-readiness.js` — new section `6e2. HeyGen batch eligibility` reports batch-eligible row count, both caps, blocked-no-script count, and the exact preview command.
+
+**Dry-run results:**
+- `--videos-only --provider=heygen --limit=5`: 5 rows planned (`9a9e2a52…`, `25df8c16…`, `ee431aac…`, `a805f65a…`, `dee88875…`); 80–86 word scripts, all TikTok content_calendar; posted_at unchanged at 22.
+- `--videos-only --provider=heygen --limit=6`: refused — `cap exceeded; pass --allow-large-heygen-batch`.
+- `--videos-only --provider=heygen --limit=11 --allow-large-heygen-batch`: refused — `absolute ceiling is 10`.
+- `diagnose-media-readiness.js` section 6e2: 16 batch-eligible / 9 blocked-no-script / caps shown / preview command printed.
+- `check-video-generation-status.js`: 0 pending; exit clean.
+
+**Live posting still BLOCKED.** No HeyGen call has been authorized. Once approved:
+1. (operator-approved) `node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=5` — queues exactly 5 HeyGen renders with the new batch logic
+2. Wait ~3–5 min, then `node scripts/check-video-generation-status.js --apply` — lands permanent Supabase URLs
+3. Repeat to drain the remaining 11 HeyGen-ready rows (two more `--limit=5` invocations or one `--limit=10 --allow-large-heygen-batch`)
+4. Phase 14L.2.5 generator authors scripts for the 9 still-no-script rows
+5. HeyGen those 9 rows; final state is 30 of 30 TikTok rows `Media ready`
+6. Then ship Phase 14K.1 (live autoposter)
+
+---
+
+### Pre-Phase-14L.2.6: Phase 14L.2.5 — Generate Missing TikTok Video Scripts (saved + pushed `2b838ce`; backfill applied to 16 of 25 rows in production 2026-05-03).
 
 Phase 14L.2.4 complete — the 4 remaining script-eligible HeyGen renders (`b378c767…`, `a42b8a02…`, `3e6879da…`, `41f3fa6a…`) were queued, polled, and stored as permanent Supabase URLs through the Phase 14L.2.3 hardened pipeline. Result: 5 of 30 TikTok rows pass media readiness. The 25 remaining TikTok blockers are uniformly "missing video_script" — they were inserted by the weekly-content cron with caption + image_prompt only.
 
