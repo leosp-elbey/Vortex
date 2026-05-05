@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-05 (Phase 14L.2.6 deployed and full TikTok pipeline drained — 30/30 TikTok rows pass media readiness. Phase 14M in working tree — Pre-Autoposter Posting Readiness Audit, **8/8 checks PASS**, proof file `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md` written. No platform calls. No mutations. Live posting still BLOCKED.)
-**Last code-shipping commit:** `2b838ce` (Phase 14L.2.5: TikTok video-script backfill generator and readiness diagnostic)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.6 deployed and verified on prod** · **Phase 14M in working tree** — read-only safety audit + proof file. 30/30 TikTok rows ready; 0 temp HeyGen URLs; 0 eligible queue (queue empty by design — no Mark Ready clicked yet). Next phase: 14K.1 Live Autoposter Small-Batch Pilot — 1 row only, low-risk text platform first.
+**Last updated:** 2026-05-05 (Phase 14M deployed `b119a3e`; first live posts landed for **Facebook + Instagram** ✓; **Twitter/X** cleanly failed with HTTP 402 (Twitter API tier issue, not code); TikTok pilot row Mark-Ready'd, awaiting manual Creator Center upload + Mark Posted. Phase 14M.1 in working tree — TikTok OAuth callback route added so `/api/auth/tiktok/callback` returns 307 instead of 404. Token exchange deferred. No posting changes. No platform API calls.)
+**Last code-shipping commit:** `b119a3e` (Phase 14M: pre-autoposter posting readiness audit, 8 of 8 checks pass)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14M deployed and verified on prod** · **Phase 14M.1 in working tree** — TikTok OAuth callback route. Live FB + IG posting validated end-to-end (`posted_at` 22 → 24). Twitter/X awaiting Developer Portal billing fix. TikTok manual flow pilot in progress.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,40 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14M — Final Pre-Autoposter Posting Readiness Audit (in working tree, 2026-05-05 — 8/8 checks PASS; proof file written; no mutations; no platform calls).**
+**Phase 14M.1 — TikTok OAuth Callback Route (in working tree, 2026-05-05 — no token exchange; no posting changes; no platform API calls).**
+
+Phase 14M deployed at `b119a3e`. After deploy, the operator exercised the live posting chain for the first time:
+- ✅ Facebook pilot row `30a95acf…` posted via `/api/automations/post-to-facebook` → live on the Vortex Trips Page (verified visually)
+- ✅ Instagram pilot row `7edb49ba…` posted via `/api/automations/post-to-instagram` → live on the Vortex Trips IG account (verified)
+- ❌ Twitter/X attempt on row `77a60ee3…` returned **HTTP 402 (Payment Required)** from `api.twitter.com` — Twitter API tier doesn't include posting (Free tier is read-only since 2024). Route correctly preserved row state (status='approved', posted_at=null). Operator unqueued the row.
+- 🟡 TikTok pilot row `9a9e2a52…` is Mark-Ready'd; the dashboard's "Upload to TikTok" button opens TikTok Creator Center (manual upload + manual Mark Posted bookkeeping per Phase 14K.0.6 gate)
+
+State: posted_at: 22 → 24, eligible queue: 1 (TikTok), 8/8 audit still PASS, cron still off.
+
+Phase 14M.1 was prompted by a separate concern: the TikTok Login Kit redirect URI `/api/auth/tiktok/callback` returned 404, blocking the TikTok Developer Portal from accepting the redirect. This phase adds the route — strictly the redirect surface; **no token exchange, no DB writes, no posting changes**.
+
+**Built in 14M.1 (no posting changes, no DB mutations):**
+- [x] `src/app/api/auth/tiktok/callback/route.ts` — Next.js App Router GET handler. Reads `code` / `state` / `error` / `error_description`. On `error` → redirects to `/dashboard/settings?platform=tiktok&connected=false&error=<message>` (truncated to 200 chars). On missing `code` → `error=missing_code`. On success → `connected=pending`. Token exchange intentionally deferred to a future Phase 14K-tt sub-phase that will mirror the YouTube callback's pattern (token POST + `site_settings` upsert). Uses `process.env.NEXT_PUBLIC_APP_URL` with `request.nextUrl.origin` as defensive fallback. Never logs `code` or `state`.
+
+**Behavioral guarantees:**
+- No platform API calls (route only issues redirects)
+- No content_calendar / posting_status / posting_gate_* writes
+- No `vercel.json` / cron change
+- No token storage (deferred to a future helper)
+- Sensitive `code` and `state` values never logged
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run build` — `Compiled successfully in 16.7s`; `ƒ /api/auth/tiktok/callback` registered
+- ❌ `npm run lint` not run — pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+**Verify post-deploy:** open `https://www.vortextrips.com/api/auth/tiktok/callback` (no query string) → expect a 307 redirect to `/dashboard/settings?platform=tiktok&connected=false&error=missing_code` instead of a 404. Then return to the TikTok Developer Portal and finish the Login Kit redirect-URI registration.
+
+**Live posting for the in-flight TikTok pilot is unaffected by this phase** — the OAuth callback is a separate URL surface for a future authentication flow; the manual upload + Mark Posted bookkeeping flow continues independently.
+
+---
+
+### Pre-Phase-14M.1: Phase 14M — Final Pre-Autoposter Posting Readiness Audit (deployed `b119a3e`; first live FB + IG pilots succeeded 2026-05-05).
 
 Phase 14L.2.6 deployed at `2b838ce` (script-readiness diagnostic) and the full TikTok pipeline was drained across multiple operator-authorized HeyGen batches:
 - 9 rows scripted in this session via Phase 14L.2.5 generator
