@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-03 (Phase 14L.2.2 deployed; HeyGen pilot row `71c25664…` rendered and `video_url` applied. Phase 14L.2.3 in working tree — permanent video storage hardening: completion path copies HeyGen MP4 to Supabase Storage; new `--repair-temp-urls` mode finds + fixes rows still on `heygen.ai` temp URLs; diagnostic warns when any exist. Default mode remains DRY-RUN. No HeyGen call fired. No mutations. No platform calls.)
-**Last code-shipping commit:** `e0f013d` (Phase 14L.2.2: HeyGen single-video pilot scaffold with migration 033 media metadata)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.2 deployed and verified on prod** · **Phase 14L.2.3 in working tree** — permanent video storage hardening + `--repair-temp-urls` scanner. Live posting still BLOCKED. Remaining 4 HeyGen videos NOT yet queued — operator approval required after storage hardening verified.
+**Last updated:** 2026-05-03 (Phase 14L.2.4 complete — 4 remaining HeyGen videos queued, completed, and stored as permanent Supabase URLs. 5 of 30 TikTok rows pass media readiness. Phase 14L.2.5 in working tree — DRY-RUN script-backfill generator for the 25 TikTok rows missing `video_script`; new readiness diagnostic; media-readiness blocker breakdown. No AI call fired. No mutations. No platform calls.)
+**Last code-shipping commit:** `ec3fc3e` (Phase 14L.2.3: harden HeyGen video storage with Supabase re-upload and add temp-url repair scanner)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14L.2.4 deployed and verified on prod** · **Phase 14L.2.5 in working tree** — TikTok video-script backfill generator + readiness diagnostic. Live posting still BLOCKED. 25 TikTok rows blocked solely on missing script; this phase is the controlled DRY-RUN scaffold to fix that.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,39 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (in working tree, 2026-05-03 — no provider calls; no mutations; no platform calls).**
+**Phase 14L.2.5 — Generate Missing TikTok Video Scripts (in working tree, 2026-05-03 — no AI call fired; default DRY-RUN; no mutations; no platform calls).**
+
+Phase 14L.2.4 complete — the 4 remaining script-eligible HeyGen renders (`b378c767…`, `a42b8a02…`, `3e6879da…`, `41f3fa6a…`) were queued, polled, and stored as permanent Supabase URLs through the Phase 14L.2.3 hardened pipeline. Result: 5 of 30 TikTok rows pass media readiness. The 25 remaining TikTok blockers are uniformly "missing video_script" — they were inserted by the weekly-content cron with caption + image_prompt only.
+
+Phase 14L.2.5 is the controlled DRY-RUN scaffold to fix that. The generator authors HeyGen-ready spoken text (70–110 words, no `[VISUAL: …]` cues, no portal URLs, no MLM language, mentions VortexTrips once) and writes only `content_calendar.video_script`.
+
+**Built in 14L.2.5 (no AI calls, no mutations):**
+- [x] `scripts/generate-missing-video-scripts.js` — DRY-RUN script generator. Default lists candidates + prompt structure. `--generate` calls OpenAI; prints scripts; no writes. `--generate --apply` writes ONLY `content_calendar.video_script`. `--apply` alone refused. Filters: `--limit=N` (default 5; max 25), `--id=<uuid>`, `--provider=openai`. Strict allow-list — never touches `status`, `posted_at`, `posting_status`, `posting_gate_approved`, `queued_for_posting_at`, `media_status`, `video_url`, etc. Sanitizer strips bracketed cues / speaker labels / lone hashtags / emoji range characters in case the model drifts. Word-count warnings at <50 or >140.
+- [x] `scripts/diagnose-video-script-readiness.js` — read-only. Reports total unposted TikTok / has-video / missing-video / has-script / no-script / projected HeyGen-eligible count after backfill. posted_at no-mutation cross-check.
+- [x] `scripts/inspect-missing-video-scripts.js` — one-shot inspector kept for debugging.
+- [x] `scripts/diagnose-media-readiness.js` updated — section 6e now splits the TikTok blocker into `no video_script` vs `has video_script` so each pipeline stage's remaining work is visible.
+
+**Dry-run results:**
+- Generator (default): 25 candidates, 5 sampled at default `--limit=5`, full prompt printed for the first row (`4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e`). posted_at unchanged at 22.
+- Script-readiness diagnostic: 30 unposted TikTok / 5 with video / 25 needs-script / projected 25 HeyGen-eligible after backfill.
+- Media-readiness diagnostic: section 6e now shows `TikTok blocked — no video_script: 25` and `TikTok blocked — has video_script: 0`. No temp HeyGen URLs (Phase 14L.2.3 cleanup confirmed).
+
+**Live posting still BLOCKED.** Phase 14L.2.5 only ships tooling. No AI call has been authorized. Once approved:
+1. (operator-approved) `node scripts/generate-missing-video-scripts.js --generate --limit=1 --id=4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e` — review the generated script in the terminal
+2. (operator-approved, after spot-check) `--generate --apply` on the same id — script lands in `video_script`
+3. Scale up `--limit` until all 25 rows have scripts
+4. Phase 14L.2.6 — run the existing HeyGen worker in batches of 5 against the now-script-ready rows, polling through the Phase 14L.2.3 hardened pipeline
+5. Once all 30 TikTok rows show `Media ready`, ship Phase 14K.1 (live autoposter)
+
+---
+
+### Pre-Phase-14L.2.5: Phase 14L.2.4 — HeyGen Batch (4 remaining renders, completed) (deployed; permanent Supabase video_urls applied 2026-05-03).
+
+The 4 remaining script-eligible HeyGen-ready rows were queued, polled, and stored as permanent Supabase URLs through the Phase 14L.2.3 hardened pipeline. 5 of 30 TikTok rows now pass media readiness. 0 temporary HeyGen URLs remain. posted_at unchanged at 22. No platform API calls. Live posting still BLOCKED.
+
+---
+
+### Pre-Phase-14L.2.4: Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (saved + pushed `ec3fc3e`).
 
 Phase 14L.2.2 deployed at `e0f013d`. Migration 033 applied. The HeyGen single-video pilot succeeded — content_calendar row `71c25664-38a7-4bc3-80b5-326bfc36c54d` rendered, polled, and `video_url` was applied. TikTok passing media readiness: 1 of 30. Posted_at unchanged at 22.
 

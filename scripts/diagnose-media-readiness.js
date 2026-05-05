@@ -465,7 +465,14 @@ async function main() {
   const tiktokBlocked = blockedByMedia.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length
   const tiktokPassing = tiktokTotal - tiktokBlocked
   console.log(`   ${COLORS.cyan}TikTok unposted passing media readiness:${COLORS.reset} ${tiktokPassing} of ${tiktokTotal}`)
-  console.log(`   ${COLORS.red}TikTok still blocked — no video script:${COLORS.reset}   ${videoWithoutScript.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length}`)
+  // Phase 14L.2.5 — break out the TikTok blocker by reason: needs video
+  // generation (has script) vs needs script first (no script).
+  const tiktokBlockedNoScript = videoWithoutScript.filter(r => (r.platform ?? '').toLowerCase() === 'tiktok').length
+  const tiktokBlockedHasScript = blockedByMedia.filter(r =>
+    (r.platform ?? '').toLowerCase() === 'tiktok' && nonEmpty(r.video_script)
+  ).length
+  console.log(`   ${COLORS.red}TikTok blocked — no video_script (need script backfill):${COLORS.reset} ${tiktokBlockedNoScript}`)
+  console.log(`   ${COLORS.yellow}TikTok blocked — has video_script (HeyGen-ready next):${COLORS.reset}  ${tiktokBlockedHasScript}`)
   console.log()
 
   // Phase 14L.2.3 — temporary HeyGen URL warning. video_url values

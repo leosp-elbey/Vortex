@@ -1,14 +1,171 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-03 (Phase 14L.2.2 deployed and HeyGen single-video pilot completed successfully — row `71c25664…` rendered and `video_url` applied. Phase 14L.2.3 in working tree — permanent video storage hardening: completion path copies HeyGen MP4 to Supabase Storage before writing `video_url`; new `--repair-temp-urls` scanner; diagnostic warns on `heygen.ai` host URLs. Default mode remains DRY-RUN. No HeyGen call fired in this phase; no provider/storage writes; live posting still BLOCKED.)
-**Last known good commit:** `e0f013d` — "Phase 14L.2.2: HeyGen single-video pilot scaffold with migration 033 media metadata"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.2 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used)
+**Last updated:** 2026-05-03 (Phase 14L.2.4 complete — remaining 4 HeyGen videos queued, completed, copied into Supabase Storage as permanent URLs. 5 of 30 TikTok rows now pass media readiness; the other 25 are blocked solely on missing `video_script`. Phase 14L.2.5 in working tree — DRY-RUN script-backfill generator + new readiness diagnostic + media-readiness blocker breakdown. No AI call fired in this phase; no mutations; no platform calls. Live posting still BLOCKED.)
+**Last known good commit:** `ec3fc3e` — "Phase 14L.2.3: harden HeyGen video storage with Supabase re-upload and add temp-url repair scanner"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14L.2.4 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used)
 
-**Live posting status:** STILL BLOCKED. Phase 14L.2.3 hardens video storage so completed HeyGen MP4 files are downloaded and re-uploaded into the Supabase `media` bucket before `video_url` is persisted. The 1 pilot row currently sitting on a HeyGen temp URL (`files2.heygen.ai`) is identified by the new diagnostic and repaired by `check-video-generation-status.js --repair-temp-urls`. The remaining 4 HeyGen-eligible rows are NOT yet queued — they will be once storage hardening is verified.
+**Live posting status:** STILL BLOCKED. Phase 14L.2.5 backfills `video_script` on the 25 TikTok rows that have no script today, so they can later pass through HeyGen via the existing Phase 14L.2.3 pipeline (queue → poll → permanent Supabase URL). The generator is DRY-RUN by default, calls OpenAI only with `--generate`, and writes only `content_calendar.video_script` with `--generate --apply`. No posting endpoints are touched. Operator approval is required before any `--generate` or `--apply` run.
 
 ---
 
-## Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (in working tree, 2026-05-03 — no provider/storage writes; `--apply` not run)
+## Phase 14L.2.5 — Generate Missing TikTok Video Scripts (in working tree, 2026-05-03 — no AI call fired; default DRY-RUN)
+
+### Why this phase exists
+
+After Phase 14L.2.4 the script-ready TikTok backlog is drained. The remaining bottleneck is the 25 TikTok rows that were inserted by the weekly-content cron with `caption` + `image_prompt` but no authored `video_script`. Without a script HeyGen has nothing to voice. This phase adds a controlled script generator that produces HeyGen-ready spoken text and (only with explicit operator approval) writes it into `content_calendar.video_script`.
+
+### Universe
+
+| Bucket | Count |
+|---|---|
+| Total TikTok unposted | 30 |
+| Have `video_url` (Phase 14L.2.2 + 14L.2.4 pilot + batch) | 5 |
+| Missing `video_url`, have `video_script` (HeyGen-eligible NOW) | 0 |
+| Missing `video_url`, no `video_script` (script-backfill candidates) | **25** |
+
+After this phase backfills scripts, 25 + 0 = 25 rows become HeyGen-eligible. Together with the 5 already done, that gives 30 of 30 TikTok rows passing media readiness.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `scripts/generate-missing-video-scripts.js` | DRY-RUN script generator. Default: lists candidates + prints prompt structure. `--generate`: calls OpenAI; prints results; no writes. `--generate --apply`: writes only `content_calendar.video_script`. `--apply` alone refused. Filters: `--limit=N` (default 5; max 25), `--id=<uuid>`, `--provider=openai` (default; only one wired). Strict allow-list — never touches `status`, `posted_at`, `posting_status`, `posting_gate_approved`, `queued_for_posting_at`, `media_status`, `video_url`, or any other column. |
+| `scripts/diagnose-video-script-readiness.js` | Read-only diagnostic for the script-readiness universe. Reports total unposted TikTok rows, has-video / missing-video split, has-script / no-script split, projected HeyGen-eligible count post-backfill, posted_at no-mutation cross-check. |
+| `scripts/inspect-missing-video-scripts.js` | One-shot read-only enumerator used during development to confirm row shape; kept in repo for future debugging. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `scripts/diagnose-media-readiness.js` | Phase 14L.2.5 — section `6e. HeyGen pilot status` now breaks the TikTok blocker into two precise reasons: `TikTok blocked — no video_script (need script backfill)` and `TikTok blocked — has video_script (HeyGen-ready next)`. Replaces the prior single-line "still blocked — no video script" so the operator sees what work remains in each pipeline stage. |
+
+### Generator prompt structure
+
+System prompt (frozen in code so prompts are auditable):
+
+```
+You write short spoken video scripts for HeyGen avatar videos.
+The brand is VortexTrips — a travel savings membership.
+
+Hard rules:
+- 70 to 110 words. Targets 30 to 45 seconds at normal speech.
+- Plain spoken English only. NO bracketed cues like [VISUAL: ...] or [B-ROLL: ...] — HeyGen will speak whatever you write.
+- NO speaker labels (no "Hook:", "Outro:", "CTA:" prefixes).
+- Natural conversational tone. Short sentences. No jargon.
+- Mention VortexTrips by name once, naturally.
+- End with a simple call to action that points the viewer to the link in the post caption / bio. Do NOT include a URL in the spoken text.
+- NEVER mention myvortex365.com or any other portal URL by name.
+- NEVER make hard income claims, MLM language, or guarantees. No "downline", "network marketing", "MLM".
+- No emojis (HeyGen would say them aloud).
+- No hashtags in the spoken text.
+
+Output exactly the spoken script. No preamble, no explanation, no quote marks around it.
+```
+
+User prompt template:
+
+```
+Platform: TikTok
+Posting week: <week_of>
+
+Caption (already on the post): <caption>
+Visual subject: <image_prompt>            # only if non-empty
+Hashtags (post-level, NOT spoken): <comma-separated, first 6>   # only if non-empty
+
+Write the 30-45 second spoken script now. Plain text only.
+```
+
+The generated text is run through a defensive sanitizer (`sanitizeScript`) that strips `[VISUAL: …]` blocks, speaker labels, lone `#hashtags`, and emoji-range characters in case the model ignores its instructions. Word count is checked: 70–110 is the target window; <50 or >140 is logged as a warning but not an error (operator decides).
+
+### Sample selected pilot row
+
+`4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e` — TikTok, week_of `2026-04-20`, status `approved`. Caption: *"Want to travel more and spend less? 🌍 Check out Travel Team Perks for unbeatable savings! #TravelHacks #SaveOnTravel"*. Visual subject: *"montage of exciting travel destinations and adventurous activities"*. Hashtags: `TravelHacks`, `SaveOnTravel`. No `tracking_url`, no `campaign_asset_id` (purely organic). The first call from `--generate --apply --limit=1 --id=4faa0732…` would author a 30–45s spoken script and write it to that row's `video_script` column only.
+
+### Allowed writes (only with `--generate --apply`)
+
+| Column | Value |
+|---|---|
+| `content_calendar.video_script` | Sanitized AI output |
+
+### Forbidden writes (any flag combination — enforced via explicit allow-list)
+
+`status`, `posted_at`, `posting_status`, `posting_gate_approved`, `queued_for_posting_at`, `media_status`, `media_source`, `media_generated_at`, `media_error`, `media_metadata`, `image_url`, `video_url`, `caption`, `image_prompt`, `hashtags`, `campaign_asset_id`, `tracking_url`.
+
+### Provider APIs called?
+
+**No.** Zero OpenAI / HeyGen / Pexels calls in this phase. The DRY-RUN generator exits before any AI call.
+
+### Rows mutated?
+
+**No.** posted_at row count: 22 → 22 across all script runs. No `UPDATE` was issued.
+
+### Platform APIs called?
+
+**No.** Zero Facebook / Instagram / TikTok / X / email API calls.
+
+### Tests run
+
+- `npx tsc --noEmit` → ✅ PASS — clean
+- `npm run build` → ✅ PASS — `Compiled successfully in 16.1s`
+- `node scripts/generate-missing-video-scripts.js` → ✅ PASS DRY-RUN — 25 candidates / 5 sampled at default `--limit=5`; first row's full prompt printed; posted_at unchanged at 22
+- `node scripts/diagnose-video-script-readiness.js` → ✅ PASS — 30 total / 5 with video / 25 needs-script; projected 25 HeyGen-ready post-backfill; posted_at unchanged at 22
+- `node scripts/diagnose-media-readiness.js` → ✅ PASS — section 6e now shows `TikTok blocked — no video_script: 25` and `TikTok blocked — has video_script: 0`; no temp HeyGen URLs (Phase 14L.2.3 cleanup confirmed)
+- `npm run lint` → ❌ not run; pre-existing Phase 13 ESLint v8/v9 mismatch unrelated
+
+### Risks and deferred items
+
+- **OpenAI cost.** ~25 rows × ~150 tokens system + ~80 tokens user + ~120 tokens output ≈ 9k tokens total. At gpt-4o pricing this is well under $0.10 for the full backfill. Per-call cost is rounding-error scale.
+- **Script quality variance.** GPT-4o usually obeys "no bracketed cues / no labels", but the sanitizer catches drift. Word-count warnings flag outliers — operator can re-run individual rows with `--id=<uuid>` after spot-checking.
+- **No re-author when caption is weak.** A few rows have very thin captions (e.g. `City life on a budget #VortexTrips #TravelSavings #CityBreak`). The `image_prompt` provides additional context; the generator falls back to it via the user prompt. If the resulting script feels generic, the operator can iterate by editing the row's `caption` / `image_prompt` and re-running.
+- **No cron auto-run.** Hobby plan is at 4/4 cron slots. The script is operator-invoked. A future phase that promotes this to cron would need to free up a slot.
+- **No multi-provider fallback.** OpenAI is the only wired provider. If it errors, the row is logged failed and skipped — no Anthropic / OpenRouter fallback at this stage.
+
+### Required approvals before running
+
+- **`--generate` (AI calls, no DB writes)** — explicit operator authorization in chat. OpenAI is billed per token but no row state changes.
+- **`--generate --apply` (AI calls + writes `video_script`)** — explicit operator authorization in chat. Use `--limit=1 --id=4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e` for the first call; review the script in the row; then scale `--limit` up.
+
+### Migration application instructions
+
+**None.** This phase adds no schema. `video_script` is a pre-existing TEXT column on `content_calendar`.
+
+### Deploy instructions
+
+Phase 14L.2.5 is operator-tooling only — no app code changed. Deploy is optional unless committing the docs:
+
+1. Confirm `git push origin main` returns `Everything up-to-date` on the second push.
+2. (Optional) `npx vercel --prod --yes` — only docs / scripts changed; no route impact.
+
+### Smoke-test checklist
+
+- [ ] Push code; (optional) deploy via Vercel
+- [ ] (operator-approved) `node scripts/generate-missing-video-scripts.js --generate --limit=1 --id=4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e` — review the AI output in the terminal
+- [ ] (operator-approved) re-run with `--apply` once script reads well
+- [ ] `SELECT video_script FROM content_calendar WHERE id = '4faa0732-9655-40cd-a7c7-3ff6ca7d7c9e';` returns the new spoken script
+- [ ] `node scripts/diagnose-video-script-readiness.js` — `no video_script — script-backfill candidates: 24` (was 25)
+- [ ] After spot-check, scale up: `node scripts/generate-missing-video-scripts.js --generate --apply --limit=10`
+- [ ] Final state: `node scripts/diagnose-media-readiness.js` should show `TikTok blocked — no video_script: 0` and `rows ready for HeyGen (have script): 25`
+
+### Recommended next phase
+
+**Phase 14L.2.6 — HeyGen the 25 newly-scripted rows through the hardened pipeline.** Concrete order:
+1. Backfill `video_script` for all 25 rows (Phase 14L.2.5 `--apply`).
+2. Run the existing HeyGen worker in batches of 5: `node scripts/generate-missing-media.js --generate --apply --videos-only --provider=heygen --limit=5` (the Phase 14L.2.4 unlock means `--limit > 1` is now permitted).
+3. Poll: `node scripts/check-video-generation-status.js --apply` — the Phase 14L.2.3 hardening guarantees permanent Supabase URLs.
+4. Verify on the dashboard that all 30 TikTok rows show `Media ready`.
+5. Then ship Phase 14K.1 (live autoposter).
+
+**14L.2.7 (parallel)** — tighten `weekly-content/route.ts` so newly-generated organic TikTok rows ship with a `video_script` from the start, eliminating the future need for backfill.
+
+---
+
+## Phase 14L.2.4 — HeyGen Batch (4 remaining renders, completed) (deployed; permanent Supabase video_urls applied 2026-05-03)
+
+The 4 remaining script-eligible HeyGen-ready rows (`b378c767…`, `a42b8a02…`, `3e6879da…`, `41f3fa6a…`) were queued, polled, and stored as permanent Supabase URLs through the Phase 14L.2.3 hardened pipeline. Result: 5 of 30 TikTok rows now pass media readiness; 0 temporary HeyGen URLs in the system; posted_at unchanged at 22; no platform API calls; live posting still BLOCKED.
+
+---
+
+## Phase 14L.2.3 — HeyGen Batch + Permanent Video Storage Hardening (deployed `ec3fc3e`; pilot row repaired and 4 batch rows landed permanently 2026-05-03)
 
 ### Why this phase exists
 
