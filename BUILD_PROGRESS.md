@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-05 (Phase 14M.1 deployed `8b4da4c`; manual TikTok pilot landed live (FB + IG + TikTok all posted on platforms). Phase 14M.2 in working tree — closes a `/api/content` PATCH bookkeeping bug discovered after the TikTok Mark Posted click. Route fix + audit Check 9 invariant + repair script. DRY-RUN only. No DB writes. No platform calls.)
-**Last code-shipping commit:** `8b4da4c` (Phase 14M.1: add TikTok OAuth callback route, no token exchange yet)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14M.1 deployed and verified on prod** · **Phase 14M.2 in working tree** — atomic posted_at fix + 9th audit check + repair tool. Manual posting validated live across FB + IG + TikTok. Twitter/X paused on Developer Portal billing.
+**Last updated:** 2026-05-06 (Phase 14M.2 deployed `224e01b`; Phase 14N completed 5 clean manual cycles (FB×2, IG×2, TikTok×1); Phase 14O Scope C plan + Scope A baseline in working tree. No live cron. No platform API calls during this phase. posted_at: 30.)
+**Last code-shipping commit:** `224e01b` (Phase 14M.2: fix Mark Posted to set posted_at atomically, add audit Check 9, add repair tool)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14M.2 deployed and verified on prod** · **Phase 14N complete (5/5 manual cycles)** · **Phase 14O in working tree** — autoposter pilot plan + dry-run baseline. 8 live posts across FB/IG/TikTok since 2026-05-05. Twitter/X excluded (billing). Cron stays off; live cron decision gated on Phase 14O.1 approval.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,38 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14M.2 — Fix TikTok Mark Posted bookkeeping + posted_at invariant audit (in working tree, 2026-05-05 — code fix; audit Check 9; repair script DRY-RUN; no DB writes; no platform calls).**
+**Phase 14O — Autoposter Pilot Plan + One-Row Cron Simulation (in working tree, 2026-05-06 — Scope C plan written; Scope A dry-run baseline confirmed; awaiting operator Mark Ready click for the live dry-run with one queued row).**
+
+Phase 14M.2 deployed at `224e01b`. Phase 14N drained 5 clean manual cycles across FB/IG/TikTok (posted_at: 25 → 30). Phase 14O is the pre-cron planning + simulation step — **no live cron decision is being made in this phase**.
+
+**Built in 14O (no code changes, no DB writes, no platform calls):**
+- [x] `PHASE_14O_AUTOPOSTER_PILOT_PLAN.md` (Scope C) — full 10-section pre-cron contract: production baseline, 13 cron guardrails, per-platform first-cron order (FB → IG → TikTok-manual → Twitter-excluded), rollback plan, success criteria, failure conditions, operator instructions for the live dry-run, approval gate before Phase 14O.1.
+- [x] Scope A baseline run — `node scripts/diagnose-autoposter-dry-run.js` against the live `/api/cron/autoposter-dry-run` endpoint with current empty queue: HTTP 200 / `dry_run: true` / `live_posting_blocked: true` / `eligible_count: 0` / 54 rows correctly skipped / posted_at unchanged at 30.
+
+**What's NOT built in 14O:**
+- ❌ No `vercel.json` change. No autoposter cron registered.
+- ❌ No live posting. No platform API calls.
+- ❌ No row mutations. (Operator's eventual Mark Ready click is the only DB write contemplated.)
+- ❌ No TikTok OAuth token exchange. No Twitter unblock.
+
+**Operator next step (the live dry-run proof):**
+1. Mark Ready ONE Facebook row in `/dashboard/content`
+2. Tell Claude `"ready - Facebook"`
+3. Claude runs the audit + diagnostic + curl recipe (PowerShell-compatible) against the live endpoint
+4. Verify all 6 success criteria from the plan doc §5
+5. Decide: Phase 14O closed (proof captured) → Phase 14O.1 (live cron, FB-only, 1 row/day with auto-disable) is the next operator-authorized phase
+
+**Cron stays off** until Phase 14O.1 ships with operator approval. The plan doc's §10 lists the 4 conditions that must all be met before that happens.
+
+---
+
+### Pre-Phase-14O: Phase 14N — Controlled Manual Posting Expansion (5/5 clean cycles 2026-05-05/06).
+
+posted_at: 25 → 30 across 5 cycles (FB×2 atomic platform-poster path; IG×2 atomic platform-poster path; TikTok×1 atomic `/api/content` PATCH bookkeeping path — Phase 14M.2 route fix proven natively). Validator disagreements: 0. Spillover: none. Check 9: PASS each cycle.
+
+---
+
+### Pre-Phase-14N: Phase 14M.2 — Fix TikTok Mark Posted bookkeeping + posted_at invariant audit (saved + pushed `224e01b`; deployed `dpl_DRN42…`; repair script `--apply --id=9a9e2a52…` ran successfully closing the existing TikTok pilot anomaly 2026-05-05).
 
 Phase 14M.1 deployed at `8b4da4c`. Manual TikTok pilot completed live (operator clicked Upload to TikTok → Creator Center → published → Mark Posted). Phase 14M's audit caught a real bookkeeping bug immediately after: TikTok pilot row `9a9e2a52…` had `status='posted'` but `posted_at=null`. Root cause was the `/api/content` PATCH route's UPDATE only including `status`, never `posted_at`.
 

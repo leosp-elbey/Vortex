@@ -1,10 +1,108 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-05 (Phase 14M.1 deployed `8b4da4c`; manual TikTok pilot completed live (operator clicked Upload→Creator Center→published→Mark Posted); discovered `/api/content` PATCH bug — Mark Posted set `status='posted'` but not `posted_at`. Phase 14M.2 in working tree: route fix + audit Check 9 invariant + repair script. No platform calls. No DB writes (DRY-RUN only). Live posting still BLOCKED on cron.)
-**Last known good commit:** `8b4da4c` — "Phase 14M.1: add TikTok OAuth callback route, no token exchange yet"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14M.1 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; first live posts on FB+IG+TikTok completed 2026-05-05)
+**Last updated:** 2026-05-06 (Phase 14M.2 deployed `224e01b`; Phase 14N completed 5 clean manual cycles (2× FB, 2× IG, 1× TikTok); Phase 14O Scope C plan + Scope A dry-run baseline in working tree. No live cron. No platform API calls. No DB writes during this phase.)
+**Last known good commit:** `224e01b` — "Phase 14M.2: fix Mark Posted to set posted_at atomically, add audit Check 9, add repair tool"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14M.2 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Manual posting validated end-to-end across **Facebook + Instagram + TikTok** during this session. Twitter/X paused on Developer Portal billing (HTTP 402). Cron stays disabled. Phase 14M.2 closes a bookkeeping bug discovered immediately after the TikTok pilot: the Mark Posted route flipped `status='posted'` but didn't stamp `posted_at`. The fix + audit invariant + repair script all land in this phase; the repair runs DRY-RUN until explicitly authorized.
+**Live posting status:** Manual workflow verified end-to-end across all 3 supported platforms (FB + IG + TikTok). Twitter/X paused on Developer Portal billing (HTTP 402). Cron stays disabled. Phase 14O is the planning + dry-run-simulation step before any cron decision; the live cron decision (Phase 14O.1) is gated on the 6 success criteria documented in [PHASE_14O_AUTOPOSTER_PILOT_PLAN.md](PHASE_14O_AUTOPOSTER_PILOT_PLAN.md).
+
+---
+
+## Phase 14O — Autoposter Pilot Plan + One-Row Cron Simulation (in working tree, 2026-05-06 — Scope C plan written; Scope A dry-run prep done; awaiting operator Mark Ready click before live dry-run)
+
+### What this phase ships
+
+**Scope C — Plan doc (done):** [PHASE_14O_AUTOPOSTER_PILOT_PLAN.md](PHASE_14O_AUTOPOSTER_PILOT_PLAN.md) — full 10-section pre-cron contract documenting current production baseline, the 13 cron guardrails, per-platform first-cron order (FB → IG → TikTok-manual → Twitter-excluded), rollback plan, success criteria, failure conditions, operator instructions, and the approval gate.
+
+**Scope A — Dry-run baseline (done) + dry-run-with-queue (awaits operator):** Re-uses the existing Phase 14K dry-run tooling (`/api/cron/autoposter-dry-run` route + `scripts/diagnose-autoposter-dry-run.js`). At baseline (queue empty) the diagnostic confirms HTTP 200 / `dry_run: true` / `live_posting_blocked: true` / `eligible_count: 0` / 54 rows correctly skipped with `posting_status is 'idle', need 'ready'` / `posted_at` unchanged at 30. The next step (live dry-run with one ready row) requires the operator to Mark Ready exactly one Facebook row in the dashboard, then re-run the diagnostic + curl the live endpoint.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `PHASE_14O_AUTOPOSTER_PILOT_PLAN.md` | The planning + simulation contract. 10 sections including production baseline, 13 cron guardrails, per-platform rollout order, rollback plan, success/failure criteria, operator instructions for the live dry-run, and the approval gate before Phase 14O.1. |
+
+### Files updated
+
+None (no code changed).
+
+### Production baseline (this phase)
+
+| Metric | Value |
+|---|---|
+| `posted_at` count | **30** |
+| `status='posted'` count | 29 (1 less than `posted_at` due to legacy IG WARN row, untouched per spec) |
+| Eligible posting queue | **0** (no row currently `posting_status='ready' && posting_gate_approved=true`) |
+| Approved + unposted | 53 |
+| Audit summary | 9/9 PASS |
+| Check 9 (posted_at invariant) | PASS — 0 FAIL, 1 WARN (`a0bd9d16…` legacy) |
+| Phase 14N manual cycles | 5/5 clean: FB → IG → FB → IG → TikTok |
+| Cron registered | 4/4 slots used (`check-heygen-jobs`, `weekly-content`, `score-and-branch`, `send-sequences`); **NO autoposter cron** |
+| Twitter/X | excluded (HTTP 402 from Developer Portal) |
+| Working tree | clean (only `PHASE_14O_AUTOPOSTER_PILOT_PLAN.md` is untracked + tsconfig.tsbuildinfo modified) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| `npm run build` | ⚠️ Compiled successfully (`Compiled successfully in 17.9s`); page-data collection fails on routes that instantiate Resend at module-eval (`/api/automations/quote-email`, `/api/automations/trigger-sba`) due to local `RESEND_API_KEY=""` from earlier `vercel env pull` — pre-existing local-env-only issue, NOT caused by Phase 14O. Production deploys unaffected (Vercel uses real values at deploy time). |
+| `node scripts/audit-pre-autoposter-readiness.js` | ✅ 9/9 PASS at baseline; eligible queue 0; posted_at 30; Check 9 PASS |
+| `node scripts/diagnose-autoposter-dry-run.js` | ✅ HTTP 200 / dry_run=true / live_posting_blocked=true / eligible_count=0 / 54 correctly skipped / posted_at unchanged at 30 |
+
+### Rows mutated, platform APIs called
+
+**Zero on both.** The audit + dry-run diagnostic + plan-doc creation are pure read-only operations; the only write is to a local markdown file. `posted_at` count stayed at 30 throughout.
+
+### Operator instructions for the live dry-run (next step)
+
+When you're ready to exercise the dry-run end-to-end:
+
+1. Open `/dashboard/content` while signed in as admin.
+2. Pick one approved + unposted **Facebook** row (Phase 14O.1 will start FB-only, so use a FB row to keep the dry-run aligned with the planned cron's first platform). It must have `image_url` populated.
+3. Click **Mark Ready** on that one row only.
+4. Tell Claude `"ready - Facebook"`.
+5. Claude runs the audit + diagnostic + curl recipe (see §8 of the plan doc) and verifies all success criteria.
+6. **Do NOT** click the platform Post button. The dry-run proves the autoposter logic without ever calling Facebook's API.
+7. After the dry-run passes, Claude will tell you to either Remove the row from Queue OR convert it to a real manual Cycle 6 (your choice).
+
+The full curl recipe (PowerShell-compatible) lives in §8 step 3 of the plan doc.
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+**Optional.** Phase 14O is operator-tooling + a planning artifact only — no app code changed. The plan doc can be committed alongside the next code change (Phase 14M.2's commit covered the route fix, so this phase has no production-observable surface).
+
+### Recommended next phase
+
+**After the live dry-run succeeds (operator action required):**
+1. Phase 14O.1 — register a single daily cron (`vercel.json`) to invoke `/api/cron/autoposter-dry-run` (initially still as dry-run-only) for one week of observability without any live posting.
+2. Phase 14O.2 — flip the route from dry-run-only to live posting WITH the 13 guardrails in §2 of the plan, FB-only, 1 row/day, auto-disable on first failure.
+3. Phase 14O.3 — extend to Instagram after FB has 7 consecutive clean cron runs.
+4. Phase 14K-tt — separately, ship the TikTok OAuth token-exchange helper so TikTok can join the autoposter cron.
+5. **Twitter/X stays excluded** until the Developer Portal billing is fixed.
+
+---
+
+## Phase 14N — Controlled Manual Posting Expansion (deployed verification across 5 cycles 2026-05-05/06)
+
+5 manual posting cycles completed cleanly across the post-Phase-14M.2 deploy. Each cycle verified:
+- Mark Ready → audit (eligible queue: 1) → click Post button → audit (queue: 0, posted_at +1, Check 9 PASS, no spillover).
+
+| Cycle | Platform | Row | Path |
+|---|---|---|---|
+| 1 | Facebook | `4907d113…` | `/api/automations/post-to-facebook` → Graph API + atomic UPDATE |
+| 2 | Instagram | `469a6eb5…` | `/api/automations/post-to-instagram` → Graph API + atomic UPDATE |
+| 3 | Facebook | (id not captured this turn) | same as cycle 1 |
+| 4 | Instagram | (id not captured this turn) | same as cycle 2 |
+| 5 | TikTok | `25df8c16…` | Creator Center upload + `/api/content` PATCH (Phase 14M.2 fix verified natively — no repair needed) |
+
+posted_at: 25 → 30 (5 atomic writes, one per cycle). 0 platform-API failures. 0 validator disagreements. Phase 14M.2 route fix proven on its actual target path (TikTok bookkeeping cycle 5 needed no repair).
+
+---
 
 ---
 
