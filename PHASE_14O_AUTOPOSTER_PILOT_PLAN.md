@@ -237,12 +237,92 @@ Working tree should be clean.
 
 ---
 
-## 10. Approval gate before Phase 14O.1
+## 10. Approval gate before Phase 14O.1 (now superseded — see §11)
 
 Phase 14O.1 (live cron) ships only after:
 1. ✅ Plan doc reviewed by operator
-2. ⏳ Phase 14O dry-run (§8 steps 1–4) returns the expected results
+2. ✅ Phase 14O dry-run (§8 steps 1–4) returned the expected results — `eligible_count: 1`, `live_posting_blocked: true`, `posted_at` unchanged at 30 (later 29 after legacy IG WARN cleanup), HTTP 200, all 6 success criteria met. Captured 2026-05-06.
 3. ⏳ Operator explicitly authorizes `vercel.json` cron registration
-4. ⏳ A staging window is chosen (e.g. 2026-05-07 9am UTC) for the first cron firing — operator on standby for immediate rollback
+4. ⏳ A staging window is chosen for the first cron firing — operator on standby for immediate rollback
 
 Until all four are checked, cron stays OFF.
+
+---
+
+## 11. Path D adopted: manual autoposter runner before any cron
+
+**Decision (2026-05-06):** Skip the immediate Phase 14O.1 (live cron) step. Adopt **Path D** from the four-paths analysis: a manual runner script that exercises the autoposter pipeline once per operator click, with the same gate/atomic-update guarantees the deployed cron route would enforce. Run for ~30 successful manual cycles before considering live cron registration.
+
+### Why Path D before cron
+
+- Real-world cadence learning. We don't yet know whether the right rhythm is one-row-per-day, one-per-business-day, sub-daily, or weekend-included. Path D lets the operator choose each day until a pattern emerges.
+- No `vercel.json` change. Hobby plan's 4-cron limit isn't touched. No upgrade, no slot reshuffle.
+- Same code surface as the future cron. The runner mirrors `getAutoposterEligibleRows` + `validateAutoposterCandidate` + `validateMediaReadiness` + the platform-poster route logic. When Phase 14O.2 promotes the runner to a cron, the eligibility logic is already proven.
+- Operator-in-the-loop. Every post is a deliberate click. Rolling back is instant (just don't run the script). No "did the cron fire? did it land? do I need to look at logs?" anxiety.
+- Catches edge cases at human speed. If the gate's input shape changes (e.g., a future migration adds a new column), the runner's first failure surfaces it the next morning instead of overnight when nobody's watching.
+
+### Runner script
+
+`scripts/run-autoposter-once.js` — committed in this phase.
+
+### Operator daily routine
+
+```bash
+# 1. Audit (sanity baseline)
+node scripts/audit-pre-autoposter-readiness.js
+# Expect: 9/9 PASS, posted_at = current count, queue size matches Mark Ready clicks
+
+# 2. Mark Ready exactly one Facebook or Instagram row in /dashboard/content
+#    (browser action; runner refuses if queue size != 1)
+
+# 3. DRY-RUN the autoposter — confirms selection, prints plan, no platform call
+node scripts/run-autoposter-once.js
+# Expect: selected row id, platform, caption preview, "DRY-RUN" footer
+
+# 4. Authorize the live post
+node scripts/run-autoposter-once.js --apply
+# Expect: platform call lands, atomic UPDATE writes status='posted' + posted_at
+#         post-flight invariants printed
+
+# 5. Re-audit to lock in the proof
+node scripts/audit-pre-autoposter-readiness.js
+# Expect: 9/9 PASS, posted_at: +1, eligible queue: 0, Check 9: PASS
+```
+
+### Refusal contract (encoded in the runner)
+
+The runner refuses (exits non-zero) on any of:
+- Eligible queue size != 1
+- Selected row's platform is `twitter`, `x`, or `tiktok`
+- Selected row's platform is not in `{facebook, instagram}` (defense in depth)
+- `validateAutoposterCandidate` returns a non-null reason
+- `validateMediaReadiness` returns blocked
+- Platform credentials missing (no FACEBOOK_PAGE_ID / FACEBOOK_PAGE_ACCESS_TOKEN for FB; no INSTAGRAM_BUSINESS_ACCOUNT_ID / INSTAGRAM_ACCESS_TOKEN for IG)
+- Platform API call fails — DB unchanged, exits with error code 3
+- Atomic UPDATE affects 0 or >1 rows (defensive `.eq('status','approved').is('posted_at',null)` guards inline)
+- Post-flight `posted_at` delta != +1
+- Post-flight `status='posted'` delta != +1
+- Post-flight Check 9 anomaly (a) > 0 (a row landed `status='posted'` without `posted_at`)
+- Post-flight eligible queue != 0
+
+### Promotion criteria to Phase 14O.2 (live cron)
+
+After ~30 consecutive clean `--apply` runs, the operator may promote to a live cron with confidence that:
+- All gate transitions land correctly
+- The atomic UPDATE never produces orphans
+- Platform-side reliability is acceptable (FB + IG return 2xx consistently)
+- No drift between manual + autoposter validators
+- The script's refusal contract has been exercised (try queue size 0, queue size 2, twitter rows, tiktok rows — confirm refusals fire as expected)
+
+If any of those holds break during the 30 runs, fix the root cause before continuing the count. Reset the counter to 0 after any incident.
+
+### Phase 14O.2 (cron promotion) preview
+
+When the time comes, Phase 14O.2 will:
+1. Choose between Path A (free, drop `check-heygen-jobs` slot) or Path C (Vercel Pro upgrade)
+2. Add a single `vercel.json` cron entry pointing at a route that wraps `scripts/run-autoposter-once.js --apply`'s logic
+3. Keep the runner script as the manual fallback / debug tool
+4. Add a `site_settings.autoposter_cron_enabled` flag (default `false`) the cron route checks before posting — operator-controlled kill switch
+5. Add an auto-disable trigger: after any non-2xx platform response, set the flag to `false` and skip subsequent runs until manually re-enabled
+
+Phase 14O.2 is gated on the 30-run criteria above.

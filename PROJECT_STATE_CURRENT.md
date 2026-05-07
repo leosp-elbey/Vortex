@@ -1,10 +1,156 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-06 (Phase 14M.2 deployed `224e01b`; Phase 14N completed 5 clean manual cycles (2× FB, 2× IG, 1× TikTok); Phase 14O Scope C plan + Scope A dry-run baseline in working tree. No live cron. No platform API calls. No DB writes during this phase.)
-**Last known good commit:** `224e01b` — "Phase 14M.2: fix Mark Posted to set posted_at atomically, add audit Check 9, add repair tool"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14M.2 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-06 (Phase 14O Scopes C+A committed `f74ddfc`; legacy IG WARN cleared via repair script; Phase 14O.1 in working tree — `scripts/run-autoposter-once.js` manual autoposter runner. No live cron. No platform API calls in this phase. posted_at: 29; status='posted': 29; both counts now perfectly aligned.)
+**Last known good commit:** `f74ddfc` — "Phase 14O: autoposter pilot plan and dry-run baseline, no cron enabled"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14O deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Manual workflow verified end-to-end across all 3 supported platforms (FB + IG + TikTok). Twitter/X paused on Developer Portal billing (HTTP 402). Cron stays disabled. Phase 14O is the planning + dry-run-simulation step before any cron decision; the live cron decision (Phase 14O.1) is gated on the 6 success criteria documented in [PHASE_14O_AUTOPOSTER_PILOT_PLAN.md](PHASE_14O_AUTOPOSTER_PILOT_PLAN.md).
+**Live posting status:** Phase 14O.1 adopts **Path D** (manual runner before any cron). The runner script enforces the same gate / atomic-update / refusal contract that a future cron would need. Operator runs `node scripts/run-autoposter-once.js --apply` once per Mark Ready cycle for ~30 cycles; then Phase 14O.2 evaluates cron promotion. Cron stays disabled. Twitter/X excluded (HTTP 402). TikTok manual-only (no token-exchange helper yet).
+
+---
+
+## Phase 14O.1 — Manual Autoposter Runner (in working tree, 2026-05-06 — DRY-RUN tested; no platform calls; no DB writes)
+
+### What this phase ships
+
+`scripts/run-autoposter-once.js` — a manual autoposter runner that mirrors the deployed `/api/cron/autoposter-dry-run` eligibility logic AND (with `--apply`) the platform-poster routes' Graph API call + atomic UPDATE pattern. Default mode is DRY-RUN (no platform call, no DB write). With `--apply`, the runner posts exactly one eligible row to Facebook OR Instagram. Twitter/X and TikTok are explicitly refused.
+
+### Why Path D before cron
+
+We don't yet know the right cron cadence (daily? business-day-only? sub-daily across timezones?) and we haven't yet exercised the cron-shaped path enough to trust it overnight. Path D gives ~30 days of operator-in-the-loop runs to learn the rhythm, validate the contract under real platform conditions, and surface any edge cases at human speed before promoting to a registered cron in Phase 14O.2.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `scripts/run-autoposter-once.js` | The runner. ~400 lines. Mirrors `validateMediaReadinessJs` + `validateAutoposterCandidateJs` (in JS) for cross-tooling consistency with `audit-pre-autoposter-readiness.js`. Mirrors `getAutoposterEligibleRows` server-side query. Mirrors `post-to-facebook` / `post-to-instagram` route Graph API calls (line-by-line). Atomic UPDATE: `status='posted', posted_at=now()` with defensive `.eq('status','approved').is('posted_at',null)` guards inline. Snapshots posted_at + status='posted' counts before/after; verifies expected delta of +1 each; verifies Check 9 invariant; verifies eligible queue drained to 0. Refuses if any post-flight invariant slips (exits with code 5). |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `PHASE_14O_AUTOPOSTER_PILOT_PLAN.md` | New §11 documents the Path D decision, daily routine, refusal contract, promotion criteria to Phase 14O.2, and the Phase 14O.2 preview. §10 marked superseded but preserved for history. |
+
+### Refusal contract (encoded in the runner)
+
+| Condition | Behavior | Exit code |
+|---|---|---|
+| Eligible queue size = 0 | Print "no eligible row" message; exit clean | 0 |
+| Eligible queue size > 1 | Refuse; print all queued rows; exit | 2 |
+| Platform is twitter / x / tiktok | Refuse with platform-specific reason; exit | 2 |
+| Platform not in `{facebook, instagram}` | Refuse "platform not supported by Phase 14O.1"; exit | 2 |
+| `validateAutoposterCandidate` returns non-null | Refuse with that reason; exit | 2 |
+| `validateMediaReadiness` blocked | Refuse with reasons; exit | 2 |
+| Platform credentials missing (env) | Refuse "credentials not configured"; exit | 3 |
+| Platform API non-2xx (`--apply` only) | DB unchanged; exit | 3 |
+| Atomic UPDATE affected 0 or >1 rows | Print warning about platform post landing without DB flip; exit | 4 |
+| Post-flight invariant slip (delta, Check 9, queue) | Print failures; exit | 5 |
+
+### Allowed writes (only with `--apply`, only on platform success)
+
+- `content_calendar.status` → `'posted'`
+- `content_calendar.posted_at` → `new Date().toISOString()`
+
+(Atomic single UPDATE; defensive `.eq('status','approved').is('posted_at',null)` guards inline.)
+
+### Forbidden writes (any flag combination — enforced by query shape)
+
+- `posting_status` / `posting_gate_approved` / `queued_for_posting_at` / `posting_block_reason`
+- `video_url` / `image_url` / `caption` / `image_prompt`
+- `campaign_asset_id` / `tracking_url`
+- Any column on `campaign_assets`
+- Any platform API beyond Facebook Graph (FB) or Instagram Graph (IG) endpoints used by the corresponding manual routes
+
+### DRY-RUN test against current production state
+
+Current state: queue empty (last cleanup of cycle 5 + 14O Scope A row removal landed). Runner correctly handles this:
+
+```
+Phase 14O.1 — Manual Autoposter Runner [DRY-RUN]
+One row only. No cron. No Twitter/X. No TikTok.
+
+1. Eligibility
+   eligible queue size: 0
+   No eligible row. Mark Ready exactly one approved Facebook or Instagram row in /dashboard/content first.
+
+Summary
+   posted_at count: 29 → 29  (delta 0)
+   status='posted' count: 29 → 29  (delta 0)
+   apply mode: no
+No cron registered. No Twitter/X. No TikTok. No HeyGen / Pexels / OpenAI.
+```
+
+Audit + dry-run remain healthy: 9/9 PASS, posted_at unchanged at 29, eligible_count=0, live_posting_blocked=true.
+
+### Operator daily routine
+
+```bash
+node scripts/audit-pre-autoposter-readiness.js
+# Mark Ready one FB or IG row in /dashboard/content
+node scripts/run-autoposter-once.js          # DRY-RUN
+node scripts/run-autoposter-once.js --apply  # operator-authorized post
+node scripts/audit-pre-autoposter-readiness.js
+```
+
+### Promotion criteria to Phase 14O.2 (live cron)
+
+~30 consecutive clean `--apply` runs without any of:
+- Refusal due to gate drift
+- Atomic UPDATE affecting != 1 row
+- Platform non-2xx response on a row that should have been valid
+- Post-flight invariant slip (Check 9, queue, deltas)
+- Manual + autoposter validator disagreement
+
+If any incident, fix root cause and reset the counter.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| `node scripts/run-autoposter-once.js` (DRY-RUN at queue=0) | ✅ PASS — clean exit, no platform call, no write |
+| `node scripts/audit-pre-autoposter-readiness.js` | ✅ 9/9 PASS, posted_at=29 unchanged, Check 9 PASS |
+| `node scripts/diagnose-autoposter-dry-run.js` | ✅ HTTP 200, dry_run=true, live_posting_blocked=true, eligible_count=0, posted_at unchanged at 29 |
+| `npm run build` | ⚠️ Compiled successfully (`Compiled successfully in <Xs>`); page-data collection still fails on routes that instantiate Resend at module-eval (`/api/automations/quote-email`, `/api/automations/trigger-sba`) due to local `RESEND_API_KEY=""` from earlier `vercel env pull` — pre-existing local-env-only issue, NOT caused by Phase 14O.1. Production deploys unaffected (Vercel uses real values at deploy time). |
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+Phase 14O.1 is operator-tooling only. The runner runs locally against production env / production Supabase. **No deploy needed unless the operator wants the doc updates committed and reflected in Vercel build history.**
+
+### Recommended next phase
+
+After ~30 successful `--apply` runs:
+
+**Phase 14O.2 — Cron promotion (decide between Path A or Path C):**
+1. Path A: drop `check-heygen-jobs` from `vercel.json`, add the autoposter cron in its place. Free.
+2. Path C: upgrade Vercel Hobby → Pro ($20/user/month) for 40-cron limit, sub-daily cadence, 60s default function timeout. Adds breathing room for future crons.
+3. Either way: the cron route wraps the runner's `--apply` logic, gated by a `site_settings.autoposter_cron_enabled` kill switch (default `false`) with auto-disable on first non-2xx platform response.
+
+In parallel:
+- **Twitter/X:** fix Developer Portal billing → upgrade API tier → re-enable in the runner's `SUPPORTED_PLATFORMS`.
+- **TikTok:** Phase 14K-tt — ship the OAuth token-exchange helper so TikTok joins the autoposter (instead of the current Creator Center + Mark Posted manual flow).
+
+---
+
+## Phase 14O — Autoposter Pilot Plan + One-Row Cron Simulation (deployed `f74ddfc` 2026-05-06; Scope C plan + Scope A dry-run proof captured)
+
+(See PHASE_14O_AUTOPOSTER_PILOT_PLAN.md §11 for the Path D follow-on. After the live dry-run proof captured `eligible_count=1, live_posting_blocked=true, posted_at unchanged`, the operator removed the Mark Ready row from queue (no live post) and authorized Phase 14O.1 / Path D — manual autoposter runner — instead of moving directly to a registered cron.)
+
+---
+
+## Phase 14O — Autoposter Pilot Plan + One-Row Cron Simulation (original spec — preserved for history)
 
 ---
 
