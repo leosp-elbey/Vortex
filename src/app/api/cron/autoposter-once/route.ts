@@ -440,10 +440,11 @@ export async function GET(request: NextRequest) {
   // Re-fetch the chosen row with the joined media SELECT so the gate sees the
   // same shape the manual platform routes use. Defense-in-depth: even though
   // getAutoposterEligibleRows already validated this row, the gate runs again
-  // here against the freshly-fetched data.
+  // here against the freshly-fetched data. Phase 14V also pulls media_metadata
+  // so the TikTok branch can merge tiktok_publish_id into the existing JSONB.
   const { data: rawPost, error: fetchErr } = await supabase
     .from('content_calendar')
-    .select(`hashtags, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
+    .select(`hashtags, media_metadata, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
     .eq('id', chosen.id)
     .single()
   if (fetchErr || !rawPost) {
@@ -523,13 +524,28 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  // Phase 14V — for TikTok rows, merge the publish_id into media_metadata
+  // so scripts/diagnose-tiktok-uploads.js can later poll TikTok's async
+  // status endpoint. FB / IG branches don't carry async state so they
+  // skip this. Spreading the existing JSONB preserves any worker-set
+  // fields (heygen_video_id, etc.).
+  const updatePayload: Record<string, unknown> = {
+    status: 'posted',
+    posted_at: new Date().toISOString(),
+  }
+  if (platform === 'tiktok' && result.platform_post_id) {
+    const existingMeta = (rawPost as unknown as { media_metadata?: Record<string, unknown> | null }).media_metadata ?? {}
+    updatePayload.media_metadata = {
+      ...(typeof existingMeta === 'object' && existingMeta !== null ? existingMeta : {}),
+      tiktok_publish_id: result.platform_post_id,
+      tiktok_published_at: new Date().toISOString(),
+    }
+  }
+
   // Atomic UPDATE — same defensive guards the manual routes and runner use.
   const { error: updErr, count: updateCount } = await supabase
     .from('content_calendar')
-    .update(
-      { status: 'posted', posted_at: new Date().toISOString() },
-      { count: 'exact' },
-    )
+    .update(updatePayload, { count: 'exact' })
     .eq('id', chosen.id)
     .eq('status', 'approved')
     .is('posted_at', null)

@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14U shipping in working tree — Cron Health Dashboard UI & Alerts. New `/api/admin/system/autoposter-cron` admin route + `SystemStatusCard` on AI Command Center for one-click kill-switch control. Autoposter cron now sends critical email alert on auto-disable. Typecheck + lint clean. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `90b27b9` (Phase 14T.1: Lint Hygiene Sweep — 51 findings -> 0 errors, 0 warnings)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14T.1 deployed and verified on prod** · **Phase 14U in working tree (operator control panel + email alerts)** — codebase is functionally complete, locally clean, lint-clean, AND operationally observable. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard kill switch + auto-disable email alerts (14U).
+**Last updated:** 2026-05-08 (Phase 14V shipping in working tree — TikTok Status Polling. `checkTikTokPostStatus` helper added to `tiktok-oauth.ts`. All 3 TikTok posting paths persist `publish_id` into `media_metadata` JSONB. New `scripts/diagnose-tiktok-uploads.js` polls TikTok's status endpoint with color-coded output. Typecheck + lint clean. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `debea44` (Phase 14U: Cron Health Dashboard UI & Alerts)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14U deployed and verified on prod** · **Phase 14V in working tree (TikTok async-upload verification)** — codebase is functionally complete, locally clean, lint-clean, operationally observable, AND verifiable. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,65 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14U — Cron Health Dashboard UI & Alerts (in working tree, 2026-05-08 — operator control panel + email-on-halt notifications. Typecheck + lint clean).**
+**Phase 14V — TikTok Status Polling (in working tree, 2026-05-08 — async upload verification. Typecheck + lint clean).**
 
-Phase 14T.1 deployed at `90b27b9`. Phase 14U gives the operator UI control over the autoposter cron and turns silent halts into loud emails. Two parts: (1) a new admin API + dashboard card to read/toggle the kill switch without touching Supabase SQL, and (2) email alerts wired into all 4 auto-disable branches of the cron route.
+Phase 14U deployed at `debea44`. Phase 14V closes the asynchronous-pipeline gap on TikTok posts: TikTok's Direct Post API returns a `publish_id` once the post is queued, but the actual download / encoding / publish all happen server-side over ~30-90 seconds. Until now, our DB marked rows `posted` based on the init signal alone — if TikTok rejected the video later, our records said "posted" while the post never went live.
+
+**Built in 14V (no DB writes during this phase, no platform writes; only status reads):**
+- [x] **`src/lib/tiktok-oauth.ts`** (updated) — new `checkTikTokPostStatus(supabase, publishId)` helper. POSTs to `https://open.tiktokapis.com/v2/post/publish/status/fetch/`. Returns `{ status, fail_reason, publicly_available_post_ids, log_id, raw }`. Defensively accepts both `publicaly_available_post_id` (TikTok's typo'd field) and `publicly_available_post_id` spellings. New `TikTokPublishStatus` type union covers documented enum values; unknown enums pass through.
+- [x] **`src/app/api/automations/post-to-tiktok/route.ts`** (updated) — extended SELECT to include `media_metadata`. After init returns `publish_id`, the route spreads existing JSONB and adds `{ tiktok_publish_id, tiktok_published_at }` as part of the SAME atomic UPDATE that flips `status='posted'`.
+- [x] **`src/app/api/cron/autoposter-once/route.ts`** (updated) — same extension. UPDATE payload built conditionally — only TikTok branch (`platform === 'tiktok' && result.platform_post_id`) merges `media_metadata`. FB / IG branches unchanged.
+- [x] **`scripts/run-autoposter-once.js`** (updated) — same extension. `ROW_SELECT` includes `media_metadata`. The `--apply` UPDATE branch builds the payload conditionally.
+- [x] **`scripts/diagnose-tiktok-uploads.js`** (new) — read-only diagnostic. Queries posted TikTok rows, polls TikTok status endpoint per row, prints color-coded report. Supports `--limit=N` and `--since=DATE`. Mirrors `getValidTikTokAccessTokenJs` and `checkTikTokPostStatusJs` (kept in sync with the lib by hand). Summary footer counts each state and flags `FAILED` rows for manual review.
+
+**TikTok status enum (5 documented + UNKNOWN catch-all):**
+| Status | Color | Emoji |
+|---|---|---|
+| `PUBLISH_COMPLETE` | green | ✅ |
+| `PROCESSING_DOWNLOAD` | cyan | ⏬ |
+| `PROCESSING_UPLOAD` | cyan | 🔄 |
+| `SEND_TO_USER_INBOX` | blue | 📥 |
+| `FAILED` | red | ❌ |
+| (unknown) | yellow | ❓ |
+
+**Persisted JSONB shape (post-14V TikTok rows):**
+```json
+{
+  "tiktok_publish_id": "v_pub_url~v3.0...",
+  "tiktok_published_at": "2026-05-08T14:00:00.000Z",
+  "...worker-set fields preserved...": "..."
+}
+```
+
+**Critical safety preserved:**
+- ✅ `media_metadata` merge happens inside the atomic UPDATE statement (not a separate write) — no race window where status='posted' lands without publish_id.
+- ✅ JSONB spread preserves worker-set fields (e.g. `heygen_video_id`). Defensive `typeof === 'object' && !== null` guards.
+- ✅ `checkTikTokPostStatus` throws on transport / API errors so callers don't silently treat failed reads as "no info."
+- ✅ Diagnostic script is **read-only** against content_calendar. The only DB writes it can produce are token rotations to `site_settings.tiktok_*` (same authorized side effect the runner has).
+- ✅ No new env vars. No new public endpoints. No platform writes.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` clean (0 errors, 0 warnings)
+- ✅ Static review of all 3 atomic UPDATE branches: media_metadata merge happens AFTER the existing JSONB spread, in the same UPDATE statement; FB/IG branches unaffected; defensive type guards before spread.
+- ⏸️ Live diagnostic run deferred — no Phase 14V TikTok posts in DB yet. Script correctly returns "No TikTok posts with a publish_id found" for pre-14V rows.
+
+**Operator usage:**
+```bash
+node scripts/diagnose-tiktok-uploads.js          # last 25 TikTok posts
+node scripts/diagnose-tiktok-uploads.js --limit=50
+node scripts/diagnose-tiktok-uploads.js --since=2026-05-01
+```
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Optional remaining phases:**
+- [ ] **Phase 14W** — Social Media Content Optimization (rewrite AI prompts for hooks, platform-specific formatting, niche hashtags)
+- [ ] **Phase 14X** — Full System Audit & Broken Page Scanner (route-status script + manual mobile review)
+
+---
+
+### Pre-Phase-14V: Phase 14U — Cron Health Dashboard UI & Alerts (saved + pushed `debea44`).
 
 **Built in 14U (no DB writes during this phase, no platform calls):**
 - [x] **`src/app/api/admin/system/autoposter-cron/route.ts`** (new) — admin GET + POST endpoints, both gated by `requireAdminUser`. GET returns `{ enabled, last_change, last_reason }`. POST `{ enabled: boolean }` upserts `site_settings.autoposter_cron_enabled` with the actor's email captured in the `description` column for audit trail.

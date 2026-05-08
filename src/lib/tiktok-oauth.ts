@@ -43,6 +43,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 
 const TIKTOK_OAUTH_URL = 'https://open.tiktokapis.com/v2/oauth/token/'
+const TIKTOK_STATUS_URL = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/'
 
 /** Buffer (ms) before access_token expiry at which we proactively refresh. */
 const REFRESH_BUFFER_MS = 60_000
@@ -246,4 +247,115 @@ export async function getValidTikTokAccessToken(supabase: SupabaseAdmin): Promis
   const fresh = await refreshAccessToken(stored.refresh_token)
   await saveTikTokTokens(supabase, fresh)
   return fresh.access_token
+}
+
+// ============================================================
+// Phase 14V — TikTok publish-status polling.
+//
+// TikTok's Direct Post API is asynchronous: the /v2/post/publish/video/init/
+// call returns a publish_id once TikTok accepts the post into its
+// processing queue, but the actual download from PULL_FROM_URL, encoding,
+// and publish all happen server-side over the next ~30-90 seconds. The
+// /v2/post/publish/status/fetch/ endpoint reports where in that pipeline
+// a given publish_id currently sits.
+//
+// Status enum values (per TikTok's docs):
+//   - 'PROCESSING_DOWNLOAD'   TikTok is downloading the video from our URL
+//   - 'PROCESSING_UPLOAD'     transcoding / preparing for publish
+//   - 'SEND_TO_USER_INBOX'    inbox-mode posts (we use direct, not inbox)
+//   - 'PUBLISH_COMPLETE'      live on TikTok; publicaly_available_post_id is populated
+//   - 'FAILED'                pipeline gave up; fail_reason explains why
+// We treat any other string defensively as the literal value the API
+// returned so the diagnostic script can surface unexpected enum values
+// rather than silently mapping them to 'unknown'.
+// ============================================================
+
+export type TikTokPublishStatus =
+  | 'PROCESSING_DOWNLOAD'
+  | 'PROCESSING_UPLOAD'
+  | 'SEND_TO_USER_INBOX'
+  | 'PUBLISH_COMPLETE'
+  | 'FAILED'
+  | string
+
+export interface TikTokStatusResult {
+  /** Current pipeline status for this publish_id. */
+  status: TikTokPublishStatus
+  /** Populated when status === 'FAILED'. Empty / undefined otherwise. */
+  fail_reason: string | null
+  /**
+   * Populated when status === 'PUBLISH_COMPLETE' for direct posts. Note
+   * the TikTok API uses the (typo'd) field name `publicaly_available_post_id` —
+   * we normalize it to `publicly_available_post_ids` here so callers don't
+   * have to remember the spelling.
+   */
+  publicly_available_post_ids: string[]
+  /** TikTok's per-call log id — useful when contacting their support. */
+  log_id: string | null
+  /** Raw API payload, for diagnostic dumps. Never logged automatically. */
+  raw: unknown
+}
+
+/**
+ * Look up the current status of a TikTok publish_id.
+ *
+ * Resolves a fresh access_token via `getValidTikTokAccessToken` (so callers
+ * never need to handle expiry themselves) and POSTs to /v2/post/publish/status/fetch/.
+ * Returns a normalized shape; throws on transport-level failure or when
+ * TikTok returns an error payload.
+ *
+ * NOT idempotent in the sense that TikTok's status can advance between
+ * calls — callers polling progress should record each status reading
+ * with a timestamp.
+ */
+export async function checkTikTokPostStatus(
+  supabase: SupabaseAdmin,
+  publishId: string,
+): Promise<TikTokStatusResult> {
+  if (!publishId || !publishId.trim()) {
+    throw new Error('checkTikTokPostStatus: publishId is required')
+  }
+  const accessToken = await getValidTikTokAccessToken(supabase)
+
+  const res = await fetch(TIKTOK_STATUS_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({ publish_id: publishId }),
+  })
+
+  const data = (await res.json().catch(() => ({}))) as {
+    data?: {
+      status?: string
+      fail_reason?: string
+      // TikTok API spells this field with a typo. Accept both spellings.
+      publicaly_available_post_id?: string[]
+      publicly_available_post_id?: string[]
+    }
+    error?: { code?: string; message?: string; log_id?: string }
+  }
+
+  const errPayload = data.error
+  const hasError = !!errPayload && errPayload.code && errPayload.code !== 'ok'
+  if (!res.ok || hasError) {
+    const reason = errPayload?.message ?? `HTTP ${res.status}`
+    throw new Error(`TikTok status fetch failed: ${reason}`)
+  }
+
+  const status = (data.data?.status ?? 'UNKNOWN') as TikTokPublishStatus
+  const failReason = data.data?.fail_reason && data.data.fail_reason.trim() ? data.data.fail_reason.trim() : null
+  const publicIds =
+    (Array.isArray(data.data?.publicaly_available_post_id) && data.data!.publicaly_available_post_id) ||
+    (Array.isArray(data.data?.publicly_available_post_id) && data.data!.publicly_available_post_id) ||
+    []
+
+  return {
+    status,
+    fail_reason: failReason,
+    publicly_available_post_ids: publicIds,
+    log_id: errPayload?.log_id ?? null,
+    raw: data,
+  }
 }

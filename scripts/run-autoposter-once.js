@@ -173,8 +173,11 @@ function validateAutoposterCandidateJs(row) {
 // then runs the JS mirror per row to produce a precise eligibility list.
 // ============================================================
 
+// Phase 14V — also pulls media_metadata so the TikTok branch can merge
+// tiktok_publish_id into the existing JSONB without clobbering anything
+// the worker put there.
 const ROW_SELECT =
-  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, image_prompt, image_url, video_url, media_status, media_error, ' +
+  'id, platform, status, caption, hashtags, posting_status, posting_gate_approved, queued_for_posting_at, manual_posting_only, tracking_url, campaign_asset_id, posted_at, week_of, created_at, image_prompt, image_url, video_url, media_status, media_error, media_metadata, ' +
   'campaign_asset:campaign_assets!campaign_asset_id(image_url, video_url, asset_type)'
 
 function flattenRow(r) {
@@ -627,12 +630,26 @@ async function main() {
   const platformPostId = result.fb_post_id ?? result.ig_post_id ?? result.tiktok_publish_id
   console.log(`   ${COLORS.green}✓ Platform post id:${COLORS.reset} ${platformPostId}`)
 
+  // Phase 14V — for TikTok rows, merge the publish_id into media_metadata
+  // so scripts/diagnose-tiktok-uploads.js can later poll TikTok's async
+  // status endpoint. Other platforms skip this. Spreading the existing
+  // JSONB preserves any worker-set fields (heygen_video_id, etc.).
+  const updatePayload = { status: 'posted', posted_at: new Date().toISOString() }
+  if (platform === 'tiktok' && nonEmpty(result.tiktok_publish_id)) {
+    const existingMeta = row.media_metadata && typeof row.media_metadata === 'object' ? row.media_metadata : {}
+    updatePayload.media_metadata = {
+      ...existingMeta,
+      tiktok_publish_id: result.tiktok_publish_id,
+      tiktok_published_at: new Date().toISOString(),
+    }
+  }
+
   // Atomic UPDATE — defensive guards inline:
   //   .eq('status', 'approved')   refuse to flip a row that's no longer approved
   //   .is('posted_at', null)      refuse to overwrite a posted_at set by a concurrent path
   const { error: updErr, count: updateCount } = await supabase
     .from('content_calendar')
-    .update({ status: 'posted', posted_at: new Date().toISOString() }, { count: 'exact' })
+    .update(updatePayload, { count: 'exact' })
     .eq('id', row.id)
     .eq('status', 'approved')
     .is('posted_at', null)

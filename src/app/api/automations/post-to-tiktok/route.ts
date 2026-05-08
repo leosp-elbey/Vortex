@@ -109,10 +109,12 @@ export async function POST(request: NextRequest) {
 
   // Fetch row with the joined campaign_assets media URL — same SELECT
   // shape the gate / IG / FB routes use, so we get the resolved
-  // image_url / video_url after flattenPostingGateRow.
+  // image_url / video_url after flattenPostingGateRow. Phase 14V also
+  // pulls media_metadata so we can merge the new tiktok_publish_id into
+  // the existing JSONB without clobbering anything the worker put there.
   const { data: rawPost, error: fetchErr } = await admin
     .from('content_calendar')
-    .select(`hashtags, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
+    .select(`hashtags, media_metadata, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
     .eq('id', content_id)
     .single()
 
@@ -210,6 +212,19 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Phase 14V — merge the new tiktok_publish_id into media_metadata so
+  // scripts/diagnose-tiktok-uploads.js can later poll TikTok's async
+  // status endpoint for this row. Spread the existing JSONB so any
+  // worker-set fields (heygen_video_id, etc.) survive the write. JS-side
+  // merge is safe because the row is locked into the {approved, posted_at IS NULL}
+  // tuple the inline UPDATE guards check.
+  const existingMeta = (rawPost as unknown as { media_metadata?: Record<string, unknown> | null }).media_metadata ?? {}
+  const mergedMeta = {
+    ...(typeof existingMeta === 'object' && existingMeta !== null ? existingMeta : {}),
+    tiktok_publish_id: publishId,
+    tiktok_published_at: new Date().toISOString(),
+  }
+
   // Atomic UPDATE — defensive guards inline (mirror of FB / IG / runner
   // patterns):
   //   .eq('status', 'approved')   refuse to flip a row no longer approved
@@ -217,7 +232,11 @@ export async function POST(request: NextRequest) {
   const { error: updErr, count: updateCount } = await admin
     .from('content_calendar')
     .update(
-      { status: 'posted', posted_at: new Date().toISOString() },
+      {
+        status: 'posted',
+        posted_at: new Date().toISOString(),
+        media_metadata: mergedMeta,
+      },
       { count: 'exact' },
     )
     .eq('id', content_id)
