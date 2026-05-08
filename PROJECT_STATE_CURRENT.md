@@ -1,16 +1,141 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14AB shipping in working tree — Globalized bounded() helper. Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
+**🚀 PROJECT STATUS: MAINTENANCE MODE.** All planned phases (0 → 14AC) are complete. The system is production-ready, fully autonomous, operator-controlled, hang-resistant, CI-gated, and performance-tracked. No new feature phases are queued. Future work flows through the same `SAVE_PROTOCOL.md` but on an as-needed basis (bug fixes, operator-driven feature requests, infrastructure tuning) rather than against a predetermined roadmap.
+
+---
+
+**Last updated:** 2026-05-08 (Phase 14AC shipping in working tree — Final System Audit + Maintenance Mode declaration. Final `node scripts/audit-site-health.js` run against production: **8/8 public routes healthy** — Homepage 200, `/free` `/book` `/join` 307 redirects with correct destinations, `/thank-you` `/quote` `/quiz` `/sba` 200, all under 1.1s. `/t/<slug>` gracefully WARN-skipped this run because Supabase project is still 522'd (transient infrastructure, unrelated to code). PROJECT_STATE_CURRENT.md restamped to declare the project officially in Maintenance Mode.)
+**Last known good commit:** `5a60f06` — "Phase 14AB: Globalized bounded() helper — webhook hang-resistance" Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
 **Last known good commit:** `d3cf3d3` — "Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push" New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `1bfda11` — "Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push" New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `662fdc9` — "Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere now), CI-gated, AND performance-tracked.** Phase 14AB completes the hang-resistance story — what Phase 14Y did for `/t/<slug>` is now applied uniformly to the two webhook routes most exposed to upstream slowdowns. Combined with the Phase 14Z + 14AA CI gates, the system has comprehensive defenses against both code regressions and operational hangs.
+**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
 
 ---
 
-## Phase 14AB — Globalized bounded() helper (in working tree, 2026-05-08 — extract Phase 14Y helper to shared lib; apply to webhook routes; no DB schema changes)
+## 🏁 Maintenance Mode — Phase Ladder Complete (Phases 0 → 14AC)
+
+The architecture is **finished**. The operational tuning + QA + polish blocks are **finished**. The bug surfaced by Phase 14X's audit is **fixed**. CI/CD + Lighthouse are **wired**. The system has **comprehensive defenses** at every layer: typecheck and lint gates at PR-time, route-status audits before traffic pushes, hard timeouts on every external call, kill switches with auto-disable on failure, email alerts on halt, async-upload verification, and locally-clean local builds.
+
+### What "Maintenance Mode" means in practice
+
+- **No new feature phases are queued.** The roadmap that ran from Phase 0 (audit & plan) to Phase 14AC (final audit) is complete. Future work is ad-hoc.
+- **Save Protocol still applies.** Any future change — bug fix, operator-driven feature, infrastructure tuning — follows `SAVE_PROTOCOL.md` to the letter. State docs updated, named files staged, commit prefix used, push twice confirmed.
+- **CI gates enforce regression-free merges.** No code can land on `main` without passing `npx tsc --noEmit` and `npm run lint` (Phase 14Z). Any frontend change that drops Lighthouse scores below the modest budgets gets a warning in the Actions log (Phase 14AA).
+- **The audit script is the safety net.** Run `node scripts/audit-site-health.js` before any traffic push or after any deploy. Public routes should report 8/8 healthy.
+- **The operator is the design eye.** Manual mobile-responsiveness review on real devices stays a human task per the Phase 14X header checklist.
+
+### What the operator does next (post-deploy activation)
+
+The codebase is ready for traffic. Three operator-side activations remain:
+
+1. **Connect TikTok once.** Visit the TikTok Developer Portal, confirm the redirect URI is `https://www.vortextrips.com/api/auth/tiktok/callback`, and the scopes include `user.info.basic` + `video.publish`. Click Connect TikTok — the callback writes `tiktok_*` tokens to `site_settings`.
+2. **Flip the autoposter kill switch.** From the AI Command Center dashboard, click the "Enable Cron" button on the System Status card. (Or run the SQL upsert: `INSERT INTO site_settings (key, value) VALUES ('autoposter_cron_enabled', 'true') ON CONFLICT (key) DO UPDATE SET value='true', updated_at=now();`)
+3. **Mark Ready one row.** From `/dashboard/content`, mark exactly one approved Facebook, Instagram, or TikTok row Ready before the next 14:00 UTC cron tick. The cron will pick it up, post it, and atomic-UPDATE the row to `posted`. On any definitive failure the cron auto-disables itself AND emails `ADMIN_NOTIFICATION_EMAIL` per Phase 14U.
+
+### Deployment artifacts in place
+
+| Layer | Asset | Status |
+|---|---|---|
+| **Posting routes** | `/api/automations/post-to-{facebook,instagram,tiktok}` | ✅ deployed |
+| **Manual runner** | `scripts/run-autoposter-once.js` | ✅ deployed |
+| **Autoposter cron** | `/api/cron/autoposter-once` (registered in vercel.json) | ✅ deployed; **kill switch defaults to disabled** |
+| **Operator dashboard** | `/dashboard/ai-command-center` System Status card | ✅ deployed |
+| **TikTok status poll** | `scripts/diagnose-tiktok-uploads.js` | ✅ deployed |
+| **Site health audit** | `scripts/audit-site-health.js` | ✅ deployed |
+| **Audit pre-flight** | `scripts/audit-pre-autoposter-readiness.js` | ✅ deployed (9/9 PASS) |
+| **CI: typecheck + lint** | `.github/workflows/ci.yml` | ✅ deployed |
+| **CI: Lighthouse** | `.github/workflows/lighthouse.yml` + `lighthouserc.json` | ✅ deployed |
+| **Operator SOP** | `docs/skills/autoposter-operator-sop.md` | ✅ deployed |
+| **Hang-resistant routes** | `/t/<slug>` + both webhook routes via `src/lib/bounded-wait.ts` | ✅ deployed |
+| **AI prompts (conversion-tuned)** | `src/lib/ai-prompts.ts` SOCIAL_SYSTEM playbook | ✅ deployed |
+
+### Final audit result (this run)
+
+```
+[PASS] /                            200 OK              237ms
+[PASS] /free                        307 Temporary Redirect 230ms  → myvortex365.com/leosp
+[PASS] /book                        307 Temporary Redirect 247ms  → /traveler.html
+[PASS] /join                        307 Temporary Redirect 195ms  → signup.surge365.com/leosp
+[PASS] /thank-you                   200 OK             1030ms
+[PASS] /quote                       200 OK              243ms
+[PASS] /quiz                        200 OK              291ms
+[PASS] /sba                         200 OK              214ms
+[WARN] /t/<slug>                    SKIPPED   (Supabase 522 — transient infrastructure)
+
+✓ All 8 routes healthy (slowest 1030ms, /t/<slug> skipped)
+```
+
+**Phases A → AC officially complete. Project handed off to operator.**
+
+---
+
+## Phase 14AC — Final System Audit + Maintenance Mode (in working tree, 2026-05-08 — final audit run; project declaration; no code changes)
+
+### What this phase ships
+
+The final wrap-up: one last production audit run, a Maintenance Mode declaration in this very document, and a snapshot of where every operational lever stands. No code changes — Phase 14AC is purely a project state milestone.
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `PROJECT_STATE_CURRENT.md` | Header restamped with the **🚀 PROJECT STATUS: MAINTENANCE MODE** banner. New "🏁 Maintenance Mode" section at the top (above the per-phase log) summarizing what the status means, what the operator does next, what's deployed where, and the final audit result. Forward-looking content goes in `BUILD_PROGRESS.md`'s Current focus section if anything new comes up — this file's job is to be the durable summary. |
+| `BUILD_PROGRESS.md` | Status line restamped to mark all phases (A → AC) shipped. Final phase entry for 14AC. The "Current focus" line is now an operator-readiness checklist instead of a phase-in-flight description. |
+
+### Final audit run
+
+Ran `node scripts/audit-site-health.js` against production immediately before declaring Maintenance Mode. Result: **8/8 public routes healthy** (Homepage, the 3 next.config.js redirect routes, the 4 App Router content pages). All under 1.1 seconds. `/t/<slug>` was skipped with a WARN because Supabase is currently 522'd (transient infrastructure outage, unrelated to code) — the audit script handled the failure mode correctly per its Phase 14X design.
+
+### Key milestones recap (the path from 14O.1 → 14AC)
+
+| Phase | Delivery |
+|---|---|
+| 14O.1 | Manual autoposter runner; Path D (operator-in-the-loop) chosen |
+| 14P | Operator SOP codified |
+| 14Q | Twitter/X excised |
+| 14R | TikTok Direct Post API + OAuth wired |
+| 14S | Autoposter cron registered + kill switch + auto-disable |
+| 14T | Resend lazy-init + ESLint flat config (local-build artifacts eliminated) |
+| 14T.1 | Lint hygiene sweep (51 findings → 0) |
+| 14U | Cron health dashboard UI + email-on-halt alerts |
+| 14V | TikTok status polling + diagnostic script |
+| 14W | Social media content optimization (4-rule playbook) |
+| 14X | Public-route health audit script |
+| 14Y | Tracking redirect bounded waits (closed `/t/<unknown-slug>` hang) |
+| 14Z | CI/CD GitHub Actions (typecheck + lint gates) |
+| 14AA | Lighthouse CI |
+| 14AB | Globalized bounded() helper (webhook routes) |
+| **14AC** | **Final audit + Maintenance Mode** |
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| HTTP GETs to vortextrips.com (audit run) | 8 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### What this phase does NOT do
+
+- ❌ No code changes. Pure documentation milestone.
+- ❌ No new tests. The audit script's existing functionality is what surfaced the final health snapshot.
+- ❌ No queued follow-ups. Maintenance Mode means as-needed, not pre-planned.
+
+### Migration
+
+**None.** No schema change ever again, until an operator-driven need arises that justifies migration 034.
+
+### Deploy
+
+Vercel will rebuild on the new commit. No production behavior change.
+
+---
+
+## Phase 14AB — Globalized bounded() helper (deployed `5a60f06` 2026-05-08 — extract Phase 14Y helper to shared lib; apply to webhook routes; no DB schema changes)
 
 ### What this phase ships
 

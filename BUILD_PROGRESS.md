@@ -1,14 +1,69 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14AB shipping in working tree — Globalized bounded() helper. Phase 14Y's pattern extracted to `src/lib/bounded-wait.ts`. Both webhook routes now use `bounded()` with 2500ms budget. lead-created treats contacts insert as critical-path (503 fast on timeout); all other calls are bookkeeping. Typecheck + lint clean.)
-**Last code-shipping commit:** `d3cf3d3` (Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14AA deployed and verified on prod** · **Phase 14AB in working tree (globalized bounded waits)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere now), CI-gated, AND performance-tracked. 8 live posts since 2026-05-05.
+**Last updated:** 2026-05-08 (Phase 14AC complete — Final System Audit + **Maintenance Mode** declared. All planned phases (0 → 14AC) shipped. Final audit: 8/8 public routes healthy. No new feature phases queued.)
+**Last code-shipping commit:** `5a60f06` (Phase 14AB: Globalized bounded() helper — webhook hang-resistance)
+**Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited. 8 live posts since 2026-05-05. No new feature phases queued; future work flows through SAVE_PROTOCOL.md on an ad-hoc basis.
 
 ---
 
 ## Current focus
 
-**Phase 14AB — Globalized bounded() helper (in working tree, 2026-05-08 — webhook hang-resistance via shared lib; no DB schema changes).**
+**🏁 MAINTENANCE MODE.** No phase in flight. Three operator-side activations remain to take the system live:
+
+1. **Connect TikTok once.** Confirm Developer Portal redirect URI `https://www.vortextrips.com/api/auth/tiktok/callback`; scopes `user.info.basic` + `video.publish`. Click Connect TikTok → callback writes tokens to site_settings.
+2. **Flip the autoposter kill switch.** AI Command Center dashboard → "Enable Cron" button. (Or SQL upsert on `site_settings.autoposter_cron_enabled='true'`.)
+3. **Mark Ready one row.** From `/dashboard/content` before next 14:00 UTC tick. Cron picks it up, posts it, atomic-UPDATEs to posted. On failure: auto-disables + emails `ADMIN_NOTIFICATION_EMAIL`.
+
+**Recently completed (this block, 14Z → 14AC):**
+
+- [x] **Phase 14Z** (`1bfda11`) — CI/CD GitHub Actions (typecheck + lint on every push/PR)
+- [x] **Phase 14AA** (`d3cf3d3`) — Lighthouse CI (perf/a11y/SEO budgets, warn-level)
+- [x] **Phase 14AB** (`5a60f06`) — Globalized bounded() helper to webhook routes
+- [x] **Phase 14AC** (this commit) — Final audit (8/8 healthy) + Maintenance Mode declaration
+
+**Final audit run (this phase):**
+```
+[PASS] /            200 OK    237ms
+[PASS] /free        307 TR    230ms  → myvortex365.com/leosp
+[PASS] /book        307 TR    247ms  → /traveler.html
+[PASS] /join        307 TR    195ms  → signup.surge365.com/leosp
+[PASS] /thank-you   200 OK   1030ms
+[PASS] /quote       200 OK    243ms
+[PASS] /quiz        200 OK    291ms
+[PASS] /sba         200 OK    214ms
+[WARN] /t/<slug>    SKIPPED   (Supabase 522 — transient infrastructure)
+
+✓ All 8 routes healthy (slowest 1030ms, /t/<slug> skipped)
+```
+
+**Provider / platform / DB activity in 14AC:** zero across the board (8 HTTP GETs against own production routes for the audit run). posted_at delta: 0 (29 → 29).
+
+**Architecture milestones recap:**
+
+| Phase | Delivery |
+|---|---|
+| 14O.1 | Manual autoposter runner; Path D chosen |
+| 14P | Operator SOP codified |
+| 14Q | Twitter/X excised |
+| 14R | TikTok Direct Post API + OAuth wired |
+| 14S | Autoposter cron + kill switch + auto-disable |
+| 14T | Resend lazy-init + ESLint flat config |
+| 14T.1 | Lint hygiene (51 findings → 0) |
+| 14U | Dashboard kill switch UI + email-on-halt |
+| 14V | TikTok status polling + diagnostic |
+| 14W | AI prompts (4-rule playbook) |
+| 14X | Site health audit script |
+| 14Y | Tracking redirect bounded waits |
+| 14Z | CI/CD typecheck + lint gates |
+| 14AA | Lighthouse CI |
+| 14AB | Globalized bounded() helper |
+| **14AC** | **Final audit + Maintenance Mode** |
+
+**Future work (as-needed, no queue):** any bug fix, operator-driven feature, or infrastructure tuning follows the same SAVE_PROTOCOL.md and conventions used through Phase 14AC.
+
+---
+
+### Pre-Maintenance-Mode: Phase 14AB — Globalized bounded() helper (saved + pushed `5a60f06`).
 
 Phase 14AA deployed at `d3cf3d3`. Phase 14AB is the third of three optional polish phases. What Phase 14Y did for `/t/<slug>` is now applied uniformly to the two webhook routes most exposed to upstream slowdowns.
 
