@@ -1,4 +1,5 @@
-// Phase 14J.2 — Branded campaign tracking redirect (hardened in Phase 14J.2.1).
+// Phase 14J.2 — Branded campaign tracking redirect (hardened in Phase 14J.2.1
+// and 14Y).
 //
 // GET /t/<slug>?utm_source=…&utm_medium=event_campaign&utm_campaign=…&utm_content=…
 //
@@ -15,6 +16,20 @@
 // Logging is best-effort: a failure NEVER blocks the redirect. The visitor
 // always reaches a destination even if attribution fails.
 //
+// Phase 14Y hardening — bounded waits.
+//   Pre-14Y: try/catch around each Supabase await. If Supabase was 522'd
+//   (Cloudflare origin timeout — common on free-tier projects), the
+//   underlying TCP request would hang for 30+ seconds before the client
+//   gave up. try/catch doesn't bound await time, so the function ate
+//   Vercel Hobby's 10s function-execution budget and the visitor saw a
+//   504 / connection hang. Phase 14X's audit surfaced this as a real bug.
+//   Phase 14Y fix: every Supabase call goes through `bounded()`, which
+//   races the work against a 2.5s timeout. Timeout / throw / success all
+//   converge to a normalized `null | T` return, so callers never wait
+//   longer than the budget. Worst case: 3 × 2.5s = 7.5s, well under the
+//   10s function timeout. The redirect still happens with the correct
+//   Tier-2/Tier-3 fallback even when every Supabase call times out.
+//
 // Public route (no admin auth required).
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -24,11 +39,14 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 /**
- * Tier 2 fallback: configured portal/CTA when a campaign row has no cta_url.
- * Per Phase 14J.2 spec, myvortex365.com/leosp remains the operational portal
- * — only the *visible* social link changed to vortextrips.com/t/<slug>.
+ * Tier 2 fallback: vortextrips.com/free. Phase 14Y changed this from
+ * myvortex365.com/leosp to keep the visitor on the brand domain — `/free`
+ * is itself a 307 redirect (configured in next.config.js) to the same
+ * myvortex365.com portal, so the operational destination is unchanged.
+ * The visitor briefly sees vortextrips.com/free in the URL bar before
+ * the second redirect, which is a UX win for branded campaign clicks.
  */
-const PORTAL_FALLBACK = 'https://myvortex365.com/leosp'
+const PORTAL_FALLBACK = 'https://www.vortextrips.com/free'
 
 /**
  * Tier 3 fallback (last resort): the VortexTrips homepage. Used when both
@@ -38,6 +56,47 @@ const PORTAL_FALLBACK = 'https://myvortex365.com/leosp'
 const FINAL_FALLBACK = 'https://www.vortextrips.com'
 
 const CAMPAIGN_UTM_MEDIUM = 'event_campaign'
+
+/**
+ * Phase 14Y — Per-Supabase-call hard timeout. Default 2.5 seconds.
+ *
+ * Vercel Hobby caps function execution at 10s. Three Supabase awaits in this
+ * route × 2.5s each = 7.5s worst case + a small budget for sync work and the
+ * redirect itself. Tuned to keep the route under 10s even when EVERY supabase
+ * call hangs (e.g. project paused, Cloudflare 522, network blip).
+ */
+const SUPABASE_CALL_TIMEOUT_MS = 2500
+
+/**
+ * Race a Supabase (or any thenable) call against a fixed timeout. Returns
+ * `null` on timeout, on rejection, or on a non-thrown error path. NEVER
+ * throws to the caller — this is the central guardrail that prevents the
+ * route from hanging on a slow Supabase response.
+ *
+ * Cleans up the timer in `finally` so we don't leak a setTimeout handle
+ * when the work resolves before the timeout.
+ */
+async function bounded<T>(work: PromiseLike<T>, ms: number, label: string): Promise<T | null> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  try {
+    const timeoutPromise = new Promise<null>(resolve => {
+      timeoutHandle = setTimeout(() => {
+        console.warn(`[branded-redirect] ${label} timed out after ${ms}ms — falling through`)
+        resolve(null)
+      }, ms)
+    })
+    // Wrap the thenable so a rejection becomes a `null` result rather than
+    // a Promise.race rejection. This lets the route degrade gracefully on
+    // ANY Supabase failure mode (timeout, 5xx, malformed response, etc.).
+    const safeWork = Promise.resolve(work).catch(err => {
+      console.error(`[branded-redirect] ${label} threw:`, err)
+      return null as T | null
+    })
+    return await Promise.race([safeWork, timeoutPromise])
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+  }
+}
 
 interface CampaignLookupRow {
   id: string
@@ -116,22 +175,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // keep the same `event_slug` but `event_year` rolls), prefer the latest
   // year. The Phase 14I attribution view still matches by year-from-utm_campaign,
   // so attribution accuracy survives even when this route picks the wrong year.
+  //
+  // Phase 14Y — wrapped with bounded() so a Supabase 522 / network hang
+  // can't tie up the function past SUPABASE_CALL_TIMEOUT_MS. On timeout,
+  // we treat the slug as unknown and fall through to Tier 2.
   let campaign: CampaignLookupRow | null = null
   if (cleanedSlug) {
-    try {
-      const { data } = await supabase
+    const result = await bounded(
+      supabase
         .from('event_campaigns')
         .select('id, cta_url, event_year')
         .ilike('event_slug', cleanedSlug)
         .order('event_year', { ascending: false })
         .limit(1)
-        .maybeSingle<CampaignLookupRow>()
-      campaign = data ?? null
-    } catch (err) {
-      // Lookup failure shouldn't 500 a public route. Treat as unknown slug.
-      console.error('[branded-redirect] campaign lookup failed:', err)
-      campaign = null
-    }
+        .maybeSingle<CampaignLookupRow>(),
+      SUPABASE_CALL_TIMEOUT_MS,
+      'campaign lookup',
+    )
+    campaign = result?.data ?? null
   }
 
   // 2. Capture UTM tags from the request query string.
@@ -141,27 +202,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const utm_content = url.searchParams.get('utm_content') || null
 
   // 3. Resolve campaign_asset_id + content_calendar_id from utm_content.
+  // Phase 14Y — bounded() guards this lookup the same way as the campaign
+  // lookup. On timeout/failure, we keep campaign-only attribution.
   let campaign_asset_id: string | null = null
   let content_calendar_id: string | null = null
   const parsedContent = parseUtmContent(utm_content)
   if (campaign?.id && parsedContent) {
-    try {
-      const { data: candidates } = await supabase
+    const result = await bounded(
+      supabase
         .from('campaign_assets')
         .select('id, content_calendar_id')
         .eq('campaign_id', campaign.id)
         .eq('asset_type', parsedContent.assetType)
-        .limit(100)
-      const match = (candidates ?? []).find(
-        (a: AssetMatchRow) =>
-          a.id.replace(/-/g, '').slice(0, 8).toLowerCase() === parsedContent.assetIdShort,
-      )
-      if (match) {
-        campaign_asset_id = match.id
-        content_calendar_id = match.content_calendar_id
-      }
-    } catch {
-      // best-effort — fall through with campaign-only attribution
+        .limit(100),
+      SUPABASE_CALL_TIMEOUT_MS,
+      'asset lookup',
+    )
+    const candidates = result?.data ?? []
+    const match = candidates.find(
+      (a: AssetMatchRow) =>
+        a.id.replace(/-/g, '').slice(0, 8).toLowerCase() === parsedContent.assetIdShort,
+    )
+    if (match) {
+      campaign_asset_id = match.id
+      content_calendar_id = match.content_calendar_id
     }
   }
 
@@ -171,8 +235,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { target: redirect_target, reason: redirect_reason } = chooseRedirect({ cleanedSlug, campaign })
 
   // 5. Best-effort log to contact_events. Never blocks the redirect.
-  try {
-    await supabase.from('contact_events').insert({
+  // Phase 14Y — bounded() so a hung INSERT (e.g. Supabase paused / 522)
+  // can't eat the function timeout. If the log times out, attribution
+  // misses this one click but the visitor still reaches the destination.
+  await bounded(
+    supabase.from('contact_events').insert({
       event: 'page_view',
       contact_id: null,
       metadata: {
@@ -192,10 +259,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       event_campaign_id: campaign?.id ?? null,
       campaign_asset_id,
       content_calendar_id,
-    })
-  } catch (err) {
-    console.error('[branded-redirect] click log failed:', err)
-  }
+    }),
+    SUPABASE_CALL_TIMEOUT_MS,
+    'click log insert',
+  )
 
   // Verify the medium matches the convention. If a non-event_campaign hit ever
   // lands here, log it but still redirect (the slug is what determines the
