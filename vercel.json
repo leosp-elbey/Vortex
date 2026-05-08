@@ -13,8 +13,8 @@
       "schedule": "0 9 * * *"
     },
     {
-      "path": "/api/cron/check-heygen-jobs",
-      "schedule": "0 6 * * *"
+      "path": "/api/cron/autoposter-once",
+      "schedule": "0 14 * * *"
     }
   ]
 }

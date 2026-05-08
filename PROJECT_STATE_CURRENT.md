@@ -1,14 +1,170 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14R shipping in working tree — full TikTok automation. `src/lib/tiktok-oauth.ts` ships `exchangeCodeForTokens`, `refreshAccessToken`, and `getValidTikTokAccessToken`; the TikTok callback now does token exchange + upserts to `site_settings`; `src/app/api/automations/post-to-tiktok/route.ts` posts via the Direct Post API using `PULL_FROM_URL` against the row's HeyGen video_url, strictly enforces `validateManualPostingGate`, and atomic-UPDATEs on success; the autoposter runner now routes TikTok through the same path. No DB writes in this phase. No platform calls until operator runs `--apply`. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last known good commit:** `5f48ced` — "Phase 14Q: excise Twitter/X — route, dependency, allowlists, UI all removed"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14Q deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14S shipping in working tree — 100% Automation Cron. `src/app/api/cron/autoposter-once/route.ts` wraps the runner's logic into a CRON_SECRET-gated daily route. `vercel.json` updated: legacy `check-heygen-jobs` cron dropped (Path A), new autoposter cron registered at `0 14 * * *` (2 PM UTC daily). `docs/skills/autoposter-operator-sop.md` updated to reflect cron-active operating mode while preserving the manual 5-step protocol as diagnostic procedure. Kill switch (`site_settings.autoposter_cron_enabled`) defaults to disabled — operator must flip to `'true'` before the cron actually posts. Auto-disables on platform failure, atomic-update slip, or post-flight invariant break. No DB writes in this phase. No platform calls until first scheduled tick AFTER kill switch is enabled. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `78c4041` — "Phase 14R: TikTok Direct Post automation — OAuth, callback, route, runner"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14R deployed and verified**; Supabase migrations 017-033 applied; **Hobby plan, 4 / 4 cron slots used after 14S — `check-heygen-jobs` swapped for `autoposter-once`**; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codified the operator SOP at `docs/skills/autoposter-operator-sop.md`. Phase 14Q permanently dropped Twitter/X. Phase 14R wires TikTok end-to-end (OAuth + Direct Post API + runner integration). Cron stays disabled until Phase 14S, which will wrap the runner's `--apply` logic into a CRON_SECRET-gated route and replace the legacy `check-heygen-jobs` slot in `vercel.json`.
+**Live posting status:** **🤖 Fully autonomous operating mode unlocked by Phase 14S.** Once the operator flips `site_settings.autoposter_cron_enabled='true'`, the cron at `/api/cron/autoposter-once` runs daily at 14:00 UTC, posts exactly one Mark-Ready'd row per execution to FB / IG / TikTok via the same gate / atomic-UPDATE contract the manual routes use, and auto-disables on the first failure. The manual 5-step protocol via `scripts/run-autoposter-once.js` is preserved as the canonical diagnostic procedure. Twitter/X stays permanently dropped (14Q). The architecture is complete; remaining work is operational tuning, not code.
 
 ---
 
-## Phase 14R — TikTok Auto-Poster (in working tree, 2026-05-08 — code changes only; no DB writes during this phase; no platform calls until operator authorizes)
+## Phase 14S — 100% Automation Cron (in working tree, 2026-05-08 — code changes only; no DB writes; no platform calls; cron defaults to DISABLED until operator flips kill switch)
+
+### What this phase ships
+
+The autoposter cron route — the final piece that promotes VortexTrips' posting pipeline from "cyborg" (operator runs the script daily) to "fully autonomous" (Vercel Cron triggers the route on schedule). The route wraps the runner's `--apply` logic into a CRON_SECRET-gated, kill-switched, auto-disabling daily endpoint.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `src/app/api/cron/autoposter-once/route.ts` | The cron route. ~430 lines. Implements the 5-step SOP programmatically: pre-flight snapshot → eligibility (`getAutoposterEligibleRows({ limit: 5 })`) → defense-in-depth `validateManualPostingGate({ supportedPlatforms: [platform] })` → platform call (FB / IG / TikTok branches mirroring `post-to-{facebook,instagram,tiktok}/route.ts`) → atomic UPDATE → post-flight snapshot → kill-switch flip on any failure. Targets exactly one eligible row per execution. Refuses Twitter/X explicitly (defense-in-depth post-14Q). Uses the existing `getValidTikTokAccessToken` + `validateManualPostingGate` libraries; no duplication of OAuth or gate logic. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `vercel.json` | Removed `/api/cron/check-heygen-jobs` (Path A — the legacy HeyGen polling cron is no longer needed; HeyGen renders are now polled by the dashboard's media-status panel and the operator's `scripts/check-video-generation-status.js`). Added `/api/cron/autoposter-once` at `0 14 * * *` (2 PM UTC daily). Hobby plan stays at 4/4 cron slots. |
+| `docs/skills/autoposter-operator-sop.md` | Header updated to show Phase 14S active. New "Operating mode (post-Phase-14S)" section documents the cron's behavior, kill switch, auto-disable triggers, and operator-after-incident flow. The 5-step manual protocol is preserved verbatim and re-purposed as the canonical **diagnostic** procedure. Step 2 (Mark Ready) is the only step the operator runs daily under cron mode. The Phase 14S Cron Mapping table at the bottom of the doc traces each SOP step to its cron implementation. |
+| `PROJECT_STATE_CURRENT.md` | This entry. |
+| `BUILD_PROGRESS.md` | Phase 14S entry; current focus shifted to "Phase 14T+ / operational tuning." |
+
+### Cron route contract (`/api/cron/autoposter-once`)
+
+**Auth:** `Authorization: Bearer ${CRON_SECRET}` — same Bearer pattern the other 4 cron routes use. Missing or wrong → 401.
+
+**Kill switch:** `site_settings.autoposter_cron_enabled`
+- `'true'` → cron actively posts
+- anything else (including missing key) → cron returns `200 { skipped: true, reason: 'cron_disabled' }`
+- After auto-disable: operator must `UPDATE site_settings SET value='true' WHERE key='autoposter_cron_enabled';`
+
+**Eligibility:** `getAutoposterEligibleRows({ limit: 5 })` from `src/lib/autoposter-gate.ts`. The candidate list runs through `validateAutoposterCandidate` (which itself runs `validateMediaReadiness`) before any platform call.
+
+**Refusal contract:**
+
+| Condition | Response |
+|---|---|
+| Bad CRON_SECRET | 401 Unauthorized |
+| Kill switch off | 200 `{ skipped: true, reason: 'cron_disabled' }` |
+| Eligibility query failed | 500 with error message |
+| 0 eligible rows | 200 `{ posted: 0, reason: 'no_eligible_rows' }` (clean — operator hasn't Mark Ready'd anything) |
+| > 1 eligible rows | 200 `{ skipped: true, reason: 'queue_size_gt_1', eligible_ids: [...] }` (operator-fixable; does NOT auto-disable) |
+| Platform is twitter/x | 200 `{ skipped: true, reason: 'refused_platform' }` (defense-in-depth post-14Q; should never happen) |
+| Platform not in {fb,ig,tiktok} | 200 `{ skipped: true, reason: 'unsupported_platform' }` |
+| Manual gate refused at apply time | 200 `{ skipped: true, reason: 'gate_refused_at_apply', gate_reasons: [...] }` |
+| Platform call exception (network) | 500 with error — does NOT auto-disable (likely transient) |
+| Platform non-2xx response | 500 + **kill switch flipped to disabled** |
+| DB update failed | 500 + **kill switch flipped to disabled** + manual-reconciliation warning + platform_post_id |
+| DB update affected != 1 row | 500 + **kill switch flipped to disabled** + manual-reconciliation warning |
+| Post-flight delta != +1 | 500 + **kill switch flipped to disabled** + before/after snapshot |
+| Successful post | 200 `{ success: true, posted: 1, platform, row_id, platform_post_id, before, after }` |
+
+**Allowed writes (only on platform success):**
+- `content_calendar.status` → `'posted'` (atomic, single statement)
+- `content_calendar.posted_at` → `now()` (atomic, single statement)
+- `site_settings.autoposter_cron_enabled` → `'false'` (only on auto-disable)
+- `site_settings.tiktok_*` → rotated tokens (only when `getValidTikTokAccessToken` refreshes during a TikTok post)
+
+**Forbidden writes (regardless of state):** `posting_status`, `posting_gate_approved`, `queued_for_posting_at`, `posting_block_reason`, `video_url`, `image_url`, `caption`, `image_prompt`, `campaign_asset_id`, `tracking_url`, any `campaign_assets` column.
+
+### Why `check-heygen-jobs` was dropped (Path A)
+
+That cron polled HeyGen's `/v1/video_status.get` once daily for the SBA video render. Three reasons it's now redundant:
+
+1. **HeyGen renders are caught at runtime.** When the operator runs `scripts/check-video-generation-status.js` (or hits the dashboard media-status panel), pending HeyGen jobs are polled on-demand and their URLs land in `content_calendar.video_url` directly via the worker.
+2. **Phase 14R's `validateMediaReadiness` blocks any TikTok row without `video_url`.** The autoposter cron will refuse a TikTok row with a still-pending HeyGen render — no harm done; the operator runs the worker and the row becomes eligible on the next tick.
+3. **Hobby plan only allows 4 cron slots.** The autoposter is the higher-leverage cron. Keeping 5/4 isn't possible without upgrading to Pro ($20/mo per seat).
+
+The HeyGen cron route file (`src/app/api/cron/check-heygen-jobs/route.ts`) **stays in the repo** — the route still works if invoked manually via curl with `Authorization: Bearer ${CRON_SECRET}`. It's just no longer scheduled by Vercel. Removing the route file would be a bigger refactor and is out of scope for 14S.
+
+### Schedule choice — `0 14 * * *` (2 PM UTC daily)
+
+- **2 PM UTC** = 9 AM ET / 6 AM PT. Avoids the typical morning-deploy window (most operator activity is 7-11 AM ET, so any post-deploy bug is likely to surface on a manual run BEFORE the cron tick).
+- **Daily** is the only option on Hobby. Pro unlocks finer-grained schedules; we don't need it yet.
+- **Single tick per day** means at most one autoposted row per day even if the operator Mark-Ready's multiple rows. That's the queue-size-must-equal-1 hard guardrail in action — the runner refuses on >1; the cron skips with `queue_size_gt_1` reason.
+
+### Critical safety gates enforced
+
+- ✅ `CRON_SECRET` Bearer auth (same pattern as the other 3 daily crons).
+- ✅ Kill switch defaults to disabled — first deploy posts NOTHING until operator flips the key. Eliminates "deploy weekend, wake up to 7 surprise posts" failure mode.
+- ✅ `getAutoposterEligibleRows` already runs `validateMediaReadiness`. The route additionally re-runs `validateManualPostingGate({ supportedPlatforms: [platform] })` against the freshly-fetched row before posting — defense-in-depth.
+- ✅ Atomic UPDATE pattern with `.eq('status','approved').is('posted_at',null)` inline guards — same pattern the manual routes and runner use.
+- ✅ Auto-disable on **definitive** failures only. Network exceptions don't auto-disable (likely transient); platform 4xx/5xx responses, DB-update failures, and post-flight slips do auto-disable.
+- ✅ Twitter/X refused at the platform-branch level (defense-in-depth post-14Q).
+- ✅ Vercel Hobby 10s function-timeout budget verified — IG's 6s container-wait loop is the tightest path; total budget for IG is ~8s. FB and TikTok stay under 5s.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No upgrade to Vercel Pro plan. Stayed on Hobby; replaced one cron with another.
+- ❌ No removal of `src/app/api/cron/check-heygen-jobs/route.ts` source file. Just dropped from `vercel.json`.
+- ❌ No status-poll cron for TikTok's async upload. The init response is authoritative. A future phase can add `/api/cron/tiktok-status-poll` if we want end-state confirmation.
+- ❌ No retry logic on transient failures. The next scheduled tick is the retry. If the operator wants immediate retry, they run `node scripts/run-autoposter-once.js --apply` manually.
+- ❌ No DB schema change. Migrations remain at 001-033 (immutable per anti-drift). The kill switch lives in the existing `site_settings` table from migration 007.
+- ❌ No state CSRF validation in OAuth flows. Out of scope; deferred (matches existing YouTube + TikTok callback pattern).
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 (until operator flips kill switch AND a Mark-Ready'd row exists at cron tick time) |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| `UPSERT` against site_settings | 0 (until operator flips the kill switch on, OR the cron hits a failure and flips it off) |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| Static review of cron route | ✅ Auth → kill switch → snapshot → eligibility → refusals → re-fetch → gate → platform branch → atomic UPDATE → invariant check → response. No platform call before gate; no UPDATE before platform 2xx; no kill-switch flip before definitive failure. |
+| `vercel.json` validation | ✅ Cron count 4/4. All paths exist. Schedules valid cron syntax. |
+| SOP doc consistency | ✅ All 5 steps in the manual protocol still match the cron's step ordering. Kill switch documented. Re-enable command documented. |
+| Live cron tick test | ⏸️ Deferred. Vercel will fire the route on schedule once deployed; with kill switch disabled, the first tick logs `cron_disabled` and exits clean — that's the safe-by-default validation. |
+| `node scripts/audit-pre-autoposter-readiness.js` | ⚠️ Same pre-existing local Supabase schema-cache transient (environmental, not from this phase). Production deploys hit real Supabase. |
+
+### Migration
+
+**None.** No schema change. The kill switch lives in the existing `site_settings` table from migration 007 (same pattern HeyGen and YouTube use).
+
+### Deploy
+
+Vercel will:
+
+1. Build on the new commit.
+2. Pick up the updated `vercel.json` and re-register the 4 crons. The new `autoposter-once` slot replaces `check-heygen-jobs`.
+3. The first scheduled tick (next 14:00 UTC after deploy) will hit the route with the correct CRON_SECRET. Because `site_settings.autoposter_cron_enabled` doesn't exist yet (or is anything other than `'true'`), the route returns `{ skipped: true, reason: 'cron_disabled' }` and exits clean.
+
+**To activate the cron** (operator-authorized, post-deploy):
+
+```sql
+INSERT INTO site_settings (key, value, description)
+VALUES ('autoposter_cron_enabled', 'true', 'Enables /api/cron/autoposter-once daily posting')
+ON CONFLICT (key) DO UPDATE SET value='true', updated_at=now();
+```
+
+(Run via the Supabase SQL editor, or via the dashboard once an admin UI is added.)
+
+**To verify the route works without enabling the cron** (recommended pre-flight):
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://www.vortextrips.com/api/cron/autoposter-once
+# expected: {"success":true,"skipped":true,"reason":"cron_disabled",...}
+```
+
+### Recommended next phase
+
+**Operational tuning, not code.** The architecture is complete. Likely next-phase candidates:
+
+- **Phase 14T (optional) — Cron Health Dashboard:** add a `/dashboard/automation` page surfacing the kill switch state, last-N-cron run results from Vercel logs, and a one-click re-enable button.
+- **Phase 14U (optional) — TikTok Status Poll:** add `/api/cron/tiktok-status-poll` to confirm TikTok's async upload completed for each `tiktok_publish_id` returned by the autoposter (currently the init response is treated as authoritative).
+- **Phase 14V (optional) — Per-Platform Schedules:** upgrade to Vercel Pro and split the autoposter into separate per-platform crons (e.g., FB at 9 AM ET, IG at 12 PM ET, TikTok at 6 PM ET) for engagement-time optimization.
+
+None of these are required for the system to function. Phase 14S is the operational completion of the primary posting automation architecture.
+
+---
+
+## Phase 14R — TikTok Auto-Poster (deployed `78c4041` 2026-05-08 — code changes only; no DB writes during this phase; no platform calls until operator authorizes)
 
 ### What this phase ships
 

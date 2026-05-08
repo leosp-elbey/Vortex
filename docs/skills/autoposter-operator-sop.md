@@ -1,15 +1,41 @@
 # Autoposter Operator SOP — VortexTrips
 
 **Phase introduced:** 14P
-**Status:** MANDATORY for every manual posting cycle on the VortexTrips autoposter.
+**Phase 14S:** Cron now active. The 5-step manual protocol below is preserved as **diagnostic** procedure; daily posting is handled automatically.
+**Status:** MANDATORY for every manual diagnostic cycle on the VortexTrips autoposter. The cron mirrors this SOP step-for-step on the schedule registered in `vercel.json`.
 **Supersedes:** ad-hoc operator routines documented across PROJECT_STATE_CURRENT.md and PHASE_14O_AUTOPOSTER_PILOT_PLAN.md §11. This document is now the canonical procedure.
 **Anti-drift:** This SOP is the law. Any deviation requires an explicit operator-authorized phase that updates this file.
 
 ---
 
-## Purpose
+## Operating mode (post-Phase-14S)
 
-Codify the exact 5-step manual posting protocol the operator must follow for every approved row that flows through the autoposter pipeline. This protocol is the human-in-the-loop substitute for a registered cron during Phase 14O.1 / Path D, and it is the contract the future autoposter cron (Phase 14S) must mirror.
+**🤖 Fully automated.** The cron at `/api/cron/autoposter-once` runs daily on the schedule registered in `vercel.json` and posts exactly one eligible Mark-Ready'd row per execution to Facebook, Instagram, or TikTok via the same gate / atomic-UPDATE contract this SOP describes.
+
+**Kill switch:** `site_settings.autoposter_cron_enabled`
+- `'true'` → cron actively posts
+- anything else (including missing) → cron returns `{ skipped: true, reason: 'cron_disabled' }`
+
+**Auto-disable on failure.** The cron flips the kill switch back to `'false'` automatically on any of:
+- platform non-2xx response,
+- atomic UPDATE affecting != 1 row,
+- post-flight invariant slip (posted_at delta != +1, status='posted' delta != +1).
+
+After an auto-disable, the operator must investigate and manually re-enable:
+```sql
+UPDATE site_settings SET value='true' WHERE key='autoposter_cron_enabled';
+```
+
+**Operator's daily responsibilities under cron:**
+1. Mark Ready exactly one approved row per day (or less; the cron is fine with 0 eligible).
+2. Watch Vercel logs for `[autoposter-once]` entries.
+3. Run the diagnostic 5-step procedure below WHENEVER something looks off (failed cron, posted_at drift, kill switch flipped) — that's the protocol's new role.
+
+---
+
+## Purpose (diagnostic mode)
+
+Codify the exact 5-step manual posting protocol the operator must follow when running the `scripts/run-autoposter-once.js` runner directly — for diagnosis, for one-off backfills when the cron is disabled, or for verifying behavior before re-enabling the kill switch after an incident.
 
 The protocol enforces:
 
@@ -18,23 +44,24 @@ The protocol enforces:
 - **No DB write without a successful platform call.** Atomic UPDATE pattern: `status='posted', posted_at=now()` only after the platform returns 2xx.
 - **No bypass of `validateManualPostingGate` or `validateMediaReadiness`.** These two are absolute law.
 
+The cron route `/api/cron/autoposter-once` enforces these exact same invariants programmatically (see Phase 14S promotion mapping at the bottom of this doc).
+
 ---
 
 ## Scope
 
-**Applies to:** Facebook + Instagram posting via `scripts/run-autoposter-once.js` (Phase 14O.1).
+**Applies to:** Facebook, Instagram, AND TikTok posting via `scripts/run-autoposter-once.js` (Phase 14O.1 + Phase 14R) OR via the cron at `/api/cron/autoposter-once` (Phase 14S).
 
 **Does NOT apply to:**
 
-- TikTok manual upload via Creator Center + Mark Posted bookkeeping (Phase 14M.2 path) — this is a separate manual flow until Phase 14R lands the TikTok Direct Post API.
-- Twitter/X — explicitly refused by the runner (HTTP 402 on Free tier; permanently dropped per Phase 14Q).
-- Any future cron-shaped path — Phase 14S will wrap this same protocol into a route, but the cron must enforce the same five gates programmatically.
+- Twitter/X — permanently dropped per Phase 14Q. The runner's `REFUSED_PLATFORMS` set keeps `twitter` and `x` as defensive; the cron route mirrors the refusal.
+- One-off manual posts via the dashboard's "Post to FB / Post to IG" buttons — those go through `/api/automations/post-to-{facebook,instagram,tiktok}` which apply the same gate but skip the audit + queue-size invariants.
 
 ---
 
-## The 5-Step Protocol (STRICT ORDER)
+## The 5-Step Protocol (STRICT ORDER) — diagnostic / one-off use
 
-Every manual posting cycle MUST execute these five steps in order. Skipping a step or reordering them is a protocol violation.
+Every manual posting cycle MUST execute these five steps in order. Skipping a step or reordering them is a protocol violation. The cron at `/api/cron/autoposter-once` runs an automated equivalent on the schedule in `vercel.json`; this manual procedure is what you fall back to for diagnostics.
 
 ### Step 1 — Audit (pre-flight)
 
@@ -56,14 +83,16 @@ If any of the 9 checks fails, **stop**. Diagnose root cause. Do not proceed to S
 In `/dashboard/content`:
 
 1. Identify the row to post. It must already be in `status='approved'` (the AI / operator approval step happens earlier and is out of scope for this SOP).
-2. Click **Mark Ready** on **exactly one** Facebook OR Instagram row.
+2. Click **Mark Ready** on **exactly one** Facebook, Instagram, OR TikTok row.
 3. Confirm the row now shows `posting_gate_approved=true` and `queued_for_posting_at` is set.
 
 **Required outcome:** Eligible queue size = **exactly 1**.
 
-- Two or more Ready rows is a refusal condition (the runner will exit with code 2).
-- A Ready row on a refused platform (Twitter/X/TikTok) is also a refusal condition.
+- Two or more Ready rows is a refusal condition (the runner will exit with code 2; the cron returns `skipped: true, reason: 'queue_size_gt_1'`).
+- A Ready row on Twitter/X is also a refusal condition (the runner refuses; the cron returns `skipped: true, reason: 'refused_platform'`).
 - If the dashboard shows the wrong row Ready, click **Unqueue** and start Step 2 over.
+
+**Note for cron mode:** under Phase 14S, this is the only step the operator performs daily. The cron handles Steps 1, 3, 4, 5 automatically.
 
 ### Step 3 — Dry-Run script (no platform call, no DB write)
 
@@ -155,16 +184,29 @@ The SOP exists to keep these invariants intact across every cycle:
 
 ---
 
-## Promotion to Cron (Phase 14S)
+## Phase 14S Cron Mapping — how the route mirrors this SOP
 
-Phase 14S will wrap the runner's `--apply` logic into `/api/cron/autoposter-once/route.ts`, gated by `CRON_SECRET` and a `site_settings.autoposter_cron_enabled` kill switch. When that ships, the cron route MUST encode this SOP's 5 gates programmatically:
+The cron at [`src/app/api/cron/autoposter-once/route.ts`](../../src/app/api/cron/autoposter-once/route.ts) implements the SOP's 5 steps programmatically:
 
-| SOP step | Cron equivalent |
+| SOP step | Cron implementation |
 |---|---|
-| Step 1 — Audit pre-flight | Pre-flight assertion: Check 9 PASS, eligible queue snapshot |
-| Step 2 — Mark Ready | (Operator-driven; cron does not Mark Ready — it only posts what is already Ready) |
-| Step 3 — Dry-Run | Pre-flight gate: `validateManualPostingGate` + `validateMediaReadiness` + queue-size-exactly-1 check |
-| Step 4 — Apply | Platform call + atomic UPDATE |
-| Step 5 — Audit post-flight | Post-flight assertion: Check 9 PASS, deltas == +1, queue drained to 0; on slip, auto-disable the cron |
+| Step 1 — Audit pre-flight | `snapshotPostedCounts(supabase)` captures `posted_at` count + `status='posted'` count before any platform call. Equivalent to Check 9's invariant baseline. |
+| Step 2 — Mark Ready | **Not done by the cron** — operator-driven. The cron only posts what is already Ready. |
+| Step 3 — Dry-Run / gate | `getAutoposterEligibleRows({ limit: 5 })` returns only rows that pass `validateAutoposterCandidate` (which already runs `validateMediaReadiness`). Cron then re-fetches the chosen row and runs `validateManualPostingGate(post, { supportedPlatforms: [platform] })` as defense-in-depth. Refuses if queue size != 1, refuses if platform is twitter/x, refuses if platform is unsupported. |
+| Step 4 — Apply | Platform call (FB photo→feed fallback, IG container→wait→publish, or TikTok Direct Post init) followed by atomic UPDATE: `status='posted', posted_at=now()` with `.eq('status','approved').is('posted_at',null)` inline guards. Update count must equal 1. |
+| Step 5 — Audit post-flight | `snapshotPostedCounts(supabase)` again — `posted_at` delta must equal +1, `status='posted'` delta must equal +1. On slip, the cron flips `site_settings.autoposter_cron_enabled` to `'false'` and returns 500. |
 
-This SOP is the source-of-truth for that cron's behavior. If the SOP and the cron disagree, the cron is wrong.
+**Auto-disable triggers** (any of these flip the kill switch and stop the next tick):
+- Platform non-2xx response
+- DB UPDATE failed
+- DB UPDATE affected count != 1
+- Post-flight delta != +1 on either counter
+
+**Operator response after auto-disable:**
+1. Read Vercel logs for the `[autoposter-once] CRITICAL` entry — it carries the row_id, platform, platform_post_id (if landed), and reason.
+2. Run `node scripts/audit-pre-autoposter-readiness.js` to inspect the database state.
+3. If the platform post landed but the DB didn't flip (the warning case): use `scripts/repair-posted-at-invariants.js` with explicit `--apply --id=<row_id>`.
+4. If the platform refused the post: fix the root cause (token expired, media URL unreachable, etc.) THEN re-enable: `UPDATE site_settings SET value='true' WHERE key='autoposter_cron_enabled';`.
+5. Run the manual 5-step protocol once on a fresh Mark-Ready'd row to verify the fix before letting the cron resume.
+
+**This SOP is the source-of-truth for the cron's behavior. If the SOP and the cron disagree, the cron is wrong.**

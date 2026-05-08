@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14R shipping in working tree — full TikTok automation. OAuth lib + callback + posting route + runner integration. No DB writes during this phase. No platform calls until operator authorizes + runs --apply. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `5f48ced` (Phase 14Q: excise Twitter/X — route, dependency, allowlists, UI all removed)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Q deployed and verified on prod** · **Phase 14R in working tree (TikTok end-to-end)** — Phase 14S (100% automation cron) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). **TikTok now fully automated** via Direct Post API. Cron stays off until 14S.
+**Last updated:** 2026-05-08 (Phase 14S shipping in working tree — 100% Automation Cron. `/api/cron/autoposter-once` route added with CRON_SECRET auth, kill switch, FB/IG/TikTok branches, and auto-disable on failure. `vercel.json` swapped `check-heygen-jobs` for `autoposter-once` at `0 14 * * *` daily. Operator SOP updated to reflect cron-active mode. Kill switch defaults to disabled — first deploy posts NOTHING until operator flips `site_settings.autoposter_cron_enabled='true'`. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `78c4041` (Phase 14R: TikTok Direct Post automation — OAuth, callback, route, runner)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14R deployed and verified on prod** · **Phase 14S in working tree (autonomous cron)** — primary posting automation architecture is complete after 14S. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). **Autoposter cron registered, kill-switched, auto-disabling.**
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,53 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14R — TikTok Auto-Poster (in working tree, 2026-05-08 — full TikTok automation. New OAuth lib, updated callback, new posting route, runner integration. Typecheck PASS).**
+**Phase 14S — 100% Automation Cron (in working tree, 2026-05-08 — autonomous daily posting via Vercel Cron. Typecheck PASS).**
 
-Phase 14Q deployed at `5f48ced`. Phase 14R is the heavy lift: building the TikTok token-exchange flow and Direct Post posting engine end-to-end so TikTok joins Facebook and Instagram as a fully-automated target platform.
+Phase 14R deployed at `78c4041`. Phase 14S is the operational completion: wrap the runner's `--apply` logic into a CRON_SECRET-gated route that Vercel calls daily, register it in `vercel.json` (replacing the legacy `check-heygen-jobs` slot), and update the operator SOP to reflect the cron-active mode. The cron is **safe-by-default** — kill switch defaults to disabled until the operator explicitly flips `site_settings.autoposter_cron_enabled='true'`.
+
+**Built in 14S (no DB writes during this phase, no platform calls until kill switch is enabled AND a Mark-Ready'd row exists at cron tick time):**
+- [x] `src/app/api/cron/autoposter-once/route.ts` (new) — ~430-line CRON_SECRET-gated daily route. Implements the SOP's 5 steps programmatically: pre-flight snapshot → `getAutoposterEligibleRows({ limit: 5 })` → defense-in-depth `validateManualPostingGate` → platform call (FB photo→feed fallback / IG container→wait→publish / TikTok Direct Post init) → atomic UPDATE with `.eq('status','approved').is('posted_at',null)` guards → post-flight delta check → kill-switch flip on any definitive failure. One row per execution (refuses on queue size != 1). Twitter/X explicitly refused (defense-in-depth). Uses existing `getValidTikTokAccessToken` and `validateManualPostingGate` libraries — no logic duplication beyond the platform-poster branches.
+- [x] `vercel.json` — `/api/cron/check-heygen-jobs` slot dropped (Path A); `/api/cron/autoposter-once` registered at `0 14 * * *` (2 PM UTC daily). Hobby plan stays at 4/4 cron slots.
+- [x] `docs/skills/autoposter-operator-sop.md` — header re-stamped to "Phase 14S: Cron now active." New "Operating mode (post-Phase-14S)" section documents kill switch, auto-disable triggers, and operator-after-incident flow. Step 2 (Mark Ready) flagged as the only step the operator runs daily under cron mode. Phase 14S Cron Mapping table at the bottom traces each SOP step to its cron implementation. The full 5-step manual protocol is preserved verbatim and re-purposed as canonical **diagnostic** procedure.
+
+**Kill switch (defense-in-depth):**
+- `site_settings.autoposter_cron_enabled = 'true'` → cron actively posts
+- anything else (including missing key) → cron returns 200 `{ skipped: true, reason: 'cron_disabled' }`
+- Auto-flips to `'false'` on: platform non-2xx response, DB UPDATE failure, UPDATE-affected-count != 1, post-flight invariant slip
+- Re-enable: `UPDATE site_settings SET value='true' WHERE key='autoposter_cron_enabled';`
+
+**Cron route's contract** (mirrors the SOP):
+1. **Step 1 (Audit pre-flight)** → `snapshotPostedCounts(supabase)` captures posted_at + status='posted' counts
+2. **Step 2 (Mark Ready)** → operator-driven; cron does NOT mark Ready
+3. **Step 3 (Dry-run / gate)** → eligibility query + `validateManualPostingGate` re-check on the freshly-fetched row
+4. **Step 4 (Apply)** → platform call + atomic UPDATE; update count must equal 1
+5. **Step 5 (Post-flight)** → re-snapshot, posted_at delta and status='posted' delta both must equal +1; on slip, kill switch flips
+
+**Schedule choice:** `0 14 * * *` (14:00 UTC daily) = 9 AM ET / 6 AM PT. Avoids the typical operator morning window (7-11 AM ET), so any post-deploy bug surfaces during a manual run before the cron tick.
+
+**Operator next steps (post-deploy, before activating cron):**
+1. **Verify route is reachable:** `curl -H "Authorization: Bearer $CRON_SECRET" https://www.vortextrips.com/api/cron/autoposter-once` → expect `{ skipped: true, reason: 'cron_disabled' }`.
+2. **(Once ready)** flip the kill switch: `INSERT INTO site_settings (key, value, description) VALUES ('autoposter_cron_enabled', 'true', 'Enables /api/cron/autoposter-once daily posting') ON CONFLICT (key) DO UPDATE SET value='true', updated_at=now();`
+3. Mark Ready ONE FB/IG/TikTok row before the next 14:00 UTC tick — that row will be auto-posted.
+4. Watch Vercel logs for `[autoposter-once]` entries.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ Static review of route: gate ordering, atomic-UPDATE shape, kill-switch flip points, error paths verified
+- ✅ `vercel.json` validates: 4 cron slots, valid cron syntax, all paths resolve to existing routes
+- ⏸️ Live cron tick test deferred — Vercel fires on schedule; first tick will safely return `cron_disabled`
+- ⚠️ `audit-pre-autoposter-readiness.js`: same pre-existing local Supabase schema-cache transient (environmental, not from this phase)
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Architecture status: complete.** Remaining work is operational tuning, not code:
+- [ ] **Phase 14T (optional) — Cron Health Dashboard** (kill switch toggle, last-N runs, one-click re-enable)
+- [ ] **Phase 14U (optional) — TikTok Status Poll** (confirm async upload completion for each `tiktok_publish_id`)
+- [ ] **Phase 14V (optional) — Per-Platform Schedules** (requires Vercel Pro upgrade for sub-daily cron cadence)
+
+---
+
+### Pre-Phase-14S: Phase 14R — TikTok Auto-Poster (saved + pushed `78c4041`; full TikTok automation; OAuth + Direct Post API + runner integration).
 
 **Built in 14R (no DB writes during this phase, no platform calls until operator runs --apply):**
 - [x] `src/lib/tiktok-oauth.ts` (new) — `exchangeCodeForTokens(code, redirectUri)`, `refreshAccessToken(refreshToken)`, `saveTikTokTokens(supabase, tokens)`, `getValidTikTokAccessToken(supabase)`. Calls `https://open.tiktokapis.com/v2/oauth/token/`. Persists `tiktok_{access_token,refresh_token,token_expires_at,open_id}` into `site_settings` with `onConflict: 'key'` upserts. 60s expiry buffer for proactive refresh. Never logs the OAuth code or state.
