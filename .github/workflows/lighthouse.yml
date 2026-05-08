@@ -1,0 +1,67 @@
+# Phase 14AA — Lighthouse CI: weekly performance / accessibility / SEO audit.
+#
+# Lives in a separate workflow file (NOT a job in ci.yml) for three reasons:
+#   1. ci.yml runs in ~2-3 minutes; Lighthouse takes ~10-15 minutes for 4 URLs.
+#      Folding Lighthouse into ci.yml would slow down the typecheck/lint feedback
+#      loop that PR authors care about most.
+#   2. Different cadence — Lighthouse only meaningfully runs against deployed
+#      production URLs, so triggering on every PR is wasteful (preview deploys
+#      have different DNS / cold-start profiles than production). Running on
+#      `push: main` (after Vercel finishes deploying) is the right window.
+#   3. Different failure semantics — ci.yml hard-fails on lint/typecheck
+#      regressions; Lighthouse uses `warn`-level assertions so the workflow
+#      surfaces score drops without blocking development.
+#
+# The audit runs against the actual content pages, NOT /free or /join. Those
+# two are 307 redirects to external portals (myvortex365.com, surge365.com)
+# that we don't control — auditing them would score someone else's site.
+#
+# Reports are uploaded to LHCI's temporary public storage (7-day retention)
+# and linked from the Actions run summary. Operator can drill into any
+# individual URL's full Lighthouse report.
+
+name: Lighthouse
+
+on:
+  push:
+    branches: [main]
+  # Manual trigger from the Actions tab — useful when investigating a
+  # specific commit's score history or after a frontend refactor.
+  workflow_dispatch:
+
+# Don't cancel in-flight Lighthouse runs — each commit's audit is meaningful
+# data even if a newer commit lands. Cancelling mid-run wastes the partial
+# work and creates score gaps in the historical record.
+concurrency:
+  group: lighthouse-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lighthouse:
+    name: Lighthouse audit (4 production URLs)
+    runs-on: ubuntu-latest
+    # Lighthouse on 4 URLs typically takes 8-12 minutes. 20-minute budget
+    # gives headroom for slow Vercel cold-starts on infrequently-hit pages.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        # Need the lighthouserc.json file from the repo, even though the
+        # actual audit runs against deployed production URLs.
+        uses: actions/checkout@v4
+
+      - name: Run Lighthouse CI
+        # treosh/lighthouse-ci-action handles install + run + upload in one
+        # step. v12 is the current major as of Phase 14AA.
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          configPath: ./lighthouserc.json
+          # Upload the .lhci/ collection as a GitHub Actions artifact too,
+          # so reports survive even after LHCI temporary public storage's
+          # 7-day retention expires. Operator can grep these from an old
+          # workflow run when investigating a regression.
+          uploadArtifacts: true
+          # Append run results to the Action's job summary so the operator
+          # can see passes/failures at a glance without clicking into the
+          # full LHCI HTML report.
+          temporaryPublicStorage: true

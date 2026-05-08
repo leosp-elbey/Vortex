@@ -1,14 +1,104 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14Z shipping in working tree — CI/CD GitHub Actions wiring. New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
+**Last updated:** 2026-05-08 (Phase 14AA shipping in working tree — Lighthouse CI Action. New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
+**Last known good commit:** `1bfda11` — "Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push" New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `662fdc9` — "Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant, AND CI-gated.** Phase 14Z is the first of three optional polish phases that close out the project. Future PRs can no longer regress lint or typecheck — GitHub Actions enforces both gates automatically before any merge.
+**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant, CI-gated, AND performance-tracked.** Phase 14AA is the second of three optional polish phases. Future frontend changes that drop performance / accessibility / SEO scores below the modest budgets surface as warnings in the Actions log; combined with Phase 14Z's typecheck + lint gates, the project now has continuous-quality monitoring across code correctness AND user-facing performance.
 
 ---
 
-## Phase 14Z — CI/CD GitHub Actions Wiring (in working tree, 2026-05-08 — automated typecheck + lint on every push/PR; no code changes; no DB writes; no platform calls)
+## Phase 14AA — Lighthouse CI Action (in working tree, 2026-05-08 — automated performance / accessibility / SEO audit on every push to main; no code changes; no DB writes; no platform calls)
+
+### What this phase ships
+
+Continuous Lighthouse auditing of VortexTrips' real content pages on every push to `main` and on manual workflow dispatch. Modest score thresholds surface regressions as warnings without blocking the workflow — the goal is observability, not a hard gate. Reports are stored in two places (LHCI temporary public storage + GitHub Actions artifacts) so the operator can drill into any historical run.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `lighthouserc.json` | LHCI config. URL list, run count, score thresholds, upload target. Lives at the repo root (the conventional location LHCI's CLI looks for) and is picked up by both the GitHub Actions workflow and any local `lhci autorun` invocation the operator runs from their machine. |
+| `.github/workflows/lighthouse.yml` | Single-job workflow using `treosh/lighthouse-ci-action@v12`. Triggers on `push: main` and `workflow_dispatch`. 20-minute job timeout. Does NOT cancel in-flight runs (each commit's audit is meaningful historical data). Uploads the `.lhci/` collection as both LHCI public-storage URLs (linked from the action's job summary) AND a GitHub Actions artifact (so reports survive past LHCI's 7-day retention). |
+
+### URL choice — what gets audited
+
+| Audited | Why |
+|---|---|
+| `/` (Homepage) | Top of funnel; primary landing surface |
+| `/quote` | Conversion form — long-form HTML the operator owns |
+| `/sba` | SBA affiliate landing — video page where performance matters |
+| `/thank-you` | Post-conversion page — sets the post-purchase experience tone |
+
+| NOT audited | Why |
+|---|---|
+| `/free` | 307 redirect (next.config.js) → myvortex365.com/leosp. Auditing this would score the EXTERNAL portal, not our site. We can't fix score issues on someone else's domain. |
+| `/join` | Same — 307 redirect to signup.surge365.com/leosp. External destination. |
+| `/book` | Same — 307 redirect to /traveler.html (legacy static page). |
+| `/quiz` | Skipped to keep the audit tight at 4 URLs. Worth adding in a future phase if quiz becomes a primary entry point. |
+| `/t/<slug>` | Always returns a 302 redirect — Lighthouse doesn't audit redirect responses. |
+
+This decision diverges from the operator's literal `/free` and `/join` examples in the directive. The operator's example URLs were illustrative ("e.g.") and the underlying intent is "audit our funnel pages" — which our redirect routes don't actually represent. Documented this trade-off explicitly.
+
+### Score thresholds (modest, warn-level)
+
+| Category | Min score | Level |
+|---|---|---|
+| Performance | 0.70 | warn |
+| Accessibility | 0.90 | warn |
+| SEO | 0.90 | warn |
+| Best-practices | 0.85 | warn |
+
+`warn` (not `error`) means a score drop is logged in the Actions output but doesn't fail the workflow. This matches the operator's directive: "modest budgets ... so it acts as a warning system for future frontend changes." A future phase can flip specific assertions to `error` once the team has a stable baseline.
+
+### Why a separate workflow file (not a second job in ci.yml)
+
+Three reasons:
+
+1. **Speed.** `ci.yml` runs in ~2-3 minutes; Lighthouse takes 10-15 minutes for 4 URLs. Combining them would slow the typecheck/lint feedback loop that PR authors care about most.
+2. **Cadence.** Lighthouse only meaningfully runs against deployed production URLs. PR previews have different DNS / cold-start profiles. Triggering on `push: main` (after Vercel finishes deploying) is the right window. PRs don't need a Lighthouse audit at all.
+3. **Failure semantics.** `ci.yml` hard-fails on lint/typecheck regressions. Lighthouse uses `warn` assertions to surface drops without blocking. Mixing them in one workflow would muddy "did the gate fail because of lint or because of performance?"
+
+### Verification
+
+- ✅ `lighthouserc.json` is valid JSON (parses cleanly).
+- ✅ `lighthouse.yml` is valid YAML.
+- ✅ `treosh/lighthouse-ci-action@v12` is the current major as of this phase.
+- ✅ Per-URL audit budget (20 min total / 4 URLs ≈ 5 min/URL) is realistic for Lighthouse's default sampling.
+- ⏸️ Live workflow run deferred — first run executes on the very push that lands these files.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No mobile-emulation runs. The default config uses `preset: desktop`. Mobile audits would double the run time; can be added in a future phase if mobile-specific budgets become important.
+- ❌ No multi-run averaging. `numberOfRuns: 1` keeps CI minutes low. Variance is acceptable because we're using `warn`-level thresholds.
+- ❌ No bundle-size budget. LHCI supports JS/CSS/image budgets via `lighthouse-budget.json` but adding that requires per-page bundle baselines we don't have yet.
+- ❌ No Slack / email alert on regression. The job summary in GitHub Actions is the surface; the operator checks it after each push.
+- ❌ No PR comment with score deltas. Adding `LHCI_GITHUB_APP_TOKEN` secret + the GitHub App integration is operational overhead we don't need today; the Actions job summary is sufficient.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+The workflow file ships in the repo and activates automatically on the next push to `main` (this very commit). Vercel-side deploys are unaffected. Lighthouse runs against the deployed production URLs after Vercel finishes the build — no special timing needed because GitHub Actions starts the Lighthouse run on the push event, by which time the previous deploy is already serving.
+
+### Recommended next phase
+
+**Phase 14AB — Globalize bounded() helper.** Extract Phase 14Y's `bounded()` from `/t/[slug]/route.ts` into a shared `src/lib/bounded-wait.ts` utility. Apply to webhook receiving routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) so external providers (GoHighLevel, Bland.ai) get fast 200/500 responses instead of hung connections when Supabase is unavailable.
+
+---
+
+## Phase 14Z — CI/CD GitHub Actions Wiring (deployed `1bfda11` 2026-05-08 — automated typecheck + lint on every push/PR; no code changes; no DB writes; no platform calls)
 
 ### What this phase ships
 

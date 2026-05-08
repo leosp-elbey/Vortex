@@ -1,0 +1,31 @@
+{
+  "_comment_phase": "Phase 14AA — Lighthouse CI config. Hooked into .github/workflows/lighthouse.yml.",
+  "_comment_url_choice": "Targets the actual VortexTrips content pages. /free and /join are deliberately NOT in this list — both are 307 redirects (configured in next.config.js) to external portals (myvortex365.com/leosp and signup.surge365.com/leosp) that we don't control. Auditing them would score someone else's site. The 4 URLs below are the real funnel pages where our HTML, our React tree, and our Tailwind classes determine the Lighthouse score.",
+  "_comment_thresholds": "Modest budgets per the operator directive. assertions use 'warn' (not 'error') so failed thresholds surface in the Actions log without blocking the workflow. The point is observability for future frontend changes, not a hard gate.",
+  "_comment_runs": "numberOfRuns=1 keeps CI minutes low. Lighthouse's default of 3 is for stability against lab variance; with 'warn' thresholds we accept more variance in exchange for a faster feedback loop. Operator can re-run the workflow for a second sample if a single number looks anomalous.",
+  "ci": {
+    "collect": {
+      "url": [
+        "https://www.vortextrips.com/",
+        "https://www.vortextrips.com/quote",
+        "https://www.vortextrips.com/sba",
+        "https://www.vortextrips.com/thank-you"
+      ],
+      "numberOfRuns": 1,
+      "settings": {
+        "preset": "desktop"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.70 }],
+        "categories:accessibility": ["warn", { "minScore": 0.90 }],
+        "categories:seo": ["warn", { "minScore": 0.90 }],
+        "categories:best-practices": ["warn", { "minScore": 0.85 }]
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}

@@ -1,41 +1,64 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14Z shipping in working tree — CI/CD GitHub Actions wiring. New `.github/workflows/ci.yml` runs typecheck + lint on every push/PR to main, pinned to Node 22 LTS. Both gates clean. No code changes; no DB writes.)
-**Last code-shipping commit:** `662fdc9` (Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Y deployed and verified on prod** · **Phase 14Z in working tree (CI/CD wiring)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant, AND CI-gated. 8 live posts since 2026-05-05.
+**Last updated:** 2026-05-08 (Phase 14AA shipping in working tree — Lighthouse CI Action. New `.github/workflows/lighthouse.yml` + `lighthouserc.json` run `treosh/lighthouse-ci-action@v12` against 4 real content pages on every push to main. Modest warn-level budgets. Reports uploaded to LHCI public storage + GitHub artifacts. No code changes.)
+**Last code-shipping commit:** `1bfda11` (Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Z deployed and verified on prod** · **Phase 14AA in working tree (Lighthouse CI)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant, CI-gated, AND performance-tracked. 8 live posts since 2026-05-05.
 
 ---
 
 ## Current focus
 
-**Phase 14Z — CI/CD GitHub Actions Wiring (in working tree, 2026-05-08 — automated typecheck + lint on every push/PR; no code changes).**
+**Phase 14AA — Lighthouse CI Action (in working tree, 2026-05-08 — automated perf / a11y / SEO audit on every push to main; no code changes).**
 
-Phase 14Y deployed at `662fdc9`. Phase 14Z is the first of three optional polish phases (14Z/14AA/14AB) that close out the project. Future PRs can no longer regress lint or typecheck — GitHub Actions enforces both gates automatically.
+Phase 14Z deployed at `1bfda11`. Phase 14AA is the second of three optional polish phases. Continuous Lighthouse auditing of VortexTrips' real content pages on every push to `main`. Modest score thresholds surface regressions as warnings without blocking the workflow.
 
-**Built in 14Z:**
-- [x] `.github/workflows/ci.yml` (new) — single workflow, single job (`typecheck-and-lint`). Triggers on `push` and `pull_request` against `main`. Steps: checkout → setup Node 22 → `npm ci --legacy-peer-deps` → `npx tsc --noEmit` → `npm run lint`. Caches npm tarball; `concurrency: cancel-in-progress` saves minutes on rapid push sequences; 10-minute job timeout.
+**Built in 14AA:**
+- [x] `lighthouserc.json` (new) — LHCI config at repo root. URL list, run count, score thresholds, upload target.
+- [x] `.github/workflows/lighthouse.yml` (new) — single-job workflow using `treosh/lighthouse-ci-action@v12`. Triggers on `push: main` and `workflow_dispatch`. 20-minute job timeout. Does NOT cancel in-flight runs (each commit's audit is meaningful historical data). Uploads to LHCI public storage AND GitHub Actions artifacts.
 
-**Why this shape:**
-- Two gates only. `next build` deliberately NOT in CI — Vercel runs it on every deploy and adding it would require replicating all production env vars as GitHub secrets.
-- Node 22 LTS matches Vercel's runtime and Next.js 16's requirement.
-- `npm ci --legacy-peer-deps` matches the documented local invocation (Phases 14Q, 14T).
-- `concurrency: cancel-in-progress` cancels in-flight runs when a new commit lands.
+**URLs audited (real content pages):**
+- `/` (Homepage)
+- `/quote` (conversion form)
+- `/sba` (SBA affiliate landing)
+- `/thank-you` (post-conversion page)
+
+**URLs NOT audited (and why):**
+- `/free`, `/join`, `/book` — all 307 redirects in next.config.js to external portals (myvortex365.com, surge365.com, /traveler.html). Auditing them would score someone else's site, not ours.
+- `/quiz` — kept the audit tight at 4 URLs; can add later if it becomes a primary entry point.
+- `/t/<slug>` — 302 redirect; Lighthouse doesn't audit redirects.
+
+This decision diverges from the operator's literal `/free` and `/join` examples in the directive. The user said "e.g." — the underlying intent is "audit our funnel pages," which the redirect routes don't represent.
+
+**Score thresholds (modest, `warn` level):**
+| Category | Min score | Level |
+|---|---|---|
+| Performance | 0.70 | warn |
+| Accessibility | 0.90 | warn |
+| SEO | 0.90 | warn |
+| Best-practices | 0.85 | warn |
+
+`warn` (not `error`) means score drops surface in Actions log but don't block the workflow. Per operator directive: "warning system for future frontend changes." Future phase can flip specific assertions to `error` once a stable baseline exists.
+
+**Why a separate workflow file (not a second job in ci.yml):**
+1. **Speed** — ci.yml runs in ~2-3 min; Lighthouse takes 10-15 min for 4 URLs. Combining would slow the typecheck/lint feedback loop.
+2. **Cadence** — Lighthouse only meaningfully runs against deployed production URLs. PR previews have different cold-start profiles. `push: main` is the right window.
+3. **Failure semantics** — ci.yml hard-fails on lint/typecheck; Lighthouse uses `warn` assertions. Separating clarifies "what failed."
 
 **Tests:**
-- ✅ Workflow file is valid YAML
-- ✅ Both gates already pass locally (`npx tsc --noEmit` clean, `npm run lint` 0/0 since Phase 14T.1)
-- ⏸️ Live CI run deferred — the very push that lands this workflow will be the first run.
+- ✅ `lighthouserc.json` valid JSON
+- ✅ `lighthouse.yml` valid YAML
+- ✅ `treosh/lighthouse-ci-action@v12` current major as of this phase
+- ⏸️ Live workflow run deferred — first run executes on the very push that lands these files
 
 **Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
 
 **Optional remaining phases (this block):**
-- [ ] **Phase 14AA** — Lighthouse CI action targeting actual content pages
 - [ ] **Phase 14AB** — Globalize bounded() helper to webhook routes
 - [ ] **Phase 14AC** — Final audit + Maintenance Mode
 
 ---
 
-### Pre-Phase-14Z: Phase 14Y — Tracking Redirect Fallback Fix (saved + pushed `662fdc9`). Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. New `bounded()` helper races every Supabase call against a 2.5s per-call timeout. PORTAL_FALLBACK changed from `myvortex365.com/leosp` to `vortextrips.com/free` per operator directive. Worst-case latency 7.5s well under Vercel Hobby's 10s budget. Typecheck + lint clean.)
+### Pre-Phase-14AA: Phase 14Z — CI/CD GitHub Actions Wiring (saved + pushed `1bfda11`). Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. New `bounded()` helper races every Supabase call against a 2.5s per-call timeout. PORTAL_FALLBACK changed from `myvortex365.com/leosp` to `vortextrips.com/free` per operator directive. Worst-case latency 7.5s well under Vercel Hobby's 10s budget. Typecheck + lint clean.)
 **Last code-shipping commit:** `1fcd40d` (Phase 14X: Full System Audit & Broken Page Scanner)
 **Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14X deployed and verified on prod** · **Phase 14Y in working tree (redirect-route hang fix)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, AND hang-resistant. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V). AI prompts optimized (14W). Public-route health audit (14X). Tracking-redirect hang fixed (14Y).
 
