@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14W shipping in working tree — Social Media Content Optimization. SOCIAL_SYSTEM prompt rewritten with 4 enforced rules: 3-Second Hook, Platform-Specific Formatting, Value-First CTA Structure, Hashtag Strategy. Mandatory branded tags `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips` on every post. Banned weak openers + banned generic CTAs ("link in bio", "DM me"). Compliance constraints intact. Typecheck + lint clean.)
-**Last code-shipping commit:** `d426e47` (Phase 14V: TikTok Status Polling — async upload verification)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14V deployed and verified on prod** · **Phase 14W in working tree (AI prompt rewrite)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, AND on-brand. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V). AI prompts optimized for conversion (14W).
+**Last updated:** 2026-05-08 (Phase 14X shipping in working tree — Full System Audit & Broken Page Scanner. New `scripts/audit-site-health.js`. Live production run: 8/8 public routes healthy in <1.2s wall-time. Per-route expected status (200 for App Router pages, 307 for next.config redirects, 302 for /t/<real-slug>). Color-coded output, non-zero exit on failure, top-of-file operator manual-review checklist. Surfaces a side finding: /t/<unknown-slug> hangs in production — defer to follow-up phase. Typecheck + lint clean.)
+**Last code-shipping commit:** `ce20cfc` (Phase 14W: Social Media Content Optimization — SOCIAL_SYSTEM playbook)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14W deployed and verified on prod** · **Phase 14X in working tree (site health audit)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, AND health-monitored. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V). AI prompts optimized (14W). Public-route health audit (14X).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,80 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14W — Social Media Content Optimization (in working tree, 2026-05-08 — AI prompt rewrite. Typecheck + lint clean).**
+**Phase 14X — Full System Audit & Broken Page Scanner (in working tree, 2026-05-08 — production health audit script. Live run: 8/8 public routes healthy. Typecheck + lint clean).**
 
-Phase 14V deployed at `d426e47`. Phase 14W shifts focus from infrastructure to marketing ROI. Now that the pipes work flawlessly and async TikTok uploads are verifiable, we ensure the water (the content) is optimized to convert traffic. The SOCIAL_SYSTEM prompt is rewritten with an opinionated 4-rule playbook every social post must follow.
+Phase 14W deployed at `ce20cfc`. Phase 14X completes the operational tuning block with a public-route health audit script. The operator runs it before any traffic push or after any deploy to get absolute certainty that every public-facing endpoint is healthy.
+
+**Built in 14X (no DB writes, no platform writes, HTTP GETs only):**
+- [x] **`scripts/audit-site-health.js`** (new) — ~280-line standalone Node script. HTTP GETs the 8 public routes in parallel, asserts per-route expected status (200 for App Router pages, 307 for `next.config.js` redirects, 302 for `/t/<real-slug>` looked up dynamically from event_campaigns). Color-coded `[PASS]` / `[FAIL]` / `[WARN]` output with elapsed-ms and redirect-target columns. Top-of-file 24-line operator manual-review checklist (real-device mobile testing). `?utm_source=audit&utm_medium=health_check` query params + custom `User-Agent: VortexTrips-Audit-Script/14X` header so analytics queries can filter audit traffic. Non-zero exit on failure (CI-friendly).
+
+**Routes tested (per-route expected status):**
+
+| Route | Expected | Why |
+|---|---|---|
+| `/` | 200 | Homepage — App Router page |
+| `/free` | 307 | Configured in `next.config.js` to redirect to myvortex365.com/leosp |
+| `/book` | 307 | Configured to redirect to /traveler.html |
+| `/join` | 307 | Configured to redirect to signup.surge365.com/leosp |
+| `/thank-you` | 200 | Generic post-conversion page |
+| `/quote` | 200 | Quote-form page |
+| `/quiz` | 200 | Travel quiz funnel |
+| `/sba` | 200 | SBA affiliate landing page |
+| `/t/<slug>` | 302 | Dynamic — uses real slug from event_campaigns; WARN-skipped if no slug or Supabase unreachable |
+
+**Critical design decisions:**
+- **Per-route expected status (NOT one-size-fits-all 200)** — `next.config.js` configures /free, /book, /join as 307 redirects. A literal 200-only check would have falsely flagged 3 healthy routes as broken.
+- **Real slug for /t/ test (not a mock)** — initial probe revealed /t/<unknown-slug> hangs in production at 15s+ (likely a stalled Supabase logging path). Rather than mask this with a mock, the script queries event_campaigns for a real slug. Tests what visitors actually experience.
+- **Graceful degradation** — three failure modes for the slug lookup all handled cleanly (missing env, missing supabase-js, query error). Yellow WARN, never a hard FAIL. Public-page audit completes normally.
+- **15s per-request timeout** — bumped from 10s after first probe revealed cold-start latency on /t/. A route taking longer than 15s IS broken from a visitor's perspective.
+
+**Live production audit results:**
+```
+[PASS] /            200 OK    150ms
+[PASS] /free        307 TR    132ms  → myvortex365.com/leosp
+[PASS] /book        307 TR    137ms  → /traveler.html
+[PASS] /join        307 TR    139ms  → signup.surge365.com/leosp
+[PASS] /thank-you   200 OK    184ms
+[PASS] /quote       200 OK    148ms
+[PASS] /quiz        200 OK    146ms
+[PASS] /sba         200 OK    149ms
+[WARN] /t/<slug>    SKIPPED   (Supabase 522 — transient infrastructure)
+
+✓ All 8 routes healthy (slowest 184ms, /t/<slug> skipped)
+```
+
+All public pages green. Total wall-time ~1.2s for 8 parallel checks. The /t/ skip is environmental (Supabase project 522'd this run); script handled it correctly with WARN, not FAIL. Exit 0.
+
+**Side-finding (out of 14X scope, defer to follow-up):**
+`/t/<unknown-slug>` hangs in production for 15s+. Route header says it should always redirect through a 3-tier fallback even for unknown slugs, but the implementation appears to hang. Doesn't affect real traffic today (real campaign links use valid slugs). Worth a Phase 14Y fix.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` clean (0 errors, 0 warnings)
+- ✅ Live production audit: 8/8 public routes healthy
+- ✅ Static review: AbortController timeout cleanup correct; Promise.all bounded to ~9 concurrent; exit 0 only when every route passed; expected-status table matches `next.config.js` reality.
+
+**Operator usage:**
+```bash
+node scripts/audit-site-health.js                      # production
+node scripts/audit-site-health.js --base=https://...   # preview deploy
+node scripts/audit-site-health.js --skip-tracking      # skip /t/ test
+```
+
+After the script reports green, operator runs the 4-step manual review checklist (real-device mobile testing) documented in the script header.
+
+**Provider / platform / DB activity in this phase:** zero against payment / posting / external APIs. 1 read against `event_campaigns` per audit run (indexed lookup). HTTP GET against the 8 public routes per audit run. posted_at delta: 0 (29 → 29).
+
+**Architecture status: COMPLETE.** Phases 14T.1 → 14X delivered the operational tuning block. The system is production-ready for traffic.
+
+**Optional follow-up phases:**
+- [ ] **Phase 14Y (recommended)** — fix the `/t/<unknown-slug>` hang surfaced by 14X.
+- [ ] **Phase 14Z (optional)** — wire audit-site-health.js into CI/CD GitHub Action.
+- [ ] **Phase 14AA (optional)** — Lighthouse + Web Vitals tracking.
+
+---
+
+### Pre-Phase-14X: Phase 14W — Social Media Content Optimization (saved + pushed `ce20cfc`).
 
 **Built in 14W (no DB writes, no platform calls, affects only the next AI generation pass):**
 - [x] **`src/lib/ai-prompts.ts`** (updated) — header comment notes Phase 14W's intentional cache invalidation. **VORTEX_BRAND_RULES** rephrased: the old "exclamation-stuffed clickbait" line replaced with one that reconciles aggressive hooks with compliance ("Direct and value-first. Aggressive curiosity hooks are encouraged when they expose a real savings benefit. Avoid exclamation-stuffed walls of text and FAKE scarcity"). CTA line strengthened with explicit ban on "link in bio" / "DM me" / "comment below". **SOCIAL_SYSTEM** completely rewritten with 4 rule sections (each enforced with `═══` dividers).
