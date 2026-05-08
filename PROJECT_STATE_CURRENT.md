@@ -1,14 +1,94 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-06 (Phase 14O Scopes C+A committed `f74ddfc`; legacy IG WARN cleared via repair script; Phase 14O.1 in working tree — `scripts/run-autoposter-once.js` manual autoposter runner. No live cron. No platform API calls in this phase. posted_at: 29; status='posted': 29; both counts now perfectly aligned.)
-**Last known good commit:** `f74ddfc` — "Phase 14O: autoposter pilot plan and dry-run baseline, no cron enabled"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14O deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14P shipping in working tree — operator SOP for the manual autoposter codified at `docs/skills/autoposter-operator-sop.md`. Documentation only; no code changes; no DB writes; no platform calls. Phase 14O.1 runtime invariants unchanged: posted_at: 29; status='posted': 29; both counts perfectly aligned.)
+**Last known good commit:** `6e2f27a` — "Phase 14O.1: add manual autoposter runner, no scheduled cron"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14O.1 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Phase 14O.1 adopts **Path D** (manual runner before any cron). The runner script enforces the same gate / atomic-update / refusal contract that a future cron would need. Operator runs `node scripts/run-autoposter-once.js --apply` once per Mark Ready cycle for ~30 cycles; then Phase 14O.2 evaluates cron promotion. Cron stays disabled. Twitter/X excluded (HTTP 402). TikTok manual-only (no token-exchange helper yet).
+**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codifies the operator's daily 5-step protocol (Audit → Mark Ready → Dry-Run → Apply → Audit) into a single canonical document — `docs/skills/autoposter-operator-sop.md` — which is now the source-of-truth for both the human operator routine and the eventual Phase 14S cron route's programmatic gates. Cron stays disabled. Twitter/X excluded (HTTP 402; permanent drop incoming in Phase 14Q). TikTok manual-only (no token-exchange helper yet; Phase 14R will land OAuth + Direct Post API).
 
 ---
 
-## Phase 14O.1 — Manual Autoposter Runner (in working tree, 2026-05-06 — DRY-RUN tested; no platform calls; no DB writes)
+## Phase 14P — Autoposter Operator SOP Skill (in working tree, 2026-05-08 — documentation only; no code changes; no DB writes; no platform calls)
+
+### What this phase ships
+
+A single canonical operator SOP document — `docs/skills/autoposter-operator-sop.md` — that codifies the strict 5-step manual posting protocol the operator must follow for every cycle through `scripts/run-autoposter-once.js`. The SOP is now THE LAW for manual posting and is referenced as the contract that the Phase 14S autoposter cron must mirror programmatically.
+
+### Why this phase exists
+
+Until Phase 14P, the operator's daily routine lived in two places: PROJECT_STATE_CURRENT.md (Phase 14O.1 section) and PHASE_14O_AUTOPOSTER_PILOT_PLAN.md §11. Both descriptions were correct but neither was canonical, and neither was structured as a strict protocol with refusal codes mapped to operator actions. As we approach 100% automation (Phases 14Q–14S), we need a single source-of-truth document the cron route can mirror line-for-line. Phase 14P creates that document; subsequent phases reference it.
+
+### The 5-step protocol (canonical, as documented in the SOP)
+
+1. **Audit (pre-flight)** — `node scripts/audit-pre-autoposter-readiness.js` → 9/9 PASS, eligible_count=0, posted_at counts aligned.
+2. **Dashboard Approve / Mark Ready** — exactly one Facebook OR Instagram row Marked Ready in `/dashboard/content`. Eligible queue size = exactly 1.
+3. **Dry-Run script** — `node scripts/run-autoposter-once.js` (no `--apply`). Verify the planned post is correct. Refusal codes 2/3/4/5 trigger an immediate STOP.
+4. **Apply script** — `node scripts/run-autoposter-once.js --apply`. Platform call + atomic UPDATE `status='posted', posted_at=now()`. Exit code 0 required.
+5. **Audit (post-flight)** — re-run the audit. 9/9 PASS, posted_at and status='posted' counts each incremented by exactly +1, eligible queue drained to 0.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `docs/skills/autoposter-operator-sop.md` | The SOP. Canonical 5-step protocol, refusal-code table, invariants enforced, what-not-to-do list, and a Phase-14S promotion mapping showing exactly how the cron route must mirror each SOP step. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `PROJECT_STATE_CURRENT.md` | Header restamp + new Phase 14P section + reference to the SOP as the operator's source-of-truth document. |
+| `BUILD_PROGRESS.md` | Phase 14P entry added; "Current focus" updated. |
+
+### What this phase does NOT do
+
+- ❌ No code changes to `scripts/run-autoposter-once.js`, `scripts/audit-pre-autoposter-readiness.js`, or any platform-poster route.
+- ❌ No changes to `validateManualPostingGate` or `validateMediaReadiness`. The gates are unchanged.
+- ❌ No `vercel.json` change. No cron registered or modified.
+- ❌ No DB schema changes. No migration 034. Supabase migrations remain at 017–033.
+- ❌ No platform API calls. No HeyGen / Pexels / OpenAI calls. Zero provider activity in this phase.
+- ❌ No content_calendar mutations. posted_at delta: 0 (29 → 29).
+
+### Invariants preserved
+
+- Audit 9/9 PASS — unchanged.
+- `status='posted' ⇔ posted_at IS NOT NULL` (Check 9) — unchanged.
+- Atomic UPDATE pattern in the runner — unchanged (this phase only documents it, does not modify it).
+- Refusal contract (exit codes 0/2/3/4/5) — unchanged (this phase documents the contract; the runner's behavior is identical).
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| Documentation review | ✅ SOP cross-checked against `scripts/run-autoposter-once.js` exit codes (0/2/3/4/5) and Phase 14O.1 refusal contract — match exact |
+| Documentation review | ✅ SOP cross-checked against `scripts/audit-pre-autoposter-readiness.js` Check 9 invariant and 9-check structure — match exact |
+| `git status` (pre-commit) | ✅ Only the three explicitly named files appear; `BUILD_STATUS.md` remains untracked and is intentionally NOT staged in this phase |
+
+### Migration
+
+**None.** No schema change. Supabase migrations remain at 001–033 (immutable).
+
+### Deploy
+
+**None required.** Phase 14P is documentation only. Vercel can rebuild on the new commit, but no behavior changes ship.
+
+### Recommended next phase
+
+**Phase 14Q — Excise Twitter:** delete `/api/automations/post-to-twitter/route.ts`, remove `'twitter'` from all `SUPPORTED_PLATFORMS` arrays, UI elements, and weekly AI generation prompts. Permanent drop per executive decision (Twitter API costs / Free tier read-only since 2024 / HTTP 402 on every attempt).
+
+After 14Q: Phase 14R (TikTok OAuth + Direct Post API) → Phase 14S (cron promotion of the runner, replacing `check-heygen-jobs` per Path A; CRON_SECRET-gated; SOP-step-mirroring as documented in the new SOP doc).
+
+---
+
+## Phase 14O.1 — Manual Autoposter Runner (deployed `6e2f27a` 2026-05-06 — DRY-RUN tested; runner committed and pushed; no cron registered)
 
 ### What this phase ships
 

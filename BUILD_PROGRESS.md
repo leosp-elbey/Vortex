@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-06 (Phase 14O Scopes C+A deployed `f74ddfc`; legacy IG WARN cleared via repair script; Phase 14O.1 in working tree — manual autoposter runner script, default DRY-RUN. posted_at: 29; status='posted': 29; both counts perfectly aligned. No live cron. No platform API calls in this phase.)
-**Last code-shipping commit:** `f74ddfc` (Phase 14O: autoposter pilot plan and dry-run baseline, no cron enabled)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14O deployed and verified on prod** · **Phase 14O.1 in working tree (Path D adopted)** — `scripts/run-autoposter-once.js` manual runner. 8 live posts since 2026-05-05. Twitter/X excluded (billing). TikTok manual-only. Cron stays off; cron decision deferred until ~30 clean manual --apply runs.
+**Last updated:** 2026-05-08 (Phase 14P shipping in working tree — operator SOP for the manual autoposter codified at `docs/skills/autoposter-operator-sop.md`. Documentation only. No code changes. No DB writes. No platform calls. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last code-shipping commit:** `6e2f27a` (Phase 14O.1: add manual autoposter runner, no scheduled cron)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14O.1 deployed and verified on prod** · **Phase 14P in working tree (operator SOP codified)** — Phase 14Q (excise Twitter) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X excluded (billing; permanent drop incoming in 14Q). TikTok manual-only (OAuth + Direct Post API incoming in 14R). Cron stays off until 14S.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,7 +28,31 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14O.1 — Manual Autoposter Runner / Path D (in working tree, 2026-05-06 — `scripts/run-autoposter-once.js` ships; DRY-RUN tested clean; no platform calls; no DB writes).**
+**Phase 14P — Autoposter Operator SOP Skill (in working tree, 2026-05-08 — `docs/skills/autoposter-operator-sop.md` codifies the strict 5-step manual posting protocol; documentation only; no code changes; no DB writes; no platform calls).**
+
+Phase 14O.1 deployed at `6e2f27a`. The runner has been exercised and the operator routine is well-understood, but the routine itself was scattered across PROJECT_STATE_CURRENT.md and PHASE_14O_AUTOPOSTER_PILOT_PLAN.md §11. Phase 14P consolidates the routine into a single canonical SOP document that is now THE LAW for manual posting and the contract that the Phase 14S autoposter cron route must mirror programmatically.
+
+**Built in 14P (no code changes, no DB writes, no platform calls):**
+- [x] `docs/skills/autoposter-operator-sop.md` — canonical operator SOP. The strict 5-step protocol (Audit → Mark Ready → Dry-Run → Apply → Audit), the refusal-code table mapping runner exit codes 0/2/3/4/5 to operator actions, the invariants enforced (queue / posted_at / atomic UPDATE / gate / platform / provider), what-the-operator-must-NOT-do list, and a Phase-14S promotion mapping showing exactly how the cron route must mirror each SOP step.
+
+**5-step protocol summary:**
+1. `node scripts/audit-pre-autoposter-readiness.js` → 9/9 PASS pre-flight
+2. Mark Ready exactly one FB or IG row in `/dashboard/content`
+3. `node scripts/run-autoposter-once.js` (DRY-RUN; verify plan)
+4. `node scripts/run-autoposter-once.js --apply` (operator-authorized; exit 0 required)
+5. `node scripts/audit-pre-autoposter-readiness.js` → 9/9 PASS post-flight; deltas == +1; queue drained to 0
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Next operator-authorized phases (from Game Plan, executed sequentially):**
+- [~] **Phase 14P — Autoposter Operator SOP Skill** (this phase; in working tree)
+- [ ] **Phase 14Q — Excise Twitter:** delete `/api/automations/post-to-twitter/route.ts`; remove `'twitter'` from all `SUPPORTED_PLATFORMS` arrays, UI elements, and weekly AI generation prompts.
+- [ ] **Phase 14R — TikTok Auto-Poster:** create `src/lib/tiktok-oauth.ts` (exchangeCodeForTokens, refreshAccessToken); update `/api/auth/tiktok/callback` to store tokens in `site_settings`; build `/api/automations/post-to-tiktok/route.ts` using TikTok Direct Post API; ensure it pulls HeyGen video_url and strictly passes `validateManualPostingGate`. Add `'tiktok'` to `scripts/run-autoposter-once.js`.
+- [ ] **Phase 14S — 100% Automation Cron:** wrap `run-autoposter-once.js` logic into `/api/cron/autoposter-once/route.ts`; update `vercel.json` to replace `check-heygen-jobs` cron with this new one (Path A); CRON_SECRET-gated; auto-disable on first non-2xx platform response; mirror the 5-step SOP programmatically.
+
+---
+
+### Pre-Phase-14P: Phase 14O.1 — Manual Autoposter Runner / Path D (saved + pushed `6e2f27a`; DRY-RUN tested clean; no cron registered).
 
 Phase 14O Scopes C+A deployed at `f74ddfc`. Live dry-run proof captured (HTTP 200 / `dry_run: true` / `live_posting_blocked: true` / `eligible_count: 1` / posted_at unchanged at 30). Operator removed the row from queue (pure dry-run proof) and authorized Phase 14O.1 / Path D instead of a registered cron. Legacy IG WARN row `a0bd9d16…` cleared (forensics confirmed it was never actually posted — 27-second create→posted_at gap, expired DALL·E URL, no gate fields ever set). posted_at: 30 → 29; status='posted': 29 (now perfectly aligned, Check 9 PASS with 0 WARN).
 
