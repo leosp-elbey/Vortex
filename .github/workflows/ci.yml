@@ -1,0 +1,73 @@
+# Phase 14Z — CI: typecheck + lint on every push and PR to main.
+#
+# Goal: ensure no bad code ever lands on main. Both gates that the repo
+# already passes locally (npx tsc --noEmit clean since Phase 10; npm run
+# lint clean since Phase 14T.1) now run automatically on GitHub Actions.
+# The job fails fast if either gate fails.
+#
+# Node version: 22 LTS. The repo has no .nvmrc / engines pin, but Next.js
+# 16 requires Node 20.18+ or 22+. Node 22 is the current LTS and matches
+# what Vercel uses for production builds. The local dev environment runs
+# Node 24, which is newer than the LTS line; CI pinning to 22 makes the
+# build reproducible across contributor environments without rejecting
+# anyone running 20+ locally.
+#
+# Why `npm ci` (not `npm install`):
+#   - ci is faster and uses the lockfile verbatim — won't update package-lock.json.
+#   - --legacy-peer-deps is required because openai@4.x has a peer-optional zod
+#     range that mismatches our pinned zod version. Same flag used everywhere
+#     else in the repo (see Phases 14Q and 14T.1 npm install commands).
+#
+# Out of scope for 14Z:
+#   - Lighthouse audit (Phase 14AA adds a separate job)
+#   - Build step (`next build`) — Vercel runs that on every deploy; running it
+#     in GH Actions would be redundant and would require all production env vars
+#     to be configured as GitHub secrets, which is operational overhead we don't
+#     need today.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs when a new commit lands on the same branch — saves
+# minutes on rapid push sequences.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-lint:
+    name: Typecheck + Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Cache the npm tarball directory so subsequent runs reinstall faster.
+          cache: 'npm'
+
+      - name: Install dependencies (npm ci with legacy peer deps)
+        # Same flag the local dev environment uses — see Phase 14T removal of
+        # @eslint/eslintrc and Phase 14Q twitter-api-v2 removal commits where
+        # `npm install --legacy-peer-deps` was the documented invocation.
+        run: npm ci --legacy-peer-deps
+
+      - name: TypeScript typecheck
+        # Phase 10 made this a hard gate. Phase 14T.1 confirmed it stays clean.
+        # Failures here block the PR.
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        # Phase 14T.1 cleared the 51 pre-existing findings; the linter now
+        # returns 0 errors / 0 warnings. Any regression on a PR fails this step.
+        run: npm run lint

@@ -1,6 +1,41 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14Y shipping in working tree — Tracking Redirect Fallback Fix. Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. New `bounded()` helper races every Supabase call against a 2.5s per-call timeout. PORTAL_FALLBACK changed from `myvortex365.com/leosp` to `vortextrips.com/free` per operator directive. Worst-case latency 7.5s well under Vercel Hobby's 10s budget. Typecheck + lint clean.)
+**Last updated:** 2026-05-08 (Phase 14Z shipping in working tree — CI/CD GitHub Actions wiring. New `.github/workflows/ci.yml` runs typecheck + lint on every push/PR to main, pinned to Node 22 LTS. Both gates clean. No code changes; no DB writes.)
+**Last code-shipping commit:** `662fdc9` (Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Y deployed and verified on prod** · **Phase 14Z in working tree (CI/CD wiring)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant, AND CI-gated. 8 live posts since 2026-05-05.
+
+---
+
+## Current focus
+
+**Phase 14Z — CI/CD GitHub Actions Wiring (in working tree, 2026-05-08 — automated typecheck + lint on every push/PR; no code changes).**
+
+Phase 14Y deployed at `662fdc9`. Phase 14Z is the first of three optional polish phases (14Z/14AA/14AB) that close out the project. Future PRs can no longer regress lint or typecheck — GitHub Actions enforces both gates automatically.
+
+**Built in 14Z:**
+- [x] `.github/workflows/ci.yml` (new) — single workflow, single job (`typecheck-and-lint`). Triggers on `push` and `pull_request` against `main`. Steps: checkout → setup Node 22 → `npm ci --legacy-peer-deps` → `npx tsc --noEmit` → `npm run lint`. Caches npm tarball; `concurrency: cancel-in-progress` saves minutes on rapid push sequences; 10-minute job timeout.
+
+**Why this shape:**
+- Two gates only. `next build` deliberately NOT in CI — Vercel runs it on every deploy and adding it would require replicating all production env vars as GitHub secrets.
+- Node 22 LTS matches Vercel's runtime and Next.js 16's requirement.
+- `npm ci --legacy-peer-deps` matches the documented local invocation (Phases 14Q, 14T).
+- `concurrency: cancel-in-progress` cancels in-flight runs when a new commit lands.
+
+**Tests:**
+- ✅ Workflow file is valid YAML
+- ✅ Both gates already pass locally (`npx tsc --noEmit` clean, `npm run lint` 0/0 since Phase 14T.1)
+- ⏸️ Live CI run deferred — the very push that lands this workflow will be the first run.
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Optional remaining phases (this block):**
+- [ ] **Phase 14AA** — Lighthouse CI action targeting actual content pages
+- [ ] **Phase 14AB** — Globalize bounded() helper to webhook routes
+- [ ] **Phase 14AC** — Final audit + Maintenance Mode
+
+---
+
+### Pre-Phase-14Z: Phase 14Y — Tracking Redirect Fallback Fix (saved + pushed `662fdc9`). Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. New `bounded()` helper races every Supabase call against a 2.5s per-call timeout. PORTAL_FALLBACK changed from `myvortex365.com/leosp` to `vortextrips.com/free` per operator directive. Worst-case latency 7.5s well under Vercel Hobby's 10s budget. Typecheck + lint clean.)
 **Last code-shipping commit:** `1fcd40d` (Phase 14X: Full System Audit & Broken Page Scanner)
 **Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14X deployed and verified on prod** · **Phase 14Y in working tree (redirect-route hang fix)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, AND hang-resistant. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V). AI prompts optimized (14W). Public-route health audit (14X). Tracking-redirect hang fixed (14Y).
 

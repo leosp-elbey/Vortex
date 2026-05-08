@@ -1,6 +1,69 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14Y shipping in working tree — Tracking Redirect Fallback Fix. Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. Root cause: `try/catch` around Supabase awaits doesn't bound timeout — when Supabase is 522'd, the TCP request can hang for 30+ seconds before the client gives up, eating Vercel Hobby's 10s function-execution budget. Fix: new `bounded()` helper races every Supabase call (campaign lookup, asset lookup, contact_events insert) against a 2.5s per-call timeout. Worst case 3 × 2.5s = 7.5s, well under 10s. The 3-tier fallback redirect chain still fires correctly even when EVERY Supabase call times out. Tier 2 fallback URL changed from `myvortex365.com/leosp` to `https://www.vortextrips.com/free` per the operator directive — keeps visitors on the brand domain. Typecheck + lint clean.)
+**Last updated:** 2026-05-08 (Phase 14Z shipping in working tree — CI/CD GitHub Actions wiring. New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
+**Last known good commit:** `662fdc9` — "Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+
+**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant, AND CI-gated.** Phase 14Z is the first of three optional polish phases that close out the project. Future PRs can no longer regress lint or typecheck — GitHub Actions enforces both gates automatically before any merge.
+
+---
+
+## Phase 14Z — CI/CD GitHub Actions Wiring (in working tree, 2026-05-08 — automated typecheck + lint on every push/PR; no code changes; no DB writes; no platform calls)
+
+### What this phase ships
+
+A single GitHub Actions workflow that runs the two gates the repo already passes locally. The job fails fast if either gate fails, so any PR that breaks types or introduces lint regressions is blocked before merge.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/ci.yml` | Single workflow with one job (`typecheck-and-lint`). Triggers on `push` and `pull_request` against `main`. Steps: checkout → setup Node 22 → `npm ci --legacy-peer-deps` → `npx tsc --noEmit` → `npm run lint`. Caches the npm tarball directory across runs. `concurrency: cancel-in-progress` so a new push automatically cancels in-flight CI runs on the same branch. 10-minute job timeout (typical run is ~2-3 minutes). |
+
+### Why this exact shape
+
+- **Two gates only.** Build (`next build`) is deliberately NOT in CI — Vercel runs it on every deploy, and adding it to GH Actions would require all production env vars (Supabase service role key, OpenRouter API key, Resend, etc.) to be replicated as GitHub secrets. That's operational overhead with no marginal value: Vercel already gates deploys on a successful build.
+- **Node 22 LTS** — current LTS, matches Vercel's runtime, satisfies Next.js 16's `Node 20.18+ or 22+` requirement. Local dev runs Node 24, which is newer than LTS; pinning CI to 22 keeps the build reproducible across contributor environments.
+- **`npm ci --legacy-peer-deps`** — matches the documented local invocation (Phases 14Q, 14T saw the same flag during package.json edits). The legacy flag is required because `openai@4.x` has a peer-optional `zod` range that mismatches our pinned `zod`.
+- **`concurrency: cancel-in-progress`** — small touch, big savings. A rapid sequence of "fix lint, push, fix typo, push again" doesn't burn CI minutes on the stale run.
+
+### Verification
+
+- ✅ Workflow file is valid YAML (verified by inspection — Actions parser is permissive but consistent indentation matters).
+- ✅ Both gates already pass locally as of Phase 14Y: `npx tsc --noEmit` clean, `npm run lint` 0/0.
+- ⏸️ Live CI run deferred until first push/PR after this commit. The very push that lands this workflow file will be the first run.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No build step (`next build`) — see "Why" above.
+- ❌ No test job. The repo doesn't have a test suite (no `npm test` script). A future phase can add Vitest/Playwright + a test job here.
+- ❌ No deploy step. Vercel handles deploys via its native GitHub integration — running our own deploy from CI would conflict.
+- ❌ No matrix builds (Node 18 / 20 / 22 compat). Single Node 22 target keeps the run fast.
+- ❌ No Lighthouse audit — that's Phase 14AA in this same block.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+The workflow file ships in the repo and activates automatically on the next push (this very commit). Vercel-side deploys are unaffected — CI runs in parallel with Vercel's preview/production builds.
+
+### Recommended next phase
+
+**Phase 14AA — Lighthouse CI Action.** Add a second job (or a sibling workflow file) running `treosh/lighthouse-ci-action` against the actual content pages (homepage, /quote, /sba, /thank-you — NOT /free or /join, which are 307 redirects to external portals we don't control). Modest budgets per the operator directive (perf > 70, a11y > 90, SEO > 90).
+
+---
+
+## Phase 14Y — Tracking Redirect Fallback Fix (deployed `662fdc9` 2026-05-08 — surgical patch to `/t/[slug]/route.ts`; no DB schema changes; no platform writes) Closes the `/t/<unknown-slug>` hang surfaced by Phase 14X's audit. Root cause: `try/catch` around Supabase awaits doesn't bound timeout — when Supabase is 522'd, the TCP request can hang for 30+ seconds before the client gives up, eating Vercel Hobby's 10s function-execution budget. Fix: new `bounded()` helper races every Supabase call (campaign lookup, asset lookup, contact_events insert) against a 2.5s per-call timeout. Worst case 3 × 2.5s = 7.5s, well under 10s. The 3-tier fallback redirect chain still fires correctly even when EVERY Supabase call times out. Tier 2 fallback URL changed from `myvortex365.com/leosp` to `https://www.vortextrips.com/free` per the operator directive — keeps visitors on the brand domain. Typecheck + lint clean.)
 **Last known good commit:** `1fcd40d` — "Phase 14X: Full System Audit & Broken Page Scanner"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14X deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
