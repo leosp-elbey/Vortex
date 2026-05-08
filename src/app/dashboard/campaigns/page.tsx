@@ -63,15 +63,16 @@ const GENERATION_BATCHES: Array<{ label: string; types: string[] }> = [
 const BATCH_MODEL_OVERRIDE = 'meta-llama/llama-3.3-70b-instruct'
 
 // Phase 14F — Push to Calendar.
-// Today the existing content_calendar.platform CHECK only accepts the four social
-// platforms below, so only `social_post` assets carrying one of them can land on the
-// calendar. Email / DM / headline / lead-magnet / hashtag-set / image-prompt /
-// video-prompt assets are explicitly out of scope until a future phase reshapes
-// content_calendar (or introduces a separate planning table). The route enforces this
-// server-side; the dashboard mirrors the rule so the operator only sees the Push button
-// where it will actually work.
+// content_calendar.platform CHECK still permits 'twitter' for historical rows
+// (migration 004 is immutable), but Phase 14Q dropped twitter as a target
+// platform. The dashboard's pushable-platform allowlist mirrors that decision
+// so operators can no longer push new twitter assets — only social_post
+// assets on the three currently-supported platforms.
+// Email / DM / headline / lead-magnet / hashtag-set / image-prompt /
+// video-prompt assets stay out of scope until a future content_calendar
+// reshape (or a separate planning table).
 const CALENDAR_PUSHABLE_ASSET_TYPES = new Set(['social_post'])
-const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok', 'twitter'])
+const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok'])
 
 interface CampaignListRow {
   id: string

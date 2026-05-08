@@ -59,14 +59,15 @@ const BANNED_TERMS = [
   'guaranteed earnings',
 ]
 
-type SocialPlatform = 'instagram' | 'facebook' | 'tiktok' | 'twitter' | 'youtube' | 'threads' | 'linkedin'
+// Twitter/X removed in Phase 14Q. The model is no longer asked to emit twitter
+// posts and `asPlatform` rejects any twitter-shaped alias outright.
+type SocialPlatform = 'instagram' | 'facebook' | 'tiktok' | 'youtube' | 'threads' | 'linkedin'
 type AssetPlatform = SocialPlatform | 'email' | 'sms' | 'web'
 
 const KNOWN_PLATFORMS: SocialPlatform[] = [
   'instagram',
   'facebook',
   'tiktok',
-  'twitter',
   'youtube',
   'threads',
   'linkedin',
@@ -185,10 +186,10 @@ function clampString(s: unknown, max: number): string {
 function asPlatform(value: unknown): SocialPlatform | null {
   if (typeof value !== 'string') return null
   const v = value.toLowerCase().trim()
+  // Phase 14Q — explicitly reject twitter aliases so the model can't sneak
+  // a twitter post back in via 'x' or 'twitter/x' if it ignores the prompt.
+  if (v === 'twitter' || v === 'x' || v === 'twitter/x' || v === 'x/twitter') return null
   const aliases: Record<string, SocialPlatform> = {
-    x: 'twitter',
-    'twitter/x': 'twitter',
-    'x/twitter': 'twitter',
     ig: 'instagram',
     fb: 'facebook',
     yt: 'youtube',
@@ -350,7 +351,7 @@ function parseBundle(raw: string): GeneratedBundle | null {
 // so a batched call only asks the model for the types being generated. This is the core
 // runtime defense against the Vercel Hobby 10s timeout: smaller batch = smaller output = fits in 10s.
 const SCHEMA_FRAGMENTS: Record<AssetType, string> = {
-  social_post: `  "social_posts": [{"platform":"instagram|facebook|tiktok|twitter","wave":"W1..W8","body":"...","hashtags":["..."]}, x10]`,
+  social_post: `  "social_posts": [{"platform":"instagram|facebook|tiktok","wave":"W1..W8","body":"...","hashtags":["..."]}, x10]`,
   short_form_script: `  "short_form_scripts": [{"platform":"tiktok|instagram","wave":"W1..W8","body":"HOOK / BODY / CTA"}, x3]`,
   email_subject: `  "email_subjects": [{"wave":"W1..W8","body":"≤60 chars"}, x3]`,
   email_body: `  "email_bodies": [{"wave":"W1..W8","body":"200-400 words ending in CTA"}, x3]`,
@@ -386,10 +387,13 @@ HARD compliance rules — never violate:
 Platform voice norms:
 - Instagram: visual, emotional, hashtags allowed, ~150 words.
 - Facebook: conversational, group/family friendly, ~120 words.
-- Twitter / X: concise, urgency-driven, ≤ 270 chars.
 - TikTok: short, hook-first, video-style, ≤ 80 words.
 - Email: warm, trust-building, one clear CTA.
 - DM: short, natural, end with a question.
+
+Twitter / X is no longer a target platform. Do NOT emit twitter posts. If
+the schema lists twitter aliases, ignore them — the parser drops twitter
+entries.
 
 Output format: a single JSON object. No prose before or after. No markdown fences.
 Produce ONLY the keys listed in the schema below. Do not invent additional keys.

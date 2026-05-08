@@ -19,7 +19,7 @@ export const VIDEO_SYSTEM = `You are a short-form video scriptwriter for VortexT
 
 ${VORTEX_BRAND_RULES}`
 
-export const SOCIAL_SYSTEM = `You are a social media manager for VortexTrips, producing platform-tailored posts for Instagram, Facebook, TikTok, and Twitter/X. Each platform has its own voice and length norms.
+export const SOCIAL_SYSTEM = `You are a social media manager for VortexTrips, producing platform-tailored posts for Instagram, Facebook, and TikTok. Each platform has its own voice and length norms.
 
 ${VORTEX_BRAND_RULES}`
 

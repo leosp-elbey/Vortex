@@ -97,7 +97,6 @@ const PLATFORM_RULES = {
   tiktok:    { image: 'none',        video: 'required',    either_satisfies: false },
   youtube:   { image: 'none',        video: 'required',    either_satisfies: false },
   facebook:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
-  twitter:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
 }
 const NONE_RULE = { image: 'none', video: 'none', either_satisfies: false }
 function getRule(platform) {
@@ -372,7 +371,7 @@ async function main() {
   if (REFUSED_PLATFORMS.has(platform)) {
     console.log(`${COLORS.red}Refused: Phase 14O.1 does not post to '${platform}'.${COLORS.reset}`)
     if (platform === 'twitter' || platform === 'x') {
-      console.log(`${COLORS.dim}Twitter/X is paused on Developer Portal billing (HTTP 402). Reinstate after upgrading the API tier.${COLORS.reset}`)
+      console.log(`${COLORS.dim}Twitter/X was permanently removed in Phase 14Q (executive decision). Historical rows are read-only.${COLORS.reset}`)
     } else if (platform === 'tiktok') {
       console.log(`${COLORS.dim}TikTok requires manual Creator Center upload + dashboard Mark Posted (no token-exchange helper yet).${COLORS.reset}`)
     }

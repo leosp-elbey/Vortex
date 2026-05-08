@@ -3,10 +3,15 @@
 //
 // Phase 14K.0.6 closure: this is the LAST server-side path that could mutate
 // a row to status='posted' without going through a platform poster route.
-// Manual posters (post-to-twitter / post-to-facebook / post-to-instagram)
-// already require `validateManualPostingGate` (Phase 14K.0.5). This route
-// now requires the same gate ONLY for the `→ posted` transition; other
-// transitions (draft↔approved, *→rejected, *→draft reset) remain unchanged.
+// Manual posters (post-to-facebook / post-to-instagram) already require
+// `validateManualPostingGate` (Phase 14K.0.5). This route now requires the
+// same gate ONLY for the `→ posted` transition; other transitions
+// (draft↔approved, *→rejected, *→draft reset) remain unchanged.
+//
+// Twitter/X was removed as a posting target in Phase 14Q; the post-to-twitter
+// route was deleted at that time. Historical rows with platform='twitter'
+// remain readable (the migration-004 CHECK still allows the value) but no
+// new twitter posts are produced.
 //
 // Bookkeeping mode skips platform/caption checks since this route doesn't
 // call any platform API — it just records that a row was posted (typically

@@ -5,9 +5,10 @@
 //   - Dashboard campaign planner: shows a "Recommended: …" guidance line per asset.
 //   - Future media generation phases: image gen / Pexels / HeyGen pick the right
 //     aspect ratio + dimensions per target platform.
-//   - Future post-validation: the per-platform poster routes (post-to-twitter,
-//     post-to-instagram, etc.) can pre-validate before hitting the Graph / X / TikTok
-//     APIs and surface clean failures instead of opaque 4xx responses.
+//   - Future post-validation: the per-platform poster routes
+//     (post-to-facebook, post-to-instagram, etc.) can pre-validate before
+//     hitting the Graph / TikTok APIs and surface clean failures instead of
+//     opaque 4xx responses.
 //
 // This module is data + pure helpers only. It does not call any external API, does not
 // generate any media, and does not modify any DB row. Safe to import from server or
@@ -16,20 +17,24 @@
 // Notes on numbers below — these reflect each platform's *operative* limits as
 // documented in their developer references in early 2026. Sources are listed in the
 // `notes` field of each spec rather than crammed into comments. When platforms change
-// limits (rare, but it happens — Twitter Premium expanded the 280-char limit for paid
-// tiers), edit the spec here and downstream consumers pick up the change automatically.
+// limits (rare), edit the spec here and downstream consumers pick up the change
+// automatically.
+//
+// Twitter / X was permanently removed in Phase 14Q (2026-05-08). Historical
+// content_calendar rows with platform='twitter' remain in the DB (the migration 004
+// CHECK constraint still allows the value), but VortexTrips no longer generates
+// new twitter content or posts to the platform. `normalizePlatform` returns null
+// for any twitter-shaped input so callers degrade gracefully on legacy rows.
 
 export type PlatformId =
   | 'instagram'
   | 'facebook'
-  | 'twitter'
   | 'tiktok'
   | 'youtube_shorts'
 
 export const ALL_PLATFORM_IDS: readonly PlatformId[] = [
   'instagram',
   'facebook',
-  'twitter',
   'tiktok',
   'youtube_shorts',
 ] as const
@@ -155,38 +160,6 @@ const FACEBOOK_SPEC: SocialSpec = {
   ],
 }
 
-const TWITTER_SPEC: SocialSpec = {
-  id: 'twitter',
-  displayName: 'X / Twitter',
-  allowedContentTypes: ['text', 'image', 'video'],
-  captionMaxChars: 280,
-  captionRecommendedChars: 240,
-  hashtagMaxCount: 2,
-  hashtagRecommendedCount: 1,
-  imageAspectRatios: ['16:9', '1:1', '2:1'],
-  videoAspectRatios: ['16:9', '1:1'],
-  preferredImageDimensions: [
-    { width: 1600, height: 900, label: 'In-feed 16:9' },
-    { width: 1200, height: 675, label: 'In-feed compact 16:9' },
-    { width: 1200, height: 1200, label: 'Square 1:1' },
-  ],
-  preferredVideoDimensions: [
-    { width: 1280, height: 720, label: 'Landscape 16:9' },
-    { width: 1080, height: 1080, label: 'Square 1:1' },
-  ],
-  maxImageFileSizeMB: 5,
-  maxVideoFileSizeMB: 512,
-  maxVideoLengthSec: 140, // free-tier cap; paid tiers can go longer
-  linkInCaptionUseful: true,
-  hashtagsUseful: false, // hashtags are weak ranking signals on X; 0-1 is best
-  shortFormVideoPreferred: false,
-  notes: [
-    'Hard 280-char cap — leave room for the URL (≈23 chars after t.co wrapping).',
-    'Hashtags add little reach on X; one situational tag is plenty.',
-    'Reply-thread strategies often outperform single posts for long thoughts.',
-  ],
-}
-
 const TIKTOK_SPEC: SocialSpec = {
   id: 'tiktok',
   displayName: 'TikTok',
@@ -249,7 +222,6 @@ const YOUTUBE_SHORTS_SPEC: SocialSpec = {
 const SPECS: Record<PlatformId, SocialSpec> = {
   instagram: INSTAGRAM_SPEC,
   facebook: FACEBOOK_SPEC,
-  twitter: TWITTER_SPEC,
   tiktok: TIKTOK_SPEC,
   youtube_shorts: YOUTUBE_SHORTS_SPEC,
 }
@@ -275,11 +247,6 @@ export function normalizePlatform(input: string | null | undefined): PlatformId 
     case 'fb':
     case 'meta':
       return 'facebook'
-    case 'twitter':
-    case 'x':
-    case 'x/twitter':
-    case 'twitter/x':
-      return 'twitter'
     case 'tiktok':
     case 'tik tok':
     case 'tt':
@@ -350,9 +317,10 @@ export function validateCaptionForPlatform(
  * as possible and appending a single ellipsis. Returns the original string if it
  * already fits. Pure / no side effects.
  *
- * Useful for Twitter where the 280-char limit is non-negotiable. Not used by the
- * push-to-calendar route in Phase 14G — it just returns 400 — but available for the
- * eventual per-platform poster pre-flight.
+ * Available for the per-platform poster pre-flight when a platform's hard
+ * caption limit is hit (e.g. truncating long captions before they reach the
+ * Graph API). Not currently used by the push-to-calendar route — it just
+ * returns 400 instead.
  */
 export function suggestCaptionTrim(
   platform: string | null | undefined,

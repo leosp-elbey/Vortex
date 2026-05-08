@@ -6,7 +6,7 @@ import { WRITER_SYSTEM } from '@/lib/ai-prompts'
 
 const ContentSchema = z.object({
   topic: z.string().min(3).max(500),
-  platform: z.enum(['instagram', 'facebook', 'tiktok', 'twitter', 'blog', 'email']).optional(),
+  platform: z.enum(['instagram', 'facebook', 'tiktok', 'blog', 'email']).optional(),
   tone: z.enum(['casual', 'professional', 'enthusiastic', 'warm']).default('warm'),
   length: z.enum(['short', 'medium', 'long']).default('medium'),
   targetAudience: z.string().max(200).optional(),

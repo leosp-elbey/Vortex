@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14P shipping in working tree — operator SOP for the manual autoposter codified at `docs/skills/autoposter-operator-sop.md`. Documentation only. No code changes. No DB writes. No platform calls. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last code-shipping commit:** `6e2f27a` (Phase 14O.1: add manual autoposter runner, no scheduled cron)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14O.1 deployed and verified on prod** · **Phase 14P in working tree (operator SOP codified)** — Phase 14Q (excise Twitter) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X excluded (billing; permanent drop incoming in 14Q). TikTok manual-only (OAuth + Direct Post API incoming in 14R). Cron stays off until 14S.
+**Last updated:** 2026-05-08 (Phase 14Q shipping in working tree — Twitter/X permanently excised. Route deleted, dependency removed, allowlists/UI/prompts/types all narrowed to {instagram, facebook, tiktok}. Migration-004 CHECK keeps historical 'twitter' rows readable. Code changes only. No DB writes. No platform calls. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `b181cb8` (Phase 14P: codify autoposter operator SOP, no code changes)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14P deployed and verified on prod** · **Phase 14Q in working tree (Twitter/X excised)** — Phase 14R (TikTok OAuth + Direct Post API) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X **permanently removed**. TikTok manual-only (OAuth + Direct Post API incoming in 14R). Cron stays off until 14S.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,31 +28,43 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14P — Autoposter Operator SOP Skill (in working tree, 2026-05-08 — `docs/skills/autoposter-operator-sop.md` codifies the strict 5-step manual posting protocol; documentation only; no code changes; no DB writes; no platform calls).**
+**Phase 14Q — Excise Twitter/X (in working tree, 2026-05-08 — code changes only; no DB writes; no platform calls; `twitter-api-v2` package and `/api/automations/post-to-twitter/route.ts` permanently removed; 28 file changes total; typecheck PASS).**
 
-Phase 14O.1 deployed at `6e2f27a`. The runner has been exercised and the operator routine is well-understood, but the routine itself was scattered across PROJECT_STATE_CURRENT.md and PHASE_14O_AUTOPOSTER_PILOT_PLAN.md §11. Phase 14P consolidates the routine into a single canonical SOP document that is now THE LAW for manual posting and the contract that the Phase 14S autoposter cron route must mirror programmatically.
+Phase 14P deployed at `b181cb8`. Phase 14Q is the executive-decision permanent removal of Twitter/X from VortexTrips' active platform list. The Twitter API Free tier has been read-only since 2024 (every prior post-to-twitter call returned HTTP 402); paid tiers are not justified by ROI for current posting volume. Rather than carry dead code, Phase 14Q deletes it.
 
-**Built in 14P (no code changes, no DB writes, no platform calls):**
-- [x] `docs/skills/autoposter-operator-sop.md` — canonical operator SOP. The strict 5-step protocol (Audit → Mark Ready → Dry-Run → Apply → Audit), the refusal-code table mapping runner exit codes 0/2/3/4/5 to operator actions, the invariants enforced (queue / posted_at / atomic UPDATE / gate / platform / provider), what-the-operator-must-NOT-do list, and a Phase-14S promotion mapping showing exactly how the cron route must mirror each SOP step.
+**Built in 14Q (no DB writes, no platform calls):**
+- [x] **Deleted:** `src/app/api/automations/post-to-twitter/route.ts`
+- [x] **Lib (5 files):** `src/lib/social-specs.ts` (TWITTER_SPEC, PlatformId, normalizePlatform), `src/lib/media-readiness.ts` (PLATFORM_RULES), `src/lib/posting-gate.ts` (comment cleanup), `src/lib/ai-prompts.ts` (SOCIAL_SYSTEM brand-voice), `src/lib/event-campaign-asset-generator.ts` (SocialPlatform type, KNOWN_PLATFORMS, asPlatform alias rejection, schema fragment, system prompt voice norms).
+- [x] **API routes (8 files):** weekly-content cron prompt + PLATFORMS array; ai/generate/social-calendar + social-pack + content z.enum + defaults; ai/push-to-calendar PostSchema + POSTING_NOT_YET_IMPLEMENTED; dashboard/generate-content prompt; admin/campaigns push-to-calendar CALENDAR_PLATFORMS + comment; content/route.ts comment.
+- [x] **Scripts (6 files):** audit-pre-autoposter-readiness.js (MANUAL_POST_ROUTES, PLATFORM_RULES — banned-hostname list intentionally KEPT as Check 7 safety assertions), run-autoposter-once.js (PLATFORM_RULES + refusal message; REFUSED_PLATFORMS retains `twitter`/`x` as belt-and-suspenders), diagnose-media-readiness.js, plan-media-generation.js, generate-missing-media.js (PLATFORM_RULES + imageOrientationFor), diagnose-manual-posting-gates.js (ROUTES_TO_CHECK).
+- [x] **UI components (4 files):** dashboard/content (platformEmoji/Label, postToTwitter handler deleted, post-to-X button removed), dashboard/campaigns (CALENDAR_PLATFORMS), PushToCalendarPanel (Platform type, POSTING_NOT_IMPLEMENTED, twitter <option>), WorkflowPanel (packPlatforms/calPlatforms type unions, togglePlatform param, PlatformChips array, draftOnly logic).
+- [x] **Types:** `shared/types.ts` `ContentPlatform` narrowed to `'instagram' | 'facebook' | 'tiktok'`.
+- [x] **Config:** `package.json` (twitter-api-v2 removed); `package-lock.json` regenerated via `npm install --legacy-peer-deps` (-19 packages, +13 lockfile churn); `.env.example` (TWITTER_* removed, replacement note added).
 
-**5-step protocol summary:**
-1. `node scripts/audit-pre-autoposter-readiness.js` → 9/9 PASS pre-flight
-2. Mark Ready exactly one FB or IG row in `/dashboard/content`
-3. `node scripts/run-autoposter-once.js` (DRY-RUN; verify plan)
-4. `node scripts/run-autoposter-once.js --apply` (operator-authorized; exit 0 required)
-5. `node scripts/audit-pre-autoposter-readiness.js` → 9/9 PASS post-flight; deltas == +1; queue drained to 0
+**What stayed (intentionally):**
+- Migration files (001-033 immutable; migration 004's CHECK still permits 'twitter' for historical rows).
+- Audit script Check 7 banned-hostname list (`twitter.com`, `x.com`) — these are safety assertions verifying the audit doesn't reach those hosts, NOT references to twitter posting logic.
+- Runner `REFUSED_PLATFORMS = {twitter, x, tiktok}` — defensive belt-and-suspenders for legacy rows.
+- Twitter Card / Open Graph metadata in `src/app/layout.tsx` and `src/app/sba/layout.tsx` — these are SEO tags for external link previews when others share VortexTrips URLs on Twitter/X. Not posting logic. Out of scope.
+- Historical narrative docs (PHASE_14O_*, EVENT_CAMPAIGN_ROADMAP, SYSTEM_AUDIT_PHASE_14_STATUS, etc.) — they document past state.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean (after removing stale `.next/types/validator.ts` which referenced the deleted route)
+- ⚠️ `node scripts/audit-pre-autoposter-readiness.js` — could not complete due to Supabase schema-cache transient (environmental: local Supabase project paused / stale `.env.local` creds; same pre-existing issue surfaced in earlier phases). Audit's local-only changes (Check 4 file-presence on the 3 remaining manual-poster routes; Check 7 banned-hostname list) were verified by inspection. Production deploys hit real Supabase and will run the audit cleanly.
+- ✅ `npm install --legacy-peer-deps` clean (-19/+13 packages)
+- ✅ Static grep: zero `twitter-api-v2` imports in code; zero `post-to-twitter` route references in code; remaining literal mentions of "twitter" are documentation comments noting the Phase 14Q removal.
 
 **Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
 
-**Next operator-authorized phases (from Game Plan, executed sequentially):**
-- [~] **Phase 14P — Autoposter Operator SOP Skill** (this phase; in working tree)
-- [ ] **Phase 14Q — Excise Twitter:** delete `/api/automations/post-to-twitter/route.ts`; remove `'twitter'` from all `SUPPORTED_PLATFORMS` arrays, UI elements, and weekly AI generation prompts.
+**Next operator-authorized phases (from Game Plan):**
+- [x] **Phase 14P — Autoposter Operator SOP Skill** (`b181cb8`)
+- [~] **Phase 14Q — Excise Twitter/X** (this phase; in working tree)
 - [ ] **Phase 14R — TikTok Auto-Poster:** create `src/lib/tiktok-oauth.ts` (exchangeCodeForTokens, refreshAccessToken); update `/api/auth/tiktok/callback` to store tokens in `site_settings`; build `/api/automations/post-to-tiktok/route.ts` using TikTok Direct Post API; ensure it pulls HeyGen video_url and strictly passes `validateManualPostingGate`. Add `'tiktok'` to `scripts/run-autoposter-once.js`.
 - [ ] **Phase 14S — 100% Automation Cron:** wrap `run-autoposter-once.js` logic into `/api/cron/autoposter-once/route.ts`; update `vercel.json` to replace `check-heygen-jobs` cron with this new one (Path A); CRON_SECRET-gated; auto-disable on first non-2xx platform response; mirror the 5-step SOP programmatically.
 
 ---
 
-### Pre-Phase-14P: Phase 14O.1 — Manual Autoposter Runner / Path D (saved + pushed `6e2f27a`; DRY-RUN tested clean; no cron registered).
+### Pre-Phase-14Q: Phase 14P — Autoposter Operator SOP Skill (saved + pushed `b181cb8`; documentation only; canonical 5-step protocol now lives at `docs/skills/autoposter-operator-sop.md`).
 
 Phase 14O Scopes C+A deployed at `f74ddfc`. Live dry-run proof captured (HTTP 200 / `dry_run: true` / `live_posting_blocked: true` / `eligible_count: 1` / posted_at unchanged at 30). Operator removed the row from queue (pure dry-run proof) and authorized Phase 14O.1 / Path D instead of a registered cron. Legacy IG WARN row `a0bd9d16…` cleared (forensics confirmed it was never actually posted — 27-second create→posted_at gap, expired DALL·E URL, no gate fields ever set). posted_at: 30 → 29; status='posted': 29 (now perfectly aligned, Check 9 PASS with 0 WARN).
 

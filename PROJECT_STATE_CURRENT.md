@@ -1,14 +1,132 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14P shipping in working tree — operator SOP for the manual autoposter codified at `docs/skills/autoposter-operator-sop.md`. Documentation only; no code changes; no DB writes; no platform calls. Phase 14O.1 runtime invariants unchanged: posted_at: 29; status='posted': 29; both counts perfectly aligned.)
-**Last known good commit:** `6e2f27a` — "Phase 14O.1: add manual autoposter runner, no scheduled cron"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14O.1 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14Q shipping in working tree — Twitter/X permanently excised from the codebase. `/api/automations/post-to-twitter/route.ts` deleted; `twitter-api-v2` dependency removed; `'twitter'` removed from every `SUPPORTED_PLATFORMS`-style allowlist, AI generation prompt, dashboard UI, and validator type union. The migration-004 CHECK on `content_calendar.platform` still permits 'twitter' for historical rows — they remain readable. No platform API calls. No DB writes. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `b181cb8` — "Phase 14P: codify autoposter operator SOP, no code changes"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14P deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codifies the operator's daily 5-step protocol (Audit → Mark Ready → Dry-Run → Apply → Audit) into a single canonical document — `docs/skills/autoposter-operator-sop.md` — which is now the source-of-truth for both the human operator routine and the eventual Phase 14S cron route's programmatic gates. Cron stays disabled. Twitter/X excluded (HTTP 402; permanent drop incoming in Phase 14Q). TikTok manual-only (no token-exchange helper yet; Phase 14R will land OAuth + Direct Post API).
+**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codified the operator SOP at `docs/skills/autoposter-operator-sop.md`. Phase 14Q permanently drops Twitter/X — the route, the dependency, the UI affordances, and the AI generation slots are all gone. Cron stays disabled. TikTok manual-only (no token-exchange helper yet; Phase 14R will land OAuth + Direct Post API). Phase 14S then promotes the runner to a CRON_SECRET-gated route.
 
 ---
 
-## Phase 14P — Autoposter Operator SOP Skill (in working tree, 2026-05-08 — documentation only; no code changes; no DB writes; no platform calls)
+## Phase 14Q — Excise Twitter/X (in working tree, 2026-05-08 — code changes only; no DB writes; no platform calls)
+
+### What this phase ships
+
+Twitter/X is permanently removed from VortexTrips' active platform list. The post-to-twitter route is deleted, the `twitter-api-v2` package is uninstalled, and every `SUPPORTED_PLATFORMS`-style allowlist, AI generation prompt, dashboard UI control, and validator type union no longer mentions twitter. The migration-004 CHECK constraint on `content_calendar.platform` still allows the value 'twitter' for historical rows (the migration is immutable per anti-drift rules), so legacy twitter rows remain readable — but no new twitter content is generated and no posting path exists.
+
+### Why this phase exists
+
+Executive decision. The Twitter API Free tier has been read-only since 2024 (every prior post-to-twitter call returned HTTP 402). Paid tiers are not justified by ROI for VortexTrips' current posting volume. Rather than carry dead code and an unused dependency, Phase 14Q deletes them. This unblocks the path to 100% automation in Phases 14R (TikTok Direct Post API) and 14S (cron promotion of the autoposter runner).
+
+### Files deleted
+
+| File | Reason |
+|---|---|
+| `src/app/api/automations/post-to-twitter/route.ts` | Twitter posting route — the only consumer of `twitter-api-v2`. Deleted entirely. |
+
+### Files modified
+
+#### Lib (5 files)
+
+| File | Change |
+|---|---|
+| `src/lib/social-specs.ts` | Removed `TWITTER_SPEC`, `'twitter'` from `PlatformId` and `ALL_PLATFORM_IDS`, twitter aliases from `normalizePlatform`. Updated module header to document the Phase 14Q removal. |
+| `src/lib/media-readiness.ts` | Removed `twitter` row from `PLATFORM_RULES`. Historical twitter rows fall through to `NONE_RULE` (text-only allowed). |
+| `src/lib/posting-gate.ts` | Comment cleanup: removed `post-to-twitter` from the list of routes the gate guards; updated the `supportedPlatforms` example from `['twitter']` to `['facebook']`. |
+| `src/lib/ai-prompts.ts` | Removed "Twitter/X" from the `SOCIAL_SYSTEM` brand-voice prompt. |
+| `src/lib/event-campaign-asset-generator.ts` | Removed `'twitter'` from `SocialPlatform`, `KNOWN_PLATFORMS`. Added explicit twitter-alias rejection guard to `asPlatform`. Removed `twitter` from the `social_post` schema fragment and the platform-voice norms section of the system prompt. Added a "do not emit twitter" instruction so the model can't sneak it back in. |
+
+#### API routes (8 files)
+
+| File | Change |
+|---|---|
+| `src/app/api/cron/weekly-content/route.ts` | Removed `'twitter'` from `PLATFORMS` array. Removed the `### twitter` block from the markdown-skeleton prompt. Updated caption-length guidance line. |
+| `src/app/api/ai/generate/social-calendar/route.ts` | Removed `'twitter'` from `z.enum`; max array length `4 → 3`. |
+| `src/app/api/ai/generate/social-pack/route.ts` | Removed `'twitter'` from `z.enum` and from the default platforms array. Removed Twitter caption guidance from the user prompt. |
+| `src/app/api/ai/generate/content/route.ts` | Removed `'twitter'` from `z.enum`. |
+| `src/app/api/ai/push-to-calendar/route.ts` | Removed `'twitter'` from `PostSchema.platform`; `POSTING_NOT_YET_IMPLEMENTED` set narrowed to `{tiktok}`; warning message updated. |
+| `src/app/api/dashboard/generate-content/route.ts` | Removed `twitter` from the OpenAI 5-post platform sequence. |
+| `src/app/api/admin/campaigns/assets/[assetId]/push-to-calendar/route.ts` | Removed `'twitter'` from `CALENDAR_PLATFORMS` allowlist. Updated header comment to explain the migration-004 vs Phase-14Q split. |
+| `src/app/api/content/route.ts` | Updated header comment — removed `post-to-twitter` from the list of guarded poster routes; added a note about the 14Q deletion + read-only legacy rows. |
+
+#### Scripts (6 files)
+
+| File | Change |
+|---|---|
+| `scripts/audit-pre-autoposter-readiness.js` | Removed `post-to-twitter/route.ts` from `MANUAL_POST_ROUTES` (Check 4). Removed `twitter` from `PLATFORM_RULES`. **Kept** the banned-hostname list entries `['api.', 'twitter.com']` and `['api.', 'x.com']` — those are Check 7 safety assertions verifying the audit script itself never reaches platform APIs; they are NOT references to twitter posting logic. |
+| `scripts/run-autoposter-once.js` | Removed `twitter` from `PLATFORM_RULES`. **Kept** `'twitter'` and `'x'` in `REFUSED_PLATFORMS` as defensive belt-and-suspenders for any historical row that gets Marked Ready by accident. Updated refusal-message text from "paused on Developer Portal billing" to "permanently removed in Phase 14Q." |
+| `scripts/diagnose-media-readiness.js` | Removed `twitter` from `PLATFORM_RULES`. |
+| `scripts/plan-media-generation.js` | Removed `twitter` from `PLATFORM_RULES`. |
+| `scripts/generate-missing-media.js` | Removed `twitter` from `PLATFORM_RULES`. Removed `'twitter'` from the landscape-orientation branch of `imageOrientationFor`. |
+| `scripts/diagnose-manual-posting-gates.js` | Removed `post-to-twitter/route.ts` from `ROUTES_TO_CHECK`. |
+
+#### UI components (4 files)
+
+| File | Change |
+|---|---|
+| `src/app/dashboard/content/page.tsx` | Removed `twitter` keys from `platformEmoji` / `platformLabel`. Deleted the `postToTwitter` handler. Removed the "🐦 Post to X" button from the post-buttons row. Historical twitter rows still render — they fall through to a default emoji and the platform string. |
+| `src/app/dashboard/campaigns/page.tsx` | Removed `'twitter'` from `CALENDAR_PLATFORMS`. Updated the header comment to explain the migration-004 vs Phase-14Q split. |
+| `src/components/ai/PushToCalendarPanel.tsx` | Removed `'twitter'` from the `Platform` type and `POSTING_NOT_IMPLEMENTED` set. Removed the twitter `<option>` and updated the helper-text ("TikTok inserts are draft-only — no automated posting route exists yet"). |
+| `src/components/ai/WorkflowPanel.tsx` | Removed `'twitter'` from `packPlatforms` / `calPlatforms` type unions, `togglePlatform`'s first parameter, and the `PlatformChips` array. `draftOnly` reduced to `p === 'tiktok'`. |
+
+#### Types (1 file)
+
+| File | Change |
+|---|---|
+| `shared/types.ts` | Removed `'twitter'` from `ContentPlatform`. Added a comment noting the migration-004 CHECK still permits twitter for historical rows. |
+
+#### Config (3 files)
+
+| File | Change |
+|---|---|
+| `package.json` | Removed `"twitter-api-v2": "^1.29.0"` from dependencies. |
+| `package-lock.json` | Regenerated via `npm install --legacy-peer-deps` after removing the dep. **19 packages removed** (twitter-api-v2 + transitive deps); **13 packages added** (lockfile-resolver normal churn). |
+| `.env.example` | Removed all `TWITTER_*` env vars. Replaced with a one-paragraph note explaining the Phase 14Q removal. |
+
+### What stayed (intentionally)
+
+- **Migration files (001-033):** untouched. Migration 004's `CHECK (platform IN ('instagram', 'facebook', 'tiktok', 'twitter'))` constraint still permits twitter values — historical rows remain valid. Per anti-drift rules, schema changes require migration 034.
+- **Audit script's banned-hostname list:** `['api.', 'twitter.com']` and `['api.', 'x.com']` stay in Check 7. Those entries verify the *audit script itself* never references those hostnames — they are safety assertions, not posting logic.
+- **Runner's `REFUSED_PLATFORMS` set:** `{twitter, x, tiktok}`. Twitter/X stay in this set as defensive belt-and-suspenders. The `SUPPORTED_PLATFORMS` set already implicitly excludes them, but the explicit refusal makes the operator-facing message precise ("Twitter/X was permanently removed in Phase 14Q") rather than a generic "platform not supported."
+- **Twitter-card metadata in `src/app/layout.tsx` and `src/app/sba/layout.tsx`:** these are Open Graph / Twitter Card SEO tags that control how vortextrips.com URLs preview when *someone else* shares them on Twitter/X. They are not posting logic. Removing them would degrade external link previews for pages our visitors share. Out of scope for Phase 14Q.
+- **Historical narrative docs** (`PHASE_14O_AUTOPOSTER_PILOT_PLAN.md`, `EVENT_CAMPAIGN_ROADMAP.md`, `SYSTEM_AUDIT_PHASE_14_STATUS.md`, `PROJECT-STATUS.md`, `VORTEX_AI_COMMAND_CENTER_TEST_REPORT.md`, `PHASE_14M_PRE_AUTOPOSTER_AUDIT_2026-05-05.md`, `VORTEXTRIPS-BUILD-PROMPT.md`): these document past state. Editing them rewrites history. Untouched.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean (after removing stale `.next/types/validator.ts` which still referenced the deleted route from a prior dev-server build) |
+| `node scripts/audit-pre-autoposter-readiness.js` | ⚠️ Could not complete — Supabase schema-cache failure ("Could not query the database for the schema cache"). This is environmental (local Supabase project paused / stale local credentials in `.env.local` — same pre-existing issue noted in earlier phases as the `RESEND_API_KEY=""` build symptom). Not caused by Phase 14Q. The audit's local-only changes (Check 4 file-presence check on the 3 remaining manual-poster routes; Check 7 banned-hostname list) were verified by inspection. Production deploys hit real Supabase and will run the audit cleanly. |
+| `npm install --legacy-peer-deps` | ✅ PASS — 19 packages removed (twitter-api-v2 + deps); 13 added (lockfile churn). |
+| Static grep — `twitter-api-v2` imports in code | ✅ Zero. Only narrative MD files mention the package historically. |
+| Static grep — `post-to-twitter` route references | ✅ Zero in code. |
+
+### Migration
+
+**None.** No schema change. Supabase migrations remain at 001–033 (immutable). The `content_calendar.platform` CHECK in migration 004 still permits 'twitter' values for historical row compatibility.
+
+### Deploy
+
+Vercel will rebuild on the new commit. No env vars need to be unset (the codebase no longer reads `TWITTER_*` at all, so leaving stale Vercel secrets in place is harmless). Operator may optionally delete the Vercel `TWITTER_*` env vars at their convenience.
+
+### Recommended next phase
+
+**Phase 14R — TikTok Auto-Poster:** create `src/lib/tiktok-oauth.ts` (`exchangeCodeForTokens`, `refreshAccessToken`); update `/api/auth/tiktok/callback` to store tokens in `site_settings`; build `/api/automations/post-to-tiktok/route.ts` using the TikTok Direct Post API; ensure it pulls the HeyGen `video_url` and strictly passes `validateManualPostingGate`. Add `'tiktok'` to `SUPPORTED_PLATFORMS` in `scripts/run-autoposter-once.js`.
+
+After 14R: Phase 14S (autoposter cron, replacing `check-heygen-jobs` per Path A; CRON_SECRET-gated; SOP-step-mirroring per `docs/skills/autoposter-operator-sop.md`).
+
+---
+
+## Phase 14P — Autoposter Operator SOP Skill (deployed `b181cb8` 2026-05-08 — documentation only; no code changes; no DB writes; no platform calls)
 
 ### What this phase ships
 

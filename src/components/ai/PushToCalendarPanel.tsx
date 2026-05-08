@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 
-type Platform = 'instagram' | 'facebook' | 'tiktok' | 'twitter'
+// Twitter/X removed in Phase 14Q.
+type Platform = 'instagram' | 'facebook' | 'tiktok'
 
 interface PostRow {
   platform: Platform
@@ -17,7 +18,7 @@ interface PushToCalendarPanelProps {
   notify: (msg: string, type?: 'success' | 'error') => void
 }
 
-const POSTING_NOT_IMPLEMENTED = new Set<Platform>(['tiktok', 'twitter'])
+const POSTING_NOT_IMPLEMENTED = new Set<Platform>(['tiktok'])
 
 function emptyRow(): PostRow {
   return {
@@ -91,7 +92,7 @@ export default function PushToCalendarPanel({ jobId, notify }: PushToCalendarPan
 
       <p className="text-xs text-gray-600">
         Copy each post from the output above into a row. Approved rows go into <code>content_calendar</code>.
-        TikTok and Twitter inserts are draft-only — no posting route exists yet.
+        TikTok inserts are draft-only — no automated posting route exists yet (manual Creator Center upload).
       </p>
 
       {rows.map((r, i) => {
@@ -107,7 +108,6 @@ export default function PushToCalendarPanel({ jobId, notify }: PushToCalendarPan
                 <option value="instagram">instagram</option>
                 <option value="facebook">facebook</option>
                 <option value="tiktok">tiktok (draft only)</option>
-                <option value="twitter">twitter (draft only)</option>
               </select>
               <input
                 type="date"

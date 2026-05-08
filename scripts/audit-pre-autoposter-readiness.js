@@ -44,7 +44,6 @@ const LEGACY_NEEDLE = 'myvortex365.com/leosp'
 const MANUAL_POST_ROUTES = [
   'src/app/api/automations/post-to-facebook/route.ts',
   'src/app/api/automations/post-to-instagram/route.ts',
-  'src/app/api/automations/post-to-twitter/route.ts',
   'src/app/api/content/route.ts',
 ]
 const GATE_TOKEN = 'validateManualPostingGate'
@@ -82,7 +81,6 @@ const PLATFORM_RULES = {
   tiktok:    { image: 'none',        video: 'required',    either_satisfies: false },
   youtube:   { image: 'none',        video: 'required',    either_satisfies: false },
   facebook:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
-  twitter:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   threads:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   linkedin:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
 }

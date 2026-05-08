@@ -92,7 +92,6 @@ const PLATFORM_RULES = {
   tiktok:    { image: 'none',        video: 'required',    either_satisfies: false },
   youtube:   { image: 'none',        video: 'required',    either_satisfies: false },
   facebook:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
-  twitter:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   threads:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   linkedin:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
 }
@@ -460,7 +459,7 @@ function pickVideoScript(row) {
 function imageOrientationFor(platform) {
   const p = (platform || '').toLowerCase()
   if (p === 'instagram' || p === 'tiktok') return 'portrait'
-  if (p === 'twitter' || p === 'facebook' || p === 'linkedin') return 'landscape'
+  if (p === 'facebook' || p === 'linkedin') return 'landscape'
   return undefined
 }
 

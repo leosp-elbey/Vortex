@@ -146,9 +146,9 @@ export function canEnterPostingQueue(row: PostingGateRow): EligibilityResult {
 // Phase 14K.0.5 — Manual posting gate validator.
 //
 // This is the gate the manual platform-post routes (post-to-facebook,
-// post-to-instagram, post-to-twitter) must run BEFORE calling any platform
-// API. It is intentionally STRICTER than `getPostingGateBlockReason` (which
-// covers the queue-entry rules in Phase 14J) — it ALSO requires:
+// post-to-instagram) must run BEFORE calling any platform API. It is
+// intentionally STRICTER than `getPostingGateBlockReason` (which covers the
+// queue-entry rules in Phase 14J) — it ALSO requires:
 //   - posting_status = 'ready'
 //   - posting_gate_approved = true
 //   - queued_for_posting_at non-null
@@ -172,9 +172,10 @@ export interface ManualPostingGateOptions {
   bookkeepingOnly?: boolean
   /**
    * Restrict supported platforms. When provided, the row's platform must be
-   * in this list. Used by per-platform routes (e.g. post-to-twitter passes
-   * `['twitter']`) to defend against operators sending a Facebook row to
-   * the Twitter route. Defaults to undefined (no restriction beyond non-empty).
+   * in this list. Used by per-platform routes (e.g. post-to-facebook passes
+   * `['facebook']`) to defend against operators sending an Instagram row
+   * to the Facebook route. Defaults to undefined (no restriction beyond
+   * non-empty).
    */
   supportedPlatforms?: readonly string[]
 }

@@ -6,9 +6,10 @@ import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
 
 const SocialPackSchema = z.object({
   theme: z.string().min(3).max(300),
-  platforms: z.array(z.enum(['instagram', 'facebook', 'tiktok', 'twitter']))
+  // Twitter/X removed in Phase 14Q.
+  platforms: z.array(z.enum(['instagram', 'facebook', 'tiktok']))
     .min(1)
-    .default(['instagram', 'facebook', 'tiktok', 'twitter']),
+    .default(['instagram', 'facebook', 'tiktok']),
   destination: z.string().max(200).optional(),
 })
 
@@ -29,7 +30,7 @@ Theme: ${data.theme}
 ${data.destination ? `Destination focus: ${data.destination}` : ''}
 
 For EACH platform, produce a clearly-labeled section with:
-- Caption (platform-appropriate length: IG ~150 words, FB ~100 words, TikTok ~50 words for the on-screen text, Twitter/X ≤280 chars)
+- Caption (platform-appropriate length: IG ~150 words, FB ~100 words, TikTok ~50 words for the on-screen text)
 - 3-7 hashtags
 - A 1-2 sentence image_prompt describing the ideal accompanying photo
 

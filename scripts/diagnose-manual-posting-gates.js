@@ -34,7 +34,6 @@ const COLORS = {
 const ROUTES_TO_CHECK = [
   'src/app/api/automations/post-to-facebook/route.ts',
   'src/app/api/automations/post-to-instagram/route.ts',
-  'src/app/api/automations/post-to-twitter/route.ts',
   // Phase 14K.0.6 — generic status PATCH gates the `→ posted` bookkeeping
   // transition. The grep below verifies the helper is imported + called;
   // the route's conditional gating (only when status === 'posted') is

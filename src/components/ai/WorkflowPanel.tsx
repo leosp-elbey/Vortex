@@ -51,16 +51,16 @@ export default function WorkflowPanel({ onJobCreated, notify }: WorkflowPanelPro
 
   // Social pack
   const [packTheme, setPackTheme] = useState('')
-  const [packPlatforms, setPackPlatforms] = useState<('instagram' | 'facebook' | 'tiktok' | 'twitter')[]>(['instagram', 'facebook'])
+  const [packPlatforms, setPackPlatforms] = useState<('instagram' | 'facebook' | 'tiktok')[]>(['instagram', 'facebook'])
 
   // Social calendar
   const [calTheme, setCalTheme] = useState('')
-  const [calPlatforms, setCalPlatforms] = useState<('instagram' | 'facebook' | 'tiktok' | 'twitter')[]>(['instagram', 'facebook'])
+  const [calPlatforms, setCalPlatforms] = useState<('instagram' | 'facebook' | 'tiktok')[]>(['instagram', 'facebook'])
   const [calDays, setCalDays] = useState(30)
   const [calStart, setCalStart] = useState(new Date().toISOString().slice(0, 10))
 
   const togglePlatform = (
-    platform: 'instagram' | 'facebook' | 'tiktok' | 'twitter',
+    platform: 'instagram' | 'facebook' | 'tiktok',
     state: typeof packPlatforms,
     setter: (s: typeof packPlatforms) => void,
   ) => {
@@ -127,9 +127,9 @@ export default function WorkflowPanel({ onJobCreated, notify }: WorkflowPanelPro
 
   const PlatformChips = ({ state, setter }: { state: typeof packPlatforms; setter: (s: typeof packPlatforms) => void }) => (
     <div className="flex flex-wrap gap-2">
-      {(['instagram', 'facebook', 'tiktok', 'twitter'] as const).map(p => {
+      {(['instagram', 'facebook', 'tiktok'] as const).map(p => {
         const active = state.includes(p)
-        const draftOnly = p === 'tiktok' || p === 'twitter'
+        const draftOnly = p === 'tiktok'
         return (
           <button
             key={p}

@@ -6,8 +6,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminUser } from '@/lib/admin-auth'
 
+// Twitter/X removed in Phase 14Q.
 const PostSchema = z.object({
-  platform: z.enum(['instagram', 'facebook', 'tiktok', 'twitter']),
+  platform: z.enum(['instagram', 'facebook', 'tiktok']),
   caption: z.string().min(1).max(5000),
   hashtags: z.array(z.string()).max(30).default([]),
   image_prompt: z.string().max(1000).optional(),
@@ -19,7 +20,7 @@ const PushSchema = z.object({
   posts: z.array(PostSchema).min(1).max(30),
 })
 
-const POSTING_NOT_YET_IMPLEMENTED = new Set(['tiktok', 'twitter'])
+const POSTING_NOT_YET_IMPLEMENTED = new Set(['tiktok'])
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdminUser()
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
     inserted: inserted?.length ?? 0,
     rows: inserted ?? [],
     warnings: draftOnlyPlatforms.length > 0
-      ? [`Posts for [${[...new Set(draftOnlyPlatforms)].join(', ')}] inserted as draft-only — posting routes not yet implemented`]
+      ? [`Posts for [${[...new Set(draftOnlyPlatforms)].join(', ')}] inserted as draft-only — automated posting route not yet implemented (TikTok)`]
       : [],
   })
 }

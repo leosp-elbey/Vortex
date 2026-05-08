@@ -23,7 +23,7 @@ Key angles: "40-60% off", "exclusive member rates", "save $1,200+ per trip", "50
 IMPORTANT: Always use "VortexTrips" as the brand name. NEVER use "Travel Team Perks" — that is an old name.
 Return ONLY a valid JSON array — no markdown, no code blocks, nothing else.`,
       userPrompt: `Generate 5 social media posts for week of ${weekOfStr}.
-Platforms: instagram, facebook, tiktok, twitter, instagram (in this order).
+Platforms: instagram, facebook, tiktok, instagram, facebook (in this order).
 
 For EVERY post include these exact fields:
 - platform (string)

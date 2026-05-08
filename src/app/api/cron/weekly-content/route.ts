@@ -17,7 +17,8 @@ import { runEventCampaignResearch, type RunResult as EventResearchResult } from 
 // weekly-content's main work completes, so we keep it conservative.
 const EVENT_RESEARCH_LIMIT_PER_RUN = 6
 
-const PLATFORMS = ['instagram', 'facebook', 'twitter', 'tiktok'] as const
+// Twitter/X removed in Phase 14Q.
+const PLATFORMS = ['instagram', 'facebook', 'tiktok'] as const
 type Platform = (typeof PLATFORMS)[number]
 
 interface ParsedPost {
@@ -147,7 +148,7 @@ Distribute posts evenly. Vary tone, format, and angle across days so the calenda
 For each post, provide:
 - DATE (YYYY-MM-DD)
 - PLATFORM
-- CAPTION (platform-appropriate length: IG 100-200 chars, FB 150-300, X under 240, TikTok 100-150)
+- CAPTION (platform-appropriate length: IG 100-200 chars, FB 150-300, TikTok 100-150)
 - HASHTAGS (3-5 relevant tags)
 - IMAGE PROMPT (one sentence describing the ideal photo)
 
@@ -162,11 +163,6 @@ Image: <description>
 ### facebook
 Caption: <text>
 Hashtags: tag1, tag2, tag3
-Image: <description>
-
-### twitter
-Caption: <text>
-Hashtags: tag1, tag2
 Image: <description>
 
 ### tiktok

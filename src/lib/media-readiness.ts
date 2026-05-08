@@ -33,8 +33,8 @@ const PLATFORM_RULES: Record<string, PlatformMediaRule> = {
   youtube:   { image: 'none',        video: 'required',    either_satisfies: false },
 
   // Text-OK platforms — media recommended for engagement but not required to post.
+  // (Twitter/X removed in Phase 14Q — historical rows fall through to NONE_RULE.)
   facebook:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
-  twitter:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   threads:   { image: 'recommended', video: 'recommended', either_satisfies: true  },
   linkedin:  { image: 'recommended', video: 'recommended', either_satisfies: true  },
 

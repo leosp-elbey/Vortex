@@ -9,8 +9,8 @@ import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
 
 const SocialCalendarSchema = z.object({
   theme: z.string().min(3).max(500),
-  platforms: z.array(z.enum(['instagram', 'facebook', 'tiktok', 'twitter']))
-    .min(1).max(4)
+  platforms: z.array(z.enum(['instagram', 'facebook', 'tiktok']))
+    .min(1).max(3)
     .default(['instagram', 'facebook']),
   days: z.number().int().min(7).max(60).default(30),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD'),

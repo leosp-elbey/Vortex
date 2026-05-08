@@ -79,18 +79,19 @@ const MEDIA_BADGE_STYLES: Record<MediaReadinessOutcome, string> = {
   'text-only-allowed': 'bg-slate-100 text-slate-700',
 }
 
+// Twitter/X removed in Phase 14Q. Historical rows with platform='twitter'
+// fall through to the default emoji/label rendering below — they remain
+// visible but no UI affordance encourages new twitter content.
 const platformEmoji: Record<string, string> = {
   instagram: '📸',
   facebook: '👥',
   tiktok: '🎵',
-  twitter: '🐦',
 }
 
 const platformLabel: Record<string, string> = {
   instagram: 'Instagram',
   facebook: 'Facebook',
   tiktok: 'TikTok',
-  twitter: 'Twitter / X',
 }
 
 export default function ContentPage() {
@@ -201,21 +202,6 @@ export default function ContentPage() {
       }
     } catch (err) {
       show(err instanceof Error ? err.message : 'Posting gate update failed', 'error')
-    }
-  }
-
-  const postToTwitter = async (item: ExtendedContentItem) => {
-    const res = await fetch('/api/automations/post-to-twitter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content_id: item.id }),
-    })
-    if (res.ok) {
-      setContent(prev => prev.map(c => c.id === item.id ? { ...c, status: 'posted' as ContentCalendarItem['status'] } : c))
-      show('Posted to X / Twitter!')
-    } else {
-      const d = await res.json()
-      show(d.error ?? 'Twitter post failed', 'error')
     }
   }
 
@@ -414,14 +400,6 @@ export default function ContentPage() {
                               >
                                 🎵 Upload to TikTok
                               </a>
-                            )}
-                            {!media.blocked && item.platform === 'twitter' && (
-                              <button
-                                onClick={() => postToTwitter(item)}
-                                className="text-xs bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg hover:bg-sky-200 transition-colors font-medium"
-                              >
-                                🐦 Post to X
-                              </button>
                             )}
                             {media.blocked && (
                               <span

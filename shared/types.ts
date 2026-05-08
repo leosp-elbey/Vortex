@@ -14,7 +14,11 @@ export type OpportunityPipeline = 'main' | 'onboarding'
 export type AIActionType = 'voice-call' | 'quote-email' | 'onboarding-email' | 'content-generation' | 'admin-notification'
 export type AIService = 'bland' | 'openai' | 'resend' | 'twilio'
 export type AIActionStatus = 'pending' | 'success' | 'failed'
-export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok' | 'twitter'
+// Twitter/X removed in Phase 14Q. The migration-004 CHECK constraint still
+// allows 'twitter' for historical rows, but this TS type narrows the surface
+// to active platforms only — TS doesn't validate runtime row data, so legacy
+// twitter rows still load (just without the type-narrowed `platform` field).
+export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok'
 export type ContentStatus = 'draft' | 'approved' | 'posted' | 'rejected'
 export type AdminRole = 'admin' | 'viewer'
 

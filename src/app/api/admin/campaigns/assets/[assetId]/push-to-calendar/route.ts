@@ -5,8 +5,10 @@
 // Behavior:
 //   - Only assets with status='approved' may be pushed.
 //   - Asset must be linkable to content_calendar today: asset_type='social_post' AND
-//     platform IN ('instagram','facebook','tiktok','twitter') (the four values
-//     content_calendar.platform CHECK currently allows — migration 004).
+//     platform IN ('instagram','facebook','tiktok'). The migration-004 CHECK
+//     constraint also permits 'twitter' for historical rows, but Phase 14Q removed
+//     twitter as a target platform — this allowlist refuses new twitter pushes
+//     while leaving legacy rows readable.
 //   - The new content_calendar row lands as status='draft' (never 'posted').
 //     Operators flip it to 'approved' on the existing /dashboard/content surface
 //     when they're ready for the per-platform poster routes to publish it.
@@ -44,7 +46,7 @@ import { buildCampaignTrackingUrl } from '@/lib/campaign-tracking-url'
 
 export const dynamic = 'force-dynamic'
 
-const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok', 'twitter'])
+const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok'])
 
 // Asset types the route accepts AT ALL. Anything outside this set returns 400 with
 // "asset type not supported" before any further validation runs. Today only
