@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14V shipping in working tree — TikTok Status Polling. `checkTikTokPostStatus` helper added to `tiktok-oauth.ts`. All 3 TikTok posting paths persist `publish_id` into `media_metadata` JSONB. New `scripts/diagnose-tiktok-uploads.js` polls TikTok's status endpoint with color-coded output. Typecheck + lint clean. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `debea44` (Phase 14U: Cron Health Dashboard UI & Alerts)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14U deployed and verified on prod** · **Phase 14V in working tree (TikTok async-upload verification)** — codebase is functionally complete, locally clean, lint-clean, operationally observable, AND verifiable. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V).
+**Last updated:** 2026-05-08 (Phase 14W shipping in working tree — Social Media Content Optimization. SOCIAL_SYSTEM prompt rewritten with 4 enforced rules: 3-Second Hook, Platform-Specific Formatting, Value-First CTA Structure, Hashtag Strategy. Mandatory branded tags `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips` on every post. Banned weak openers + banned generic CTAs ("link in bio", "DM me"). Compliance constraints intact. Typecheck + lint clean.)
+**Last code-shipping commit:** `d426e47` (Phase 14V: TikTok Status Polling — async upload verification)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14V deployed and verified on prod** · **Phase 14W in working tree (AI prompt rewrite)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, AND on-brand. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard + email alerts (14U). TikTok async status polling (14V). AI prompts optimized for conversion (14W).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,52 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14V — TikTok Status Polling (in working tree, 2026-05-08 — async upload verification. Typecheck + lint clean).**
+**Phase 14W — Social Media Content Optimization (in working tree, 2026-05-08 — AI prompt rewrite. Typecheck + lint clean).**
 
-Phase 14U deployed at `debea44`. Phase 14V closes the asynchronous-pipeline gap on TikTok posts: TikTok's Direct Post API returns a `publish_id` once the post is queued, but the actual download / encoding / publish all happen server-side over ~30-90 seconds. Until now, our DB marked rows `posted` based on the init signal alone — if TikTok rejected the video later, our records said "posted" while the post never went live.
+Phase 14V deployed at `d426e47`. Phase 14W shifts focus from infrastructure to marketing ROI. Now that the pipes work flawlessly and async TikTok uploads are verifiable, we ensure the water (the content) is optimized to convert traffic. The SOCIAL_SYSTEM prompt is rewritten with an opinionated 4-rule playbook every social post must follow.
+
+**Built in 14W (no DB writes, no platform calls, affects only the next AI generation pass):**
+- [x] **`src/lib/ai-prompts.ts`** (updated) — header comment notes Phase 14W's intentional cache invalidation. **VORTEX_BRAND_RULES** rephrased: the old "exclamation-stuffed clickbait" line replaced with one that reconciles aggressive hooks with compliance ("Direct and value-first. Aggressive curiosity hooks are encouraged when they expose a real savings benefit. Avoid exclamation-stuffed walls of text and FAKE scarcity"). CTA line strengthened with explicit ban on "link in bio" / "DM me" / "comment below". **SOCIAL_SYSTEM** completely rewritten with 4 rule sections (each enforced with `═══` dividers).
+
+**The 4 enforced rules:**
+
+1. **3-Second Hook** — every post's first sentence must grab attention with a punchy curiosity-inducing statement. Worked examples: "Stop overpaying for your vacations", "$1,847 saved on one trip — here's exactly how", "Most people don't know hotels have wholesale rates". Banned openers: "Welcome to...", "Are you looking for...", "Today we're talking about...", "Have you ever wondered...", brand-name openers.
+
+2. **Platform-Specific Formatting** — IG: emojis as visual bullets, 1-2 sentence paragraphs, 3-5 short paragraphs total. FB: same rhythm but slightly longer body OK; clickable links in body. TikTok: punchy chyron ≤100 chars, hard cap 150, minimal emojis (1-2 max), one hook line + hashtag burst.
+
+3. **Value-First CTA Structure** — mandatory order `HOOK → DESTINATION + SAVINGS STORY → SPECIFIC CTA URL`. 5 allowed CTAs each with documented use case: `vortextrips.com/free` (top-of-funnel awareness), `/book` (specific deal), `/join` (paid push), `/quote` ("see your rate"), `/sba` (income angle). Banned: "Click the link in bio", "DM me", "Comment below", any CTA without a `vortextrips.com` path.
+
+4. **Hashtag Strategy** — every post MUST include the 4 mandatory branded tags FIRST: `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips`. Then 3-5 contextual tags per platform (broad + niche + destination-specific mix). Counts: IG 8-12, FB 4-6, TikTok 4-6.
+
+**Compliance reconciliation:**
+- New aggressive-hook directive doesn't conflict with compliance: hooks may be aggressive but must be TRUE. Savings numbers must be cited as "members report saving up to $X" or "examples like $X are common" — never as a guarantee.
+- Forbidden terms (MLM/downline/network marketing) and brand-name rules (Travel Team Perks blocked) intact.
+- No fabricated scarcity, no countdown timers, no "only 3 spots left".
+
+**Cache impact:** OpenRouter prompt cache for the OLD SOCIAL_SYSTEM string is invalidated. The next generation pays one uncached prompt cost (~$0.001-0.005), then re-warms.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` clean (0 errors, 0 warnings)
+- ✅ Static review: all 4 rule sections present + dividered; banned-openers list explicit; CTA URL allowlist explicit; mandatory hashtag list spelled out exactly per the operator's directive.
+- ✅ VORTEX_BRAND_RULES tension reconciled.
+- ⏸️ Live AI generation test deferred. The next weekly-content cron tick (Monday 13:00 UTC) will be the first production exercise. Operator can also manually trigger via `/api/ai/generate/social-pack` to validate before Monday.
+
+**Consumers picking up the new prompt automatically (via SOCIAL_SYSTEM import):**
+- `src/app/api/cron/weekly-content/route.ts` (Mondays 13:00 UTC)
+- `src/app/api/ai/generate/social-pack/route.ts` (manual trigger)
+- `src/app/api/ai/generate/social-calendar/route.ts` (manual trigger)
+
+No route changes required — the system prompt drives all three.
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Optional remaining phases:**
+- [ ] **Phase 14X** — Full System Audit & Broken Page Scanner (route-status script + manual mobile review)
+
+---
+
+### Pre-Phase-14W: Phase 14V — TikTok Status Polling (saved + pushed `d426e47`).
 
 **Built in 14V (no DB writes during this phase, no platform writes; only status reads):**
 - [x] **`src/lib/tiktok-oauth.ts`** (updated) — new `checkTikTokPostStatus(supabase, publishId)` helper. POSTs to `https://open.tiktokapis.com/v2/post/publish/status/fetch/`. Returns `{ status, fail_reason, publicly_available_post_ids, log_id, raw }`. Defensively accepts both `publicaly_available_post_id` (TikTok's typo'd field) and `publicly_available_post_id` spellings. New `TikTokPublishStatus` type union covers documented enum values; unknown enums pass through.

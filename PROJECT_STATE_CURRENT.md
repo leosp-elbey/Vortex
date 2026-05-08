@@ -1,14 +1,125 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14V shipping in working tree — TikTok Status Polling. `checkTikTokPostStatus(supabase, publishId)` helper added to `src/lib/tiktok-oauth.ts`. All three TikTok posting paths — manual route, cron route, runner script — now persist the returned `publish_id` into `content_calendar.media_metadata.tiktok_publish_id` as part of the atomic UPDATE. New diagnostic script `scripts/diagnose-tiktok-uploads.js` queries posted TikTok rows and polls TikTok's `/v2/post/publish/status/fetch/` endpoint for each, surfacing PROCESSING_DOWNLOAD / PROCESSING_UPLOAD / PUBLISH_COMPLETE / FAILED states with color-coded output. Typecheck + lint both clean. No DB writes during this phase. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last known good commit:** `debea44` — "Phase 14U: Cron Health Dashboard UI & Alerts"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14U deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14W shipping in working tree — Social Media Content Optimization. `src/lib/ai-prompts.ts` rewritten: SOCIAL_SYSTEM now has 4 explicit rule sections — 3-Second Hook, Platform-Specific Formatting, Value-First CTA Structure, Hashtag Strategy. VORTEX_BRAND_RULES rephrased to unblock aggressive hooks while keeping compliance constraints (no fake scarcity / no income guarantees / no MLM language) intact. Mandatory branded tags `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips` enforced on every post. CTAs MUST paste actual `vortextrips.com/<path>` URLs — generic "link in bio" is banned. All three SOCIAL_SYSTEM consumers (weekly-content cron, social-pack route, social-calendar route) pick up the new directives automatically via the system prompt. OpenRouter prompt cache invalidated as expected. Typecheck + lint both clean. No DB writes. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `d426e47` — "Phase 14V: TikTok Status Polling — async upload verification"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14V deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous, operator-controlled, AND verifiable.** Phase 14U gave the operator UI control + email alerts. Phase 14V closes the last observability gap: TikTok's Direct Post API is asynchronous, so a successful init returning a `publish_id` only means TikTok accepted the post — the actual download / encoding / publish all happen server-side over ~30-90 seconds. The diagnostic script now lets the operator confirm the post actually went live (or surfaces a `FAILED` state with TikTok's `fail_reason`).
+**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, AND on-brand.** Phases 14U/V gave the operator UI control, email alerts, and async-upload verification. Phase 14W shifts focus from infrastructure to ROI: the AI now writes posts that follow a strict 4-rule playbook designed to stop the scroll and convert traffic. The next weekly-content cron tick will produce posts with aggressive 3-second hooks, platform-tailored formatting, value-first CTAs to specific `vortextrips.com/<path>` URLs, and the mandatory `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips` branded tag stack.
 
 ---
 
-## Phase 14V — TikTok Status Polling (in working tree, 2026-05-08 — async upload verification; no DB writes during this phase; no platform writes; status calls only)
+## Phase 14W — Social Media Content Optimization (in working tree, 2026-05-08 — AI prompt rewrite; no DB writes; no platform calls; affects only the next AI generation pass)
+
+### What this phase ships
+
+A complete rewrite of the SOCIAL_SYSTEM prompt that turns the AI from a "produce platform-tailored posts" generalist into an opinionated marketer with 4 enforced rules. Every social post the autoposter pipeline produces from this point forward must satisfy all four. The downstream consumers (weekly-content cron, social-pack route, social-calendar route) pick up the directives automatically because they all import `SOCIAL_SYSTEM` from this single source-of-truth file.
+
+### File updated
+
+| File | Change |
+|---|---|
+| `src/lib/ai-prompts.ts` | Header comment updated to document Phase 14W's intentional cache invalidation. **VORTEX_BRAND_RULES** rephrased: the old "Avoid exclamation-stuffed clickbait or aggressive scarcity" line was creating tension with the new aggressive hook directive — replaced with "Direct and value-first. Aggressive curiosity hooks are encouraged when they expose a real savings benefit. Avoid exclamation-stuffed walls of text and FAKE scarcity (no countdown timers, no 'only 3 spots left', no fabricated urgency)." Compliance intent preserved (no income guarantees, forbidden terms list intact). The CTA line was strengthened: explicit ban on "link in bio", "DM me", "comment below". **SOCIAL_SYSTEM** completely rewritten with a 4-section playbook (each section enforced with `═══` dividers so the model can't miss them). WRITER_SYSTEM, VIDEO_SYSTEM, EMAIL_SYSTEM unchanged. |
+
+### The 4 rules (now baked into SOCIAL_SYSTEM)
+
+#### Rule 1 — 3-Second Hook (mandatory)
+
+Every post's first sentence must grab attention in under 3 seconds with a punchy, curiosity-inducing statement. The system prompt provides 6 worked examples ("Stop overpaying for your vacations", "$1,847 saved on one trip — here's exactly how", "Most people don't know hotels have wholesale rates", etc.) and a banned-openers list ("Welcome to...", "Are you looking for...", "Today we're talking about...", "Have you ever wondered...", brand-name openers, etc.).
+
+#### Rule 2 — Platform-Specific Formatting
+
+| Platform | Voice | Length | Emojis | Layout |
+|---|---|---|---|---|
+| **Instagram** | Visual, scroll-stopping | 3-5 short paragraphs, 8-15 lines | Emojis as visual bullets (✈️ 🏖️ 💰) | Hook + savings hint loaded into first 125 chars (pre-"more" window) |
+| **Facebook** | Conversational, link-friendly | 200-350 chars | Same emoji-bullet rhythm as IG | Clickable URLs encouraged |
+| **TikTok** | Punchy chyron | ≤100 chars (hard cap 150) | 1-2 max | Hook line + hashtag burst; video carries the story |
+
+#### Rule 3 — Value-First CTA Structure
+
+Mandatory order: **HOOK → DESTINATION + SAVINGS STORY → SPECIFIC CTA URL**. Sell before pushing the link. The 5 allowed CTA URLs each have a documented use case:
+
+| URL | When to use |
+|---|---|
+| `vortextrips.com/free` | Top-of-funnel awareness; default for "intro to wholesale rates" posts |
+| `vortextrips.com/book` | Posts featuring a specific destination/deal |
+| `vortextrips.com/join` | Posts that already established savings value (paid membership push) |
+| `vortextrips.com/quote` | "See your rate" angle |
+| `vortextrips.com/sba` | Income/business-opportunity angle posts only |
+
+Banned CTA patterns: "Click the link in bio", "DM me for info", "Comment below", any CTA without a `vortextrips.com` path.
+
+#### Rule 4 — Hashtag Strategy
+
+Every post MUST include the 4 mandatory branded tags first: `#TravelHacks #Surge365 #WholesaleTravel #VortexTrips`. Then 3-5 contextual tags per platform — a mix of broad (#Travel #Vacation #TravelLife), niche (#LuxuryTravelOnABudget, #BudgetTravelTips, #CruiseDeals, #SoloTravel), and destination-specific (#Cancun, #Paris, #LasVegas) when applicable.
+
+| Platform | Total hashtags | Mix |
+|---|---|---|
+| Instagram | 8-12 | 4 mandatory + 4-8 contextual |
+| Facebook | 4-6 | 4 mandatory + 2 contextual (FB rewards fewer) |
+| TikTok | 4-6 | 4 mandatory + 2 trending/niche |
+
+Ordering rule: mandatory branded tags ALWAYS appear first in the hashtag block.
+
+### Compliance reconciliation
+
+The new aggressive-hook directive could conflict with the brand's compliance posture (no fake claims, no income guarantees). Phase 14W explicitly reconciles:
+
+- **VORTEX_BRAND_RULES** still forbids: "MLM" / "downline" / "network marketing" / income guarantees / medical claims / specific dollar earnings without disclaimers / fabricated scarcity.
+- **SOCIAL_SYSTEM compliance floor** adds: every savings number must be cited as "members report saving up to $X" or "examples like $X are common" — never as a guarantee. Hooks may be aggressive but must be TRUE (don't claim "the industry is hiding" something that isn't a real wholesale-rate gap). No medical/legal/financial advice framing.
+
+This means the AI can write `"Stop overpaying for your vacations"` (true, opinionated) but cannot write `"Guaranteed $2,000 savings on your next trip"` (forbidden by brand rules).
+
+### Cache invalidation
+
+OpenRouter caches long system prompts when they exceed a threshold. The Phase 14W rewrite changes the entire SOCIAL_SYSTEM string, which:
+
+- Invalidates any existing cache entries for the OLD SOCIAL_SYSTEM prefix.
+- The next weekly-content cron tick (or manual generation via `/api/ai/generate/social-pack`) will pay one full uncached prompt cost (~$0.001-0.005 depending on model tier).
+- After that, the new SOCIAL_SYSTEM string re-warms the cache and subsequent calls hit normally.
+
+The cost is small and one-time. The user explicitly accepted this in the Phase 14W brief.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No changes to WRITER_SYSTEM, VIDEO_SYSTEM, or EMAIL_SYSTEM. Their tones are different (long-form blog, video script, email body) and their consumers don't need the social-post playbook.
+- ❌ No changes to per-route user prompts (the inline prompts in `weekly-content/route.ts`, `social-pack/route.ts`, `social-calendar/route.ts`). They specify per-call constraints (date, theme, character counts) that are already consistent with the new directives. Touching them would risk breaking the working pipeline for no gain.
+- ❌ No changes to `src/lib/event-campaign-asset-generator.ts` (the campaign asset generator has its own system prompt). Future phase can apply the 4-rule playbook there if we want the campaign assets to follow the same hook/format/CTA/hashtag structure.
+- ❌ No DB schema changes. No platform calls. No autoposter behavior changes — only the AI's voice changes.
+- ❌ No A/B test harness. We're committing to the new playbook based on conversion-rate best-practices; if it underperforms vs the old voice, a future phase can tune.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| `npm run lint` | ✅ PASS — 0 errors, 0 warnings |
+| Static review of new SOCIAL_SYSTEM | ✅ All 4 rule sections present and dividered with `═══` so the model can't miss them. Banned openers list explicit. CTA URL allowlist explicit. Hashtag mandatory list spelled out exactly per the operator's directive (`#TravelHacks #Surge365 #WholesaleTravel #VortexTrips`). |
+| Static review of VORTEX_BRAND_RULES tension | ✅ "Aggressive curiosity hooks are encouraged when they expose a real savings benefit" reconciles with the new hook directive. Compliance constraints (no income guarantees, no MLM/downline language, no fabricated scarcity) intact. |
+| Live AI generation test | ⏸️ Deferred. The next weekly-content cron tick (Monday 13:00 UTC per `vercel.json`) will be the first production exercise of the new prompt. The operator can also manually trigger via `/api/ai/generate/social-pack` to validate before Monday. |
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+Vercel will rebuild on the new commit. The new SOCIAL_SYSTEM is in effect immediately for any social-content generation triggered after the deploy completes. Existing already-generated content_calendar rows are untouched (they were generated by the OLD prompt; the operator may choose to regenerate via the dashboard if they want the new voice applied retroactively).
+
+### Recommended next phase
+
+**Phase 14X — Full System Audit & Broken Page Scanner:** create `scripts/audit-site-health.js` to programmatically fetch all known public routes (`/`, `/free`, `/book`, `/join`, `/thank-you`, `/quote`, `/quiz`, `/sba`, `/t/<slug>`) and assert they return 200 OK. The operator handles the manual mobile-responsiveness review separately.
+
+---
+
+## Phase 14V — TikTok Status Polling (deployed `d426e47` 2026-05-08 — async upload verification; no DB writes during this phase; no platform writes; status calls only)
 
 ### What this phase ships
 
