@@ -5,6 +5,7 @@ import { useToast, Toaster } from '@/components/ui/toast'
 import WorkflowPanel from '@/components/ai/WorkflowPanel'
 import JobInspector from '@/components/ai/JobInspector'
 import JobsTable from '@/components/ai/JobsTable'
+import SystemStatusCard from '@/components/ai/SystemStatusCard'
 
 export default function AICommandCenterPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
@@ -30,6 +31,9 @@ export default function AICommandCenterPage() {
           </p>
         </div>
       </div>
+
+      {/* Phase 14U — operator-facing kill switch for the autoposter cron. */}
+      <SystemStatusCard notify={notify} />
 
       <div className="grid lg:grid-cols-2 gap-6">
         <WorkflowPanel onJobCreated={handleJobCreated} notify={notify} />

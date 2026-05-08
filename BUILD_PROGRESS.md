@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14T.1 shipping in working tree — Lint Hygiene Sweep. All 51 pre-existing lint findings across 22 files cleared. `npm run lint` returns **0 errors, 0 warnings**. Strictly mechanical edits; funnel-page behavior preserved. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `2844734` (Phase 14T: Resend lazy-init + ESLint v9 flat config — local builds clean)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14T deployed and verified on prod** · **Phase 14T.1 in working tree (lint hygiene sweep)** — codebase is functionally complete, locally clean, AND lint-clean. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). Autoposter cron registered + kill-switched (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1).
+**Last updated:** 2026-05-08 (Phase 14U shipping in working tree — Cron Health Dashboard UI & Alerts. New `/api/admin/system/autoposter-cron` admin route + `SystemStatusCard` on AI Command Center for one-click kill-switch control. Autoposter cron now sends critical email alert on auto-disable. Typecheck + lint clean. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `90b27b9` (Phase 14T.1: Lint Hygiene Sweep — 51 findings -> 0 errors, 0 warnings)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14T.1 deployed and verified on prod** · **Phase 14U in working tree (operator control panel + email alerts)** — codebase is functionally complete, locally clean, lint-clean, AND operationally observable. 8 live posts since 2026-05-05. Twitter/X removed (14Q). TikTok fully automated (14R). Autoposter cron + kill switch (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1). Dashboard kill switch + auto-disable email alerts (14U).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,55 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14T.1 — Lint Hygiene Sweep (in working tree, 2026-05-08 — all 51 pre-existing ESLint findings cleared across 22 files. `npm run lint`: 0 errors, 0 warnings. Typecheck PASS).**
+**Phase 14U — Cron Health Dashboard UI & Alerts (in working tree, 2026-05-08 — operator control panel + email-on-halt notifications. Typecheck + lint clean).**
 
-Phase 14T deployed at `2844734`. Phase 14T.1 eradicates the 51 lint findings that surfaced once the FlatCompat crash was fixed. Strictly mechanical edits per operator directive: `<a>` → `<Link>` for internal hrefs, JSX entity escapes, unused-var cleanup, targeted `eslint-disable-next-line` directives with justification comments for unavoidable patterns (data-fetch-on-mount, URL-param sync), and one real refactor — `PlatformChips` extracted out of `WorkflowPanel`'s render scope.
+Phase 14T.1 deployed at `90b27b9`. Phase 14U gives the operator UI control over the autoposter cron and turns silent halts into loud emails. Two parts: (1) a new admin API + dashboard card to read/toggle the kill switch without touching Supabase SQL, and (2) email alerts wired into all 4 auto-disable branches of the cron route.
+
+**Built in 14U (no DB writes during this phase, no platform calls):**
+- [x] **`src/app/api/admin/system/autoposter-cron/route.ts`** (new) — admin GET + POST endpoints, both gated by `requireAdminUser`. GET returns `{ enabled, last_change, last_reason }`. POST `{ enabled: boolean }` upserts `site_settings.autoposter_cron_enabled` with the actor's email captured in the `description` column for audit trail.
+- [x] **`src/components/ai/SystemStatusCard.tsx`** (new) — self-contained client component. Color-coded card (emerald = enabled, rose = disabled, gray = loading). Toggle button flips state with confirm dialog on disable. Shows last-change timestamp + reason so operator can distinguish manual disables from auto-disables. Refresh button. Toast notifications via existing `useToast`.
+- [x] **`src/app/dashboard/ai-command-center/page.tsx`** (updated) — imports + renders `<SystemStatusCard />` between the header and the WorkflowPanel/JobInspector grid. No layout disruption.
+- [x] **`src/app/api/cron/autoposter-once/route.ts`** (updated) — imports `sendEmail` from `@/lib/resend`. New `sendKillSwitchAlert(...)` helper sends an HTML email to `ADMIN_NOTIFICATION_EMAIL` with subject "🚨 URGENT: VortexTrips Autoposter Halted". Body: reason, platform, content_calendar.id, platform_post_id (when present), severity tag, next-steps checklist. **Best-effort** — missing env var = warning log + return; Resend failure = warning log + continue. Wired into all 4 auto-disable branches: platform non-2xx, DB UPDATE error, UPDATE-affected count != 1, post-flight invariant slip. Transient network-exception branch deliberately NOT alerted (likely transient, doesn't auto-disable). Internal `escapeHtml()` for all dynamic strings.
+
+**Email alert behavior (severity escalation):**
+| Trigger | Severity | Subject prefix |
+|---|---|---|
+| Platform non-2xx | High | 🚨 URGENT: ... |
+| DB UPDATE error after platform success | **CRITICAL** (post may have landed) | 🚨 URGENT: ... |
+| DB UPDATE affected != 1 row | **CRITICAL** (post landed) | 🚨 URGENT: ... |
+| Post-flight invariant slip | **CRITICAL** (counters disagree) | 🚨 URGENT: ... |
+
+All four cases emit the same subject line; severity is conveyed in the body's "Additional context" section.
+
+**Critical safety gates preserved:**
+- ✅ `requireAdminUser` on both GET and POST of the new admin route.
+- ✅ Kill-switch flip happens BEFORE the email send; if the email fails, the cron is still disabled.
+- ✅ `sendKillSwitchAlert` never throws — wrapped in try/catch internally.
+- ✅ Cron's atomic UPDATE, refusal contract, and CRON_SECRET auth unchanged.
+- ✅ No new env vars required (`ADMIN_NOTIFICATION_EMAIL` was already in `.env.example`).
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` clean (0 errors, 0 warnings)
+- ✅ Static review: `requireAdminUser` enforced; POST validates body shape; `sendKillSwitchAlert` is best-effort; all 4 auto-disable branches emit alerts AFTER the kill-switch flip; HTML body escapes dynamic strings.
+- ⏸️ Live email-on-halt test deferred — would require triggering an actual cron failure. The code path is exercised by the static review.
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Operator workflow now (post-14U):**
+1. **Enable cron:** click "Enable Cron" on the AI Command Center → kill switch flips to `'true'`.
+2. **Daily routine:** Mark Ready one row in `/dashboard/content` before the next 14:00 UTC tick.
+3. **On halt:** receive emergency email with reason + content_calendar.id + next-steps; investigate; click "Enable Cron" to resume after fix.
+4. **Disable for maintenance:** click "Disable Cron" → confirm dialog → kill switch flips to `'false'`. Daily ticks return `cron_disabled` until re-enabled.
+
+**Optional remaining phases:**
+- [ ] **Phase 14V** — TikTok Status Polling (async upload verification)
+- [ ] **Phase 14W** — Social Media Content Optimization (rewrite AI prompts)
+- [ ] **Phase 14X** — Full System Audit & Broken Page Scanner
+
+---
+
+### Pre-Phase-14U: Phase 14T.1 — Lint Hygiene Sweep (saved + pushed `90b27b9`; 51 findings → 0; npm run lint silent).
 
 **Built in 14T.1 (no DB writes, no platform calls, behavior preserved on every funnel page):**
 - [x] **API routes (3)** — `upload-to-youtube` ts-ignore→ts-expect-error; `dashboard/generate-content` removed unused `request` param; `webhooks/bland` removed unused `call_id`.

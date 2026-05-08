@@ -1,14 +1,129 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14T.1 shipping in working tree — Lint Hygiene Sweep. All 51 pre-existing ESLint findings across 22 files eliminated. `npm run lint` now returns **0 errors, 0 warnings**. Edits were strictly mechanical: `<a>` → `<Link>` for internal nav, JSX entity escapes, unused-var cleanup, targeted `eslint-disable-next-line` directives with justification comments for unavoidable `react-hooks/set-state-in-effect` patterns (data-fetch-on-mount and URL-param sync), and one real refactor — `PlatformChips` + `togglePlatform` extracted out of `WorkflowPanel`'s render scope. Funnel-page behavior preserved. No DB writes. No platform calls. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last known good commit:** `2844734` — "Phase 14T: Resend lazy-init + ESLint v9 flat config — local builds clean"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14T deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14U shipping in working tree — Cron Health Dashboard UI & Alerts. New admin API at `/api/admin/system/autoposter-cron` (GET + POST) reads/toggles the kill switch via `requireAdminUser`. New `SystemStatusCard` component on the AI Command Center surfaces current state with color-coded badge (🟢 Enabled / 🔴 Disabled), last-change timestamp, and a one-click toggle button. The autoposter cron route now sends a critical email alert (subject "🚨 URGENT: VortexTrips Autoposter Halted") to `ADMIN_NOTIFICATION_EMAIL` from all 4 auto-disable branches; missing env var logs a warning and skips gracefully (alert is best-effort, never throws). Operator no longer needs Supabase SQL editor to flip the switch. Typecheck + lint both clean. No DB writes during this phase. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `90b27b9` — "Phase 14T.1: Lint Hygiene Sweep — 51 findings -> 0 errors, 0 warnings"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14T.1 deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous operating mode unlocked by Phase 14S.** Once the operator flips `site_settings.autoposter_cron_enabled='true'`, the cron at `/api/cron/autoposter-once` runs daily at 14:00 UTC. Phase 14T eliminated the local-build artifacts. Phase 14T.1 closes the lint backlog so the linter is a useful gate going forward. The codebase is functionally complete, locally clean, **and lint-clean.**
+**Live posting status:** **🤖 Fully autonomous, operator-controlled.** Once the operator flips `site_settings.autoposter_cron_enabled='true'` (now via the dashboard kill-switch button, no SQL needed), the cron at `/api/cron/autoposter-once` runs daily at 14:00 UTC. On any definitive failure the cron auto-disables AND emails the admin so the halt is never silent. Codebase is functionally complete, locally clean, lint-clean, **and operationally observable.**
 
 ---
 
-## Phase 14T.1 — Lint Hygiene Sweep (in working tree, 2026-05-08 — mechanical cleanup of all 51 pre-existing ESLint findings; no DB writes; no platform calls; behavior preserved on every funnel page)
+## Phase 14U — Cron Health Dashboard UI & Alerts (in working tree, 2026-05-08 — operator control panel + email-on-halt; no DB writes during this phase; no platform calls)
+
+### What this phase ships
+
+The operator can now control and observe the autoposter cron entirely through the dashboard. No more Supabase SQL editor. And when the cron auto-halts, the admin gets a loud email instead of silently waiting until they happen to notice the next morning that nothing posted.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `src/app/api/admin/system/autoposter-cron/route.ts` | Admin-only GET + POST endpoint backing the kill switch UI. `GET` returns `{ enabled, last_change, last_reason }` from `site_settings.autoposter_cron_enabled`. `POST { enabled: boolean }` upserts the same row. Both go through `requireAdminUser` from `src/lib/admin-auth.ts` — same gate every other admin route uses. The `description` column captures *who* toggled it (e.g. `manually enabled by operator@vortextrips.com`) so the dashboard can display attribution and the cron's auto-disable history doesn't get clobbered by a manual toggle. |
+| `src/components/ai/SystemStatusCard.tsx` | Self-contained client component. Loads cron status on mount, renders a color-coded card (emerald border + green badge when enabled; rose border + red badge when disabled), shows the last-change timestamp + reason, and provides a single toggle button + a refresh button. Disable action requires a confirm dialog; enable is one-click. Uses the existing `useToast` notify pattern. Pre-existing `react-hooks/set-state-in-effect` disable on the mount-load effect (matches the established pattern). |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `src/app/dashboard/ai-command-center/page.tsx` | Imports + renders `<SystemStatusCard notify={notify} />` between the page header and the existing `WorkflowPanel`/`JobInspector` grid. No layout disruption — slots in as a top-level full-width card. |
+| `src/app/api/cron/autoposter-once/route.ts` | Imports `sendEmail` from `@/lib/resend`. New `sendKillSwitchAlert(...)` helper that emails `process.env.ADMIN_NOTIFICATION_EMAIL` with subject "🚨 URGENT: VortexTrips Autoposter Halted" and a structured HTML body (reason, platform, content_calendar.id, platform_post_id when available, additional context, next-steps checklist). Helper is **best-effort**: missing env var logs a warning and returns; Resend send failure logs a warning and continues. Never throws — the cron's primary job is the kill-switch flip + atomic UPDATE, the email is operator notification on top. Wired into all 4 auto-disable branches: platform non-2xx, DB UPDATE failure, UPDATE-affected count != 1, post-flight invariant slip. The transient network-exception branch (which does NOT auto-disable) does NOT trigger the alert — likely transient, no operator action needed. |
+
+### Email alert behavior
+
+**Triggers (all 4 auto-disable conditions, in firing order):**
+
+1. **Platform non-2xx** — `${platform} post failed at row ${id}: ${error}` — body includes the platform error message.
+2. **DB UPDATE error after platform success** — *CRITICAL*: post may have landed but DB didn't flip. Email includes `platform_post_id` so the operator can verify on the platform UI and reconcile.
+3. **DB UPDATE affected != 1 row** — same severity as above; concurrent path interfered.
+4. **Post-flight invariant slip** — `posted_at` delta and/or `status='posted'` delta != +1. Email includes before/after counter snapshots.
+
+**Graceful degradation:**
+
+| Condition | Behavior |
+|---|---|
+| `ADMIN_NOTIFICATION_EMAIL` unset / empty | `console.warn` with the alert reason; helper returns silently |
+| Resend send throws | `console.warn` with the error message; cron continues with its 500 response |
+| Email body construction throws | Wrapped in try/catch internally; cron continues |
+
+The cron's HTTP 500 response is unaffected by alert success/failure. The kill-switch flip happens BEFORE the alert send, so even if the email fails the next scheduled tick stays safely disabled.
+
+### Subject line + body
+
+- **Subject:** `🚨 URGENT: VortexTrips Autoposter Halted`
+- **Body sections:**
+  - Header banner with red accent
+  - Reason (bold) + platform + content_calendar.id + platform_post_id (when present)
+  - "Additional context" list (severity tag, deltas, etc.)
+  - "Next steps" ordered list:
+    1. Open the System Status & Kill Switch card on the AI Command Center.
+    2. Run `node scripts/audit-pre-autoposter-readiness.js` to confirm DB invariants.
+    3. (When `platform_post_id` present) Verify on platform UI; reconcile with `scripts/repair-posted-at-invariants.js`.
+    4. Re-enable from the dashboard kill switch (or via SQL upsert).
+  - Tiny footer noting how to opt out (unset `ADMIN_NOTIFICATION_EMAIL`).
+- All dynamic strings escaped via internal `escapeHtml()` — no XSS surface even though only the admin reads it.
+
+### Dashboard UI behavior
+
+- Card location: top of `/dashboard/ai-command-center`, full-width, between header and the WorkflowPanel/JobInspector grid.
+- **Enabled state:** emerald-300 border, 🟢 Enabled badge (emerald-100 bg + emerald-800 text), red `Disable Cron` button (rose-600).
+- **Disabled state:** rose-300 border, 🔴 Disabled badge, green `Enable Cron` button (emerald-600).
+- **Loading state:** gray border, "Loading…" badge, button disabled.
+- Last-change timestamp shown via `new Date().toLocaleString()`. Last reason shown verbatim (operator can tell at a glance whether they disabled it OR the cron auto-disabled itself with `auto-disabled: <reason>`).
+- Disable action triggers a `window.confirm()` dialog ("Disable the autoposter cron? The daily 14:00 UTC tick will be skipped…"). Enable is one-click.
+- Refresh button reloads the status without page reload.
+- Toast notifications via the existing `useToast` provider on success/failure.
+
+### Critical safety gates preserved
+
+- ✅ `requireAdminUser` enforced on both GET and POST of the new admin route. Non-admins → 401/403.
+- ✅ The cron route still flips the kill switch BEFORE attempting the email send. If the email fails, the kill switch is still disabled — the alert is observability, not a dependency for safety.
+- ✅ The cron's atomic UPDATE pattern, refusal contract, and CRON_SECRET auth are all unchanged.
+- ✅ Manual posting routes, runner script, and `validateManualPostingGate` are untouched.
+- ✅ No new env vars required. `ADMIN_NOTIFICATION_EMAIL` was already documented in `.env.example` (used by other notification paths). Missing var = warning log, no crash.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No notifications for the *transient network-exception* branch (the one that does NOT auto-disable). That branch returns 500 without flipping the kill switch — likely transient, retried by next tick. Adding email noise here would hurt signal.
+- ❌ No retry / batching for failed alert emails. If Resend rejects, we log and move on. The dashboard already shows last-change reason; the operator's morning routine catches it.
+- ❌ No SMS or Slack alerts. Email is the established notification channel for VortexTrips. A future phase can add other channels via the same `sendKillSwitchAlert` helper.
+- ❌ No DB schema change. Migrations remain at 001-033. The kill switch lives in the existing `site_settings` table from migration 007.
+- ❌ No change to `vercel.json` or the cron schedule.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / TikTok / X / email API calls | 0 (no cron tick fired during the phase) |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| `UPSERT` against site_settings | 0 (no operator toggle during the phase) |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| `npm run lint` | ✅ PASS — 0 errors, 0 warnings |
+| Static review of new admin API route | ✅ Both GET and POST go through `requireAdminUser`; POST validates `body.enabled` is a boolean before write; description string captures actor email for audit trail. |
+| Static review of `SystemStatusCard` | ✅ Loads on mount with toast feedback; disable action confirms first; toggle button color/label flip correctly with state; refresh button works; loading state disables both buttons. |
+| Static review of `sendKillSwitchAlert` | ✅ Returns silently when `ADMIN_NOTIFICATION_EMAIL` unset; wraps `sendEmail` in try/catch; never throws to caller; called from all 4 auto-disable branches AFTER the kill-switch flip. |
+| `escapeHtml` correctness | ✅ Standard 5-char escape: `&` `<` `>` `"` `'`. Sufficient for HTML attribute + body context. |
+
+### Migration
+
+**None.** No schema change.
+
+### Deploy
+
+Vercel will rebuild on the new commit. The new admin route is gated by `requireAdminUser` so it's safe to ship — non-admins see 401/403. The `SystemStatusCard` renders on the dashboard for any admin who's already authenticated. The cron route's email-on-halt path activates immediately on first deploy; missing `ADMIN_NOTIFICATION_EMAIL` just logs a warning and continues.
+
+### Recommended next phase
+
+**Phase 14V — TikTok Status Polling:** add `checkTikTokPostStatus(publish_id)` helper to `src/lib/tiktok-oauth.ts`, persist `publish_id` into `content_calendar.media_metadata` JSONB on TikTok post, and add `scripts/diagnose-tiktok-uploads.js` to confirm async uploads finished processing.
+
+---
+
+## Phase 14T.1 — Lint Hygiene Sweep (deployed `90b27b9` 2026-05-08 — mechanical cleanup of all 51 pre-existing ESLint findings; no DB writes; no platform calls; behavior preserved on every funnel page)
 
 ### What this phase ships
 

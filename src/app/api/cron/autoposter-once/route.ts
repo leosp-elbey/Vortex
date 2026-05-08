@@ -56,6 +56,7 @@ import {
 } from '@/lib/posting-gate'
 import { getAutoposterEligibleRows } from '@/lib/autoposter-gate'
 import { getValidTikTokAccessToken } from '@/lib/tiktok-oauth'
+import { sendEmail } from '@/lib/resend'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -254,6 +255,88 @@ async function flipKillSwitchToDisabled(supabase: SupabaseAdmin, reason: string)
     )
 }
 
+/**
+ * Phase 14U — fire a critical alert email when the kill switch auto-flips.
+ *
+ * Best-effort: this function NEVER throws. If ADMIN_NOTIFICATION_EMAIL is
+ * unset OR Resend rejects the send, we log a warning and continue. The
+ * cron's primary job is bookkeeping integrity (atomic UPDATE + kill switch
+ * flip); the email is an operator notification on top, not a hard
+ * dependency.
+ */
+async function sendKillSwitchAlert(args: {
+  reason: string
+  platform: string | null
+  rowId: string | null
+  platformPostId?: string | null
+  detail?: Record<string, unknown>
+}): Promise<void> {
+  const adminEmail = (process.env.ADMIN_NOTIFICATION_EMAIL ?? '').trim()
+  if (!adminEmail) {
+    console.warn('[autoposter-once] kill-switch alert email skipped — ADMIN_NOTIFICATION_EMAIL not configured', {
+      reason: args.reason,
+    })
+    return
+  }
+
+  const subject = '🚨 URGENT: VortexTrips Autoposter Halted'
+  const detailLines = args.detail
+    ? Object.entries(args.detail).map(
+        ([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`,
+      )
+    : []
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #1A1A2E; max-width: 640px;">
+      <h1 style="color: #C53030; font-size: 22px; margin-bottom: 8px;">🚨 VortexTrips Autoposter Halted</h1>
+      <p style="color: #4A5568; margin-top: 0;">
+        The autoposter cron at <code>/api/cron/autoposter-once</code> hit a definitive failure
+        and auto-disabled itself. Daily posting is paused until you investigate and re-enable.
+      </p>
+
+      <div style="background: #FFF5F5; border-left: 4px solid #C53030; padding: 16px; margin: 16px 0; border-radius: 4px;">
+        <p style="margin: 0 0 8px 0;"><strong>Reason:</strong> ${escapeHtml(args.reason)}</p>
+        ${args.platform ? `<p style="margin: 0 0 4px 0;"><strong>Platform:</strong> ${escapeHtml(args.platform)}</p>` : ''}
+        ${args.rowId ? `<p style="margin: 0 0 4px 0;"><strong>content_calendar.id:</strong> <code>${escapeHtml(args.rowId)}</code></p>` : ''}
+        ${args.platformPostId ? `<p style="margin: 0 0 4px 0;"><strong>Platform post id:</strong> <code>${escapeHtml(args.platformPostId)}</code></p>` : ''}
+      </div>
+
+      ${detailLines.length > 0 ? `<p style="font-weight: 600; margin-bottom: 4px;">Additional context:</p><ul style="color: #4A5568; padding-left: 20px;">${detailLines.join('')}</ul>` : ''}
+
+      <h2 style="font-size: 16px; margin-top: 24px;">Next steps</h2>
+      <ol style="color: #4A5568; padding-left: 20px;">
+        <li>Open the <strong>System Status &amp; Kill Switch</strong> card on the AI Command Center dashboard for current state and last-change reason.</li>
+        <li>Run <code>node scripts/audit-pre-autoposter-readiness.js</code> to confirm DB invariants are intact.</li>
+        ${args.platformPostId ? '<li><strong>Critical:</strong> the platform post may have landed but the DB UPDATE failed. Verify on the platform UI and reconcile with <code>scripts/repair-posted-at-invariants.js</code> if needed.</li>' : ''}
+        <li>Once the root cause is fixed, re-enable from the dashboard kill switch (or run <code>UPDATE site_settings SET value='true' WHERE key='${KILL_SWITCH_KEY}'</code>).</li>
+      </ol>
+
+      <p style="color: #A0AEC0; font-size: 12px; margin-top: 24px;">
+        Sent automatically by the autoposter cron route. To stop receiving these alerts, unset
+        <code>ADMIN_NOTIFICATION_EMAIL</code> in Vercel env vars (note: the cron will still
+        auto-disable, you just won't be emailed about it).
+      </p>
+    </div>
+  `
+
+  try {
+    await sendEmail({ to: adminEmail, subject, html })
+    console.log('[autoposter-once] kill-switch alert email sent', { to: adminEmail, reason: args.reason })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    console.warn('[autoposter-once] kill-switch alert email failed (non-fatal)', { to: adminEmail, error: message })
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 async function snapshotPostedCounts(supabase: SupabaseAdmin): Promise<{ posted_at: number; status_posted: number }> {
   const [postedAt, statusPosted] = await Promise.all([
     supabase.from('content_calendar').select('id', { count: 'exact', head: true }).not('posted_at', 'is', null),
@@ -414,11 +497,18 @@ export async function GET(request: NextRequest) {
   if (!result.ok) {
     // Definitive platform-side failure — flip the kill switch to 'false' so
     // the next scheduled tick stays quiet until the operator diagnoses + re-enables.
-    await flipKillSwitchToDisabled(supabase, `${platform} post failed at row ${chosen.id}: ${result.error ?? 'unknown'}`)
+    const failureReason = `${platform} post failed at row ${chosen.id}: ${result.error ?? 'unknown'}`
+    await flipKillSwitchToDisabled(supabase, failureReason)
     console.error('[autoposter-once] platform post failed — auto-disabled cron', {
       row_id: chosen.id,
       platform,
       error: result.error,
+    })
+    await sendKillSwitchAlert({
+      reason: failureReason,
+      platform,
+      rowId: chosen.id,
+      detail: { platform_error: result.error ?? 'unknown' },
     })
     return NextResponse.json(
       {
@@ -447,12 +537,20 @@ export async function GET(request: NextRequest) {
   if (updErr) {
     // Platform post landed but DB didn't flip — operator MUST manually
     // reconcile. Auto-disable so we don't keep posting without bookkeeping.
-    await flipKillSwitchToDisabled(supabase, `DB update failed after ${platform} post landed at row ${chosen.id}: ${updErr.message}`)
+    const failureReason = `DB update failed after ${platform} post landed at row ${chosen.id}: ${updErr.message}`
+    await flipKillSwitchToDisabled(supabase, failureReason)
     console.error('[autoposter-once] CRITICAL: DB update failed after platform post landed — auto-disabled cron', {
       row_id: chosen.id,
       platform,
       platform_post_id: result.platform_post_id,
       error: updErr.message,
+    })
+    await sendKillSwitchAlert({
+      reason: failureReason,
+      platform,
+      rowId: chosen.id,
+      platformPostId: result.platform_post_id ?? null,
+      detail: { db_error: updErr.message, severity: 'CRITICAL — platform post may have landed; manual reconciliation required' },
     })
     return NextResponse.json(
       {
@@ -468,12 +566,20 @@ export async function GET(request: NextRequest) {
     )
   }
   if ((updateCount ?? 0) !== 1) {
-    await flipKillSwitchToDisabled(supabase, `DB update affected ${updateCount} rows after ${platform} post at row ${chosen.id}`)
+    const failureReason = `DB update affected ${updateCount} rows after ${platform} post at row ${chosen.id}`
+    await flipKillSwitchToDisabled(supabase, failureReason)
     console.error('[autoposter-once] CRITICAL: DB update affected unexpected count — auto-disabled cron', {
       row_id: chosen.id,
       platform,
       platform_post_id: result.platform_post_id,
       update_count: updateCount,
+    })
+    await sendKillSwitchAlert({
+      reason: failureReason,
+      platform,
+      rowId: chosen.id,
+      platformPostId: result.platform_post_id ?? null,
+      detail: { update_count: updateCount, severity: 'CRITICAL — platform post landed; manual reconciliation required' },
     })
     return NextResponse.json(
       {
@@ -496,10 +602,8 @@ export async function GET(request: NextRequest) {
   const statusDelta = after.status_posted - before.status_posted
 
   if (postedAtDelta !== 1 || statusDelta !== 1) {
-    await flipKillSwitchToDisabled(
-      supabase,
-      `post-flight invariant slip at row ${chosen.id}: posted_at_delta=${postedAtDelta}, status_delta=${statusDelta}`,
-    )
+    const failureReason = `post-flight invariant slip at row ${chosen.id}: posted_at_delta=${postedAtDelta}, status_delta=${statusDelta}`
+    await flipKillSwitchToDisabled(supabase, failureReason)
     console.error('[autoposter-once] CRITICAL: post-flight invariant slip — auto-disabled cron', {
       row_id: chosen.id,
       platform,
@@ -508,6 +612,21 @@ export async function GET(request: NextRequest) {
       after,
       posted_at_delta: postedAtDelta,
       status_delta: statusDelta,
+    })
+    await sendKillSwitchAlert({
+      reason: failureReason,
+      platform,
+      rowId: chosen.id,
+      platformPostId: result.platform_post_id ?? null,
+      detail: {
+        posted_at_before: before.posted_at,
+        posted_at_after: after.posted_at,
+        status_posted_before: before.status_posted,
+        status_posted_after: after.status_posted,
+        posted_at_delta: postedAtDelta,
+        status_delta: statusDelta,
+        severity: 'CRITICAL — DB counters disagree; investigate before re-enabling',
+      },
     })
     return NextResponse.json(
       {
