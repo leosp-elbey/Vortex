@@ -1,14 +1,24 @@
-import { FlatCompat } from '@eslint/eslintrc'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+// Phase 14T — Native flat ESLint config.
+//
+// Pre-14T: this file used `FlatCompat` from `@eslint/eslintrc` to wrap
+// `next/core-web-vitals` and `next/typescript` for ESLint 9.x consumption.
+// `eslint-plugin-react`'s recommended config contains a circular plugin
+// reference (`configs.flat -> ... -> plugins.react -> configs`), which
+// FlatCompat's validator tries to JSON.stringify and crashes with:
+//
+//   TypeError: Converting circular structure to JSON
+//
+// Phase 14T: `eslint-config-next` v16.2.4 ships flat-config-native arrays
+// at the `core-web-vitals` and `typescript` subpath exports — already-shaped
+// `Linter.Config[]` arrays that we spread directly without going through
+// the legacy compat layer. No more circular-JSON crash; lint runs cleanly.
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
+import nextTypescript from 'eslint-config-next/typescript'
 
-const compat = new FlatCompat({ baseDirectory: __dirname })
-
-export default [
-  ...compat.extends('next/core-web-vitals', 'next/typescript'),
+const config = [
+  ...nextCoreWebVitals,
+  ...nextTypescript,
   {
     ignores: [
       '.next/**',
@@ -21,3 +31,5 @@ export default [
     ],
   },
 ]
+
+export default config

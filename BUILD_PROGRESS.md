@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14S shipping in working tree — 100% Automation Cron. `/api/cron/autoposter-once` route added with CRON_SECRET auth, kill switch, FB/IG/TikTok branches, and auto-disable on failure. `vercel.json` swapped `check-heygen-jobs` for `autoposter-once` at `0 14 * * *` daily. Operator SOP updated to reflect cron-active mode. Kill switch defaults to disabled — first deploy posts NOTHING until operator flips `site_settings.autoposter_cron_enabled='true'`. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `78c4041` (Phase 14R: TikTok Direct Post automation — OAuth, callback, route, runner)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14R deployed and verified on prod** · **Phase 14S in working tree (autonomous cron)** — primary posting automation architecture is complete after 14S. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). **Autoposter cron registered, kill-switched, auto-disabling.**
+**Last updated:** 2026-05-08 (Phase 14T shipping in working tree — local-build tech debt cleared. `src/lib/resend.ts` lazy-initializes the Resend client; `eslint.config.mjs` rewritten to use Next 16 native flat exports, eliminating the FlatCompat circular-JSON crash. `@eslint/eslintrc` devDep removed. `npm run lint` now executes cleanly — surfaces 51 pre-existing findings in unrelated files (out of scope). posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `c012228` (Phase 14S: 100% Automation Cron — autoposter route + vercel.json swap)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14S deployed and verified on prod** · **Phase 14T in working tree (tech-debt cleanup)** — codebase is now functionally complete and locally clean. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). Autoposter cron registered + kill-switched (14S). Resend + ESLint local-build artifacts eliminated (14T).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,35 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14S — 100% Automation Cron (in working tree, 2026-05-08 — autonomous daily posting via Vercel Cron. Typecheck PASS).**
+**Phase 14T — Resend Lazy-Init + ESLint v9 Flat Config (in working tree, 2026-05-08 — tech-debt cleanup. Typecheck PASS. `npm run lint` executes cleanly).**
 
-Phase 14R deployed at `78c4041`. Phase 14S is the operational completion: wrap the runner's `--apply` logic into a CRON_SECRET-gated route that Vercel calls daily, register it in `vercel.json` (replacing the legacy `check-heygen-jobs` slot), and update the operator SOP to reflect the cron-active mode. The cron is **safe-by-default** — kill switch defaults to disabled until the operator explicitly flips `site_settings.autoposter_cron_enabled='true'`.
+Phase 14S deployed at `c012228`. Phase 14T closes the two known local-build artifacts: Resend's module-eval crash and ESLint v9's FlatCompat circular-JSON. Both were known caveats in earlier phases' audit notes; production was unaffected (real env vars + bundled Vercel lint pipeline) but the local developer experience suffered.
+
+**Built in 14T (no DB writes, no platform calls, no behavioral change to posting / cron / API surfaces):**
+- [x] `src/lib/resend.ts` — module-level `new Resend(...)` replaced with private `getResend()` getter that lazily instantiates and caches the client. Module-eval no longer reads `RESEND_API_KEY`. The missing-key error throws only at actual send time. `sendEmail` export interface unchanged — all 6 consumers (partners, lead-created webhook, send-sequences cron, score-and-branch cron, quote-email, trigger-sba) continue to work without changes.
+- [x] `eslint.config.mjs` — dropped `FlatCompat` from `@eslint/eslintrc`. `eslint-config-next` v16.2.4 ships flat-config-native arrays at `./core-web-vitals` and `./typescript` subpath exports — already-shaped `Linter.Config[]` arrays. New config spreads them directly. Exported as a named `const` for `import/no-anonymous-default-export` compliance.
+- [x] `package.json` — removed `@eslint/eslintrc: ^3.2.0` from devDependencies (only consumer was the FlatCompat path).
+- [x] `package-lock.json` — regenerated; `@eslint/eslintrc` top-level entry dropped.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` executes cleanly (no crash; 51 pre-existing findings in unrelated files surface — that's the linter doing its job)
+- ✅ Static review of `src/lib/resend.ts`: `process.env.RESEND_API_KEY` only read inside `getResend()`; throws are scoped to send attempts
+- ✅ Resend `sendEmail` interface unchanged; all 6 call sites continue to work
+
+**Pre-existing lint findings (out of scope):**
+51 issues across the codebase — `react-hooks/set-state-in-effect` (5x), `@next/next/no-html-link-for-pages` (~14x), `react/no-unescaped-entities` (~10x), unused vars and minor noise. ALL in files Phase 14T did not touch. The deliverable was "lint executes cleanly without crashing" (achieved); cleanup of these findings is deferred to a future Phase 14T.1 lint-hygiene sweep.
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Architecture status: COMPLETE and locally clean.** Optional future phases:
+- [ ] **Phase 14T.1 (optional) — Lint Hygiene Sweep** — address the 51 pre-existing findings now that the linter works
+- [ ] **Phase 14U (optional) — TikTok Status Poll** — confirm async upload completion for each `tiktok_publish_id`
+- [ ] **Phase 14V (optional) — Per-Platform Schedules** — requires Vercel Pro upgrade
+
+---
+
+### Pre-Phase-14T: Phase 14S — 100% Automation Cron (saved + pushed `c012228`; CRON_SECRET-gated daily route at `0 14 * * *`; kill switch defaults disabled; auto-disable on definitive failure).
 
 **Built in 14S (no DB writes during this phase, no platform calls until kill switch is enabled AND a Mark-Ready'd row exists at cron tick time):**
 - [x] `src/app/api/cron/autoposter-once/route.ts` (new) — ~430-line CRON_SECRET-gated daily route. Implements the SOP's 5 steps programmatically: pre-flight snapshot → `getAutoposterEligibleRows({ limit: 5 })` → defense-in-depth `validateManualPostingGate` → platform call (FB photo→feed fallback / IG container→wait→publish / TikTok Direct Post init) → atomic UPDATE with `.eq('status','approved').is('posted_at',null)` guards → post-flight delta check → kill-switch flip on any definitive failure. One row per execution (refuses on queue size != 1). Twitter/X explicitly refused (defense-in-depth). Uses existing `getValidTikTokAccessToken` and `validateManualPostingGate` libraries — no logic duplication beyond the platform-poster branches.
