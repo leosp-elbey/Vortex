@@ -18,6 +18,7 @@ function VideosPageInner() {
 
   useEffect(() => {
     // Check URL params from OAuth callback
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing state from URL params on mount; not derivable in render because searchParams is a hook
     if (searchParams.get('yt_connected') === '1') setYtConnected(true)
     if (searchParams.get('yt_error')) setYtMsg(`Connection failed: ${searchParams.get('yt_error')}`)
 

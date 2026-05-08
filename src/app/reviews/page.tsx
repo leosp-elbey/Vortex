@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 
 interface Review {
   id: string
@@ -40,7 +41,6 @@ function ReviewsJsonLd({ reviews }: { reviews: Review[] }) {
   return (
     <script
       type="application/ld+json"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }}
     />
   )
@@ -62,6 +62,7 @@ export default function ReviewsPage() {
     // Pre-fill contact_id from URL param if present (from review request link)
     const params = new URLSearchParams(window.location.search)
     const cid = params.get('cid')
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time URL-param sync on mount; cid is window-scoped, not derivable in render
     if (cid) setForm(f => ({ ...f, contact_id: cid }))
   }, [])
 
@@ -88,8 +89,8 @@ export default function ReviewsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-[#1A1A2E] px-6 py-4 flex items-center justify-between">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
-        <a href="/quote" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">Get Quote</a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
+        <Link href="/quote" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">Get Quote</Link>
       </nav>
 
       <div className="max-w-5xl mx-auto px-6 py-16">
@@ -150,7 +151,7 @@ export default function ReviewsPage() {
                   )}
                 </div>
                 <div className="text-[#FF6B35] mb-2">{'⭐'.repeat(r.rating)}</div>
-                <p className="text-gray-600 text-sm italic">"{r.review_text}"</p>
+                <p className="text-gray-600 text-sm italic">&quot;{r.review_text}&quot;</p>
               </div>
             ))}
           </div>
@@ -202,9 +203,9 @@ export default function ReviewsPage() {
       <footer className="bg-[#0d0d1a] text-gray-500 py-8 px-6 text-center text-sm mt-16">
         <p className="text-white font-bold mb-2">VortexTrips</p>
         <div className="flex justify-center gap-6 mb-3 flex-wrap">
-          <a href="/" className="hover:text-white">Home</a>
-          <a href="/quote" className="hover:text-white">Get a Quote</a>
-          <a href="/privacy" className="hover:text-white">Privacy</a>
+          <Link href="/" className="hover:text-white">Home</Link>
+          <Link href="/quote" className="hover:text-white">Get a Quote</Link>
+          <Link href="/privacy" className="hover:text-white">Privacy</Link>
         </div>
         <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
       </footer>

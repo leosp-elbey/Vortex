@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import type { QuoteFormData } from '@/types'
 
 export default function QuotePage() {
@@ -49,7 +50,7 @@ export default function QuotePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-[#1A1A2E] px-6 py-4">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>
 
       <div className="max-w-2xl mx-auto px-6 py-16">

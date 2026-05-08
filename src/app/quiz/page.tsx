@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 const QUESTIONS = [
   {
@@ -126,7 +127,7 @@ export default function QuizPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1A1A2E] to-[#0F3460] flex flex-col">
       <nav className="px-6 py-4">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>
 
       <div className="flex-1 flex items-center justify-center px-6 py-12">
@@ -172,7 +173,7 @@ export default function QuizPage() {
 
               <div className="bg-white rounded-2xl p-8">
                 <h3 className="text-xl font-bold text-[#1A1A2E] mb-1">Get Your Personalized Savings</h3>
-                <p className="text-gray-500 text-sm mb-5">We'll match deals to your traveler profile.</p>
+                <p className="text-gray-500 text-sm mb-5">We&apos;ll match deals to your traveler profile.</p>
                 <form onSubmit={handleSubmit} className="space-y-3">
                   <input type="text" placeholder="First Name" required value={form.first_name}
                     onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}

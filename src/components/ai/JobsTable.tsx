@@ -52,6 +52,7 @@ export default function JobsTable({ selectedJobId, onSelect, refreshKey }: JobsT
     setLoading(false)
   }, [statusFilter, typeFilter])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount + when filters change; loadJobs writes setState internally
   useEffect(() => { loadJobs() }, [loadJobs, refreshKey])
 
   return (

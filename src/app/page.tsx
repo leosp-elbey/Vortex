@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import ExitIntent from '@/components/ExitIntent'
 
 interface LeadFormProps {
@@ -71,7 +71,6 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
 }
 
 export default function LandingPage() {
-  const router = useRouter()
   const [form, setForm] = useState({ first_name: '', email: '', phone: '', smsConsent: false })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -119,10 +118,10 @@ export default function LandingPage() {
           <span className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></span>
         </div>
         <div className="hidden md:flex items-center gap-6 text-sm text-gray-400">
-          <a href="/quiz" className="hover:text-white transition-colors">Travel Quiz</a>
-          <a href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</a>
-          <a href="/reviews" className="hover:text-white transition-colors">Reviews</a>
-          <a href="/sba" className="hover:text-white transition-colors">Earn With Us</a>
+          <Link href="/quiz" className="hover:text-white transition-colors">Travel Quiz</Link>
+          <Link href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</Link>
+          <Link href="/reviews" className="hover:text-white transition-colors">Reviews</Link>
+          <Link href="/sba" className="hover:text-white transition-colors">Earn With Us</Link>
         </div>
         <a href="https://myvortex365.com/leosp" target="_blank" rel="noopener noreferrer" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
           Get Free Account
@@ -259,6 +258,7 @@ export default function LandingPage() {
             ].map(({ name, location, saved, trip, quote, photo }) => (
               <div key={name} className="p-6 bg-gray-50 rounded-2xl">
                 <div className="flex items-center gap-3 mb-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- testimonial photo from /public; configuring next/image is out of scope */}
                   <img
                     src={photo}
                     alt={name}
@@ -275,7 +275,7 @@ export default function LandingPage() {
                     </div>
                   </div>
                 </div>
-                <p className="text-gray-600 text-sm italic">"{quote}"</p>
+                <p className="text-gray-600 text-sm italic">&quot;{quote}&quot;</p>
                 <div className="mt-3 text-[#FF6B35]">⭐⭐⭐⭐⭐</div>
               </div>
             ))}
@@ -317,7 +317,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h2 className="text-3xl font-black text-white mb-2">Not Sure Where to Go?</h2>
-            <p className="text-white/80 text-lg">Take our 60-second travel quiz — we'll match you with the perfect destination and your best savings.</p>
+            <p className="text-white/80 text-lg">Take our 60-second travel quiz — we&apos;ll match you with the perfect destination and your best savings.</p>
           </div>
           <a
             href="/quiz"
@@ -345,7 +345,7 @@ export default function LandingPage() {
           >
             ✅ Create My Free Account →
           </a>
-          <p className="text-gray-500 text-sm mb-10">or leave your info below and we'll call you in 60 seconds</p>
+          <p className="text-gray-500 text-sm mb-10">or leave your info below and we&apos;ll call you in 60 seconds</p>
           <div className="bg-white rounded-2xl p-8">
             <LeadForm
               id="cta-form"
@@ -370,14 +370,14 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <p className="text-white font-bold text-lg mb-2">VortexTrips</p>
           <div className="flex justify-center gap-6 mb-4 flex-wrap">
-            <a href="/quiz" className="hover:text-white transition-colors">Travel Quiz</a>
-            <a href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</a>
-            <a href="/reviews" className="hover:text-white transition-colors">Member Reviews</a>
-            <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
-            <a href="/join" className="hover:text-white transition-colors">Join Now</a>
+            <Link href="/quiz" className="hover:text-white transition-colors">Travel Quiz</Link>
+            <Link href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</Link>
+            <Link href="/reviews" className="hover:text-white transition-colors">Member Reviews</Link>
+            <Link href="/quote" className="hover:text-white transition-colors">Get a Quote</Link>
+            <Link href="/join" className="hover:text-white transition-colors">Join Now</Link>
             <a href="mailto:support@vortextrips.com" className="hover:text-white transition-colors">Contact</a>
-            <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
-            <a href="/terms" className="hover:text-white transition-colors">Terms</a>
+            <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
           </div>
           <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
           <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>

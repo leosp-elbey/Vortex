@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { call_id, status, duration, metadata } = body
+    const { status, duration, metadata } = body
     const supabase = createAdminClient()
 
     await supabase

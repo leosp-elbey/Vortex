@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 interface Props {
   searchParams: Promise<{ from?: string }>
 }
@@ -11,7 +13,7 @@ export default async function ThankYouPage({ searchParams }: Props) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1A1A2E] to-[#0F3460] flex flex-col">
       <nav className="px-6 py-4">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>
 
       <div className="flex-1 flex items-center justify-center px-6">
@@ -40,7 +42,7 @@ export default async function ThankYouPage({ searchParams }: Props) {
               <>
                 <div className="flex gap-3 text-gray-300"><span className="text-[#16C79A] font-black shrink-0">1.</span><span>Check your email for your affiliate links and onboarding guide</span></div>
                 <div className="flex gap-3 text-gray-300"><span className="text-[#16C79A] font-black shrink-0">2.</span><span>Share your link on social media to start earning commissions</span></div>
-                <div className="flex gap-3 text-gray-300"><span className="text-[#16C79A] font-black shrink-0">3.</span><span>We'll follow up with training tips over the next 7 days</span></div>
+                <div className="flex gap-3 text-gray-300"><span className="text-[#16C79A] font-black shrink-0">3.</span><span>We&apos;ll follow up with training tips over the next 7 days</span></div>
               </>
             ) : isQuote ? (
               <>
@@ -77,9 +79,9 @@ export default async function ThankYouPage({ searchParams }: Props) {
             >
               Book a Trip Now →
             </a>
-            <a href="/" className="bg-white/10 text-white font-bold px-6 py-3 rounded-xl hover:bg-white/20 transition-colors text-center">
+            <Link href="/" className="bg-white/10 text-white font-bold px-6 py-3 rounded-xl hover:bg-white/20 transition-colors text-center">
               ← Back to Home
-            </a>
+            </Link>
           </div>
         </div>
       </div>

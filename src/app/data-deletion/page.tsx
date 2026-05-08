@@ -1,8 +1,10 @@
+import Link from 'next/link'
+
 export default function DataDeletionPage() {
   return (
     <div className="min-h-screen bg-[#1A1A2E] text-white">
       <nav className="px-6 py-4">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-black mb-4">Data Deletion Request</h1>
@@ -15,7 +17,7 @@ export default function DataDeletionPage() {
               If you have connected your Facebook or Instagram account to VortexTrips and wish to have your data deleted,
               you may submit a deletion request by emailing us at{' '}
               <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] underline">support@vortextrips.com</a>{' '}
-              with the subject line <strong className="text-white">"Data Deletion Request"</strong>.
+              with the subject line <strong className="text-white">&quot;Data Deletion Request&quot;</strong>.
             </p>
           </section>
 

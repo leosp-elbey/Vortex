@@ -75,7 +75,7 @@ export default function SBAPage() {
       <div className="min-h-screen bg-[#1A1A2E] flex items-center justify-center px-4">
         <div className="max-w-lg text-center">
           <div className="text-6xl mb-6">🎉</div>
-          <h1 className="text-3xl font-black text-white mb-4">You're In — Check Your Inbox</h1>
+          <h1 className="text-3xl font-black text-white mb-4">You&apos;re In — Check Your Inbox</h1>
           <p className="text-gray-300 text-lg mb-8">
             We just sent your SBA welcome package with your affiliate links, marketing kit, and first commission tips.
           </p>
@@ -144,7 +144,7 @@ export default function SBAPage() {
           >
             <div className="text-5xl mb-4">🎬</div>
             <h3 className="text-xl font-bold mb-2">Opportunity Video</h3>
-            <p className="text-white/90 text-sm leading-relaxed mb-4">Why this exists and who it's for. The 5-minute company overview every prospect should watch.</p>
+            <p className="text-white/90 text-sm leading-relaxed mb-4">Why this exists and who it&apos;s for. The 5-minute company overview every prospect should watch.</p>
             <span className="inline-flex items-center gap-2 font-semibold text-sm group-hover:gap-3 transition-all">
               Watch now <span>→</span>
             </span>

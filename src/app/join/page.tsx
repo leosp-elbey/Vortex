@@ -1,20 +1,15 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 
 export default function JoinPage() {
-  const [email, setEmail] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitted(true)
-  }
+  const [submitted] = useState(false)
 
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-[#1A1A2E] px-6 py-4">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>
 
       <div className="max-w-5xl mx-auto px-6 py-16">
@@ -72,7 +67,7 @@ export default function JoinPage() {
                   >
                     Join the SBA Program →
                   </a>
-                  <p className="text-xs text-center text-gray-400">You'll be taken to our secure enrollment page to complete signup.</p>
+                  <p className="text-xs text-center text-gray-400">You&apos;ll be taken to our secure enrollment page to complete signup.</p>
                   <div className="flex items-center gap-3 my-2">
                     <div className="flex-1 h-px bg-gray-200" />
                     <span className="text-gray-400 text-xs">not ready to earn yet?</span>

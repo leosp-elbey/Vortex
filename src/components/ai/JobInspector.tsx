@@ -67,6 +67,7 @@ export default function JobInspector({ jobId, notify, onJobUpdated }: JobInspect
     }
   }, [jobId, notify])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount; loadJob writes setState internally
   useEffect(() => { loadJob() }, [loadJob])
 
   const action = async (path: string, label: string, body?: object) => {

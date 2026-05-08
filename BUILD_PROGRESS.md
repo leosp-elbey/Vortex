@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14T shipping in working tree — local-build tech debt cleared. `src/lib/resend.ts` lazy-initializes the Resend client; `eslint.config.mjs` rewritten to use Next 16 native flat exports, eliminating the FlatCompat circular-JSON crash. `@eslint/eslintrc` devDep removed. `npm run lint` now executes cleanly — surfaces 51 pre-existing findings in unrelated files (out of scope). posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `c012228` (Phase 14S: 100% Automation Cron — autoposter route + vercel.json swap)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14S deployed and verified on prod** · **Phase 14T in working tree (tech-debt cleanup)** — codebase is now functionally complete and locally clean. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). Autoposter cron registered + kill-switched (14S). Resend + ESLint local-build artifacts eliminated (14T).
+**Last updated:** 2026-05-08 (Phase 14T.1 shipping in working tree — Lint Hygiene Sweep. All 51 pre-existing lint findings across 22 files cleared. `npm run lint` returns **0 errors, 0 warnings**. Strictly mechanical edits; funnel-page behavior preserved. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `2844734` (Phase 14T: Resend lazy-init + ESLint v9 flat config — local builds clean)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14T deployed and verified on prod** · **Phase 14T.1 in working tree (lint hygiene sweep)** — codebase is functionally complete, locally clean, AND lint-clean. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). TikTok fully automated via Direct Post (14R). Autoposter cron registered + kill-switched (14S). Local-build artifacts eliminated (14T). Lint backlog cleared (14T.1).
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,35 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14T — Resend Lazy-Init + ESLint v9 Flat Config (in working tree, 2026-05-08 — tech-debt cleanup. Typecheck PASS. `npm run lint` executes cleanly).**
+**Phase 14T.1 — Lint Hygiene Sweep (in working tree, 2026-05-08 — all 51 pre-existing ESLint findings cleared across 22 files. `npm run lint`: 0 errors, 0 warnings. Typecheck PASS).**
 
-Phase 14S deployed at `c012228`. Phase 14T closes the two known local-build artifacts: Resend's module-eval crash and ESLint v9's FlatCompat circular-JSON. Both were known caveats in earlier phases' audit notes; production was unaffected (real env vars + bundled Vercel lint pipeline) but the local developer experience suffered.
+Phase 14T deployed at `2844734`. Phase 14T.1 eradicates the 51 lint findings that surfaced once the FlatCompat crash was fixed. Strictly mechanical edits per operator directive: `<a>` → `<Link>` for internal hrefs, JSX entity escapes, unused-var cleanup, targeted `eslint-disable-next-line` directives with justification comments for unavoidable patterns (data-fetch-on-mount, URL-param sync), and one real refactor — `PlatformChips` extracted out of `WorkflowPanel`'s render scope.
+
+**Built in 14T.1 (no DB writes, no platform calls, behavior preserved on every funnel page):**
+- [x] **API routes (3)** — `upload-to-youtube` ts-ignore→ts-expect-error; `dashboard/generate-content` removed unused `request` param; `webhooks/bland` removed unused `call_id`.
+- [x] **Dashboard pages (5)** — `campaigns` removed dead `CALENDAR_PLATFORMS` + 3 set-state-in-effect disables; `content` img-element disable; `leads` ternary→if/else; `members` removed unused `show`; `videos` URL-param-sync disable.
+- [x] **Public landing pages (11)** — `data-deletion`, `destinations/[slug]`, `join`, `page` (homepage), `privacy`, `quiz`, `quote`, `reviews`, `sba`, `terms`, `thank-you`. Mechanical `<a>`→`<Link>` for internal hrefs (external `mailto:`/`https://` left as `<a>`), JSX entity escapes, dead-code cleanup (unused `router`, dead `handleSubmit` on join, dead `eslint-disable react/no-danger` on reviews).
+- [x] **Components (3)** — `JobInspector` + `JobsTable` data-fetch-on-mount disables; `WorkflowPanel` real refactor — `PlatformChips` and `togglePlatform` extracted out of render scope into module-level declarations + new `SocialPlatformId` type alias.
+
+**Decision on `react-hooks/set-state-in-effect` (5 instances):**
+Silenced with targeted `eslint-disable-next-line` directives + inline justification comments. The rule recommends not using effects for these patterns, but the alternatives (React Query, in-effect lazy initializers) are major refactors out of 14T.1's "strictly mechanical" scope. Each disable carries a one-line `--` comment explaining why (data fetch on mount; URL-param sync; selection-driven re-fetch). Future phase can migrate if desired.
+
+**Verification:**
+- ✅ `npm run lint`: **0 problems (0 errors, 0 warnings)** — down from 51 problems
+- ✅ `npx tsc --noEmit` clean
+- ✅ Behavior preserved: `<Link>` renders the same `<a>` tag in DOM with same href; entity escapes render identically; removed `handleSubmit` on /join was unbound (no form `onSubmit` referenced it); `WorkflowPanel`'s `PlatformChips` extraction is functionally identical (still receives state/setter as props).
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Architecture status: COMPLETE, locally clean, lint-clean.** Optional remaining phases:
+- [ ] **Phase 14U** — Cron Health Dashboard UI & Alerts (kill-switch toggle UI + admin email on auto-disable)
+- [ ] **Phase 14V** — TikTok Status Polling (async upload verification)
+- [ ] **Phase 14W** — Social Media Content Optimization (rewrite AI prompts for hooks, formatting, niche hashtags)
+- [ ] **Phase 14X** — Full System Audit & Broken Page Scanner (route-status script + manual mobile review)
+
+---
+
+### Pre-Phase-14T.1: Phase 14T — Resend Lazy-Init + ESLint v9 Flat Config (saved + pushed `2844734`).
 
 **Built in 14T (no DB writes, no platform calls, no behavioral change to posting / cron / API surfaces):**
 - [x] `src/lib/resend.ts` — module-level `new Resend(...)` replaced with private `getResend()` getter that lazily instantiates and caches the client. Module-eval no longer reads `RESEND_API_KEY`. The missing-key error throws only at actual send time. `sendEmail` export interface unchanged — all 6 consumers (partners, lead-created webhook, send-sequences cron, score-and-branch cron, quote-email, trigger-sba) continue to work without changes.

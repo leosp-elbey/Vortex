@@ -3,10 +3,46 @@
 import { useState } from 'react'
 
 type WorkflowKind = 'generic' | 'blog' | 'email-sequence' | 'video-script' | 'social-pack' | 'social-calendar'
+type SocialPlatformId = 'instagram' | 'facebook' | 'tiktok'
 
 interface WorkflowPanelProps {
   onJobCreated: (jobId: string) => void
   notify: (msg: string, type?: 'success' | 'error') => void
+}
+
+// Phase 14T.1 — hoisted out of WorkflowPanel so it isn't recreated on every render.
+function togglePlatform(
+  platform: SocialPlatformId,
+  state: SocialPlatformId[],
+  setter: (s: SocialPlatformId[]) => void,
+) {
+  if (state.includes(platform)) setter(state.filter(p => p !== platform))
+  else setter([...state, platform])
+}
+
+function PlatformChips({ state, setter }: { state: SocialPlatformId[]; setter: (s: SocialPlatformId[]) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {(['instagram', 'facebook', 'tiktok'] as const).map(p => {
+        const active = state.includes(p)
+        const draftOnly = p === 'tiktok'
+        return (
+          <button
+            key={p}
+            type="button"
+            onClick={() => togglePlatform(p, state, setter)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              active
+                ? 'bg-[#FF6B35] text-white border-[#FF6B35]'
+                : 'bg-white text-gray-700 border-gray-300 hover:border-[#FF6B35]'
+            }`}
+          >
+            {p}{draftOnly && active ? ' (draft only)' : ''}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 const TABS: { id: WorkflowKind; label: string; icon: string }[] = [
@@ -58,15 +94,6 @@ export default function WorkflowPanel({ onJobCreated, notify }: WorkflowPanelPro
   const [calPlatforms, setCalPlatforms] = useState<('instagram' | 'facebook' | 'tiktok')[]>(['instagram', 'facebook'])
   const [calDays, setCalDays] = useState(30)
   const [calStart, setCalStart] = useState(new Date().toISOString().slice(0, 10))
-
-  const togglePlatform = (
-    platform: 'instagram' | 'facebook' | 'tiktok',
-    state: typeof packPlatforms,
-    setter: (s: typeof packPlatforms) => void,
-  ) => {
-    if (state.includes(platform)) setter(state.filter(p => p !== platform))
-    else setter([...state, platform])
-  }
 
   const submit = async (path: string, body: object) => {
     setLoading(true)
@@ -124,29 +151,6 @@ export default function WorkflowPanel({ onJobCreated, notify }: WorkflowPanelPro
       })
     }
   }
-
-  const PlatformChips = ({ state, setter }: { state: typeof packPlatforms; setter: (s: typeof packPlatforms) => void }) => (
-    <div className="flex flex-wrap gap-2">
-      {(['instagram', 'facebook', 'tiktok'] as const).map(p => {
-        const active = state.includes(p)
-        const draftOnly = p === 'tiktok'
-        return (
-          <button
-            key={p}
-            type="button"
-            onClick={() => togglePlatform(p, state, setter)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-              active
-                ? 'bg-[#FF6B35] text-white border-[#FF6B35]'
-                : 'bg-white text-gray-700 border-gray-300 hover:border-[#FF6B35]'
-            }`}
-          >
-            {p}{draftOnly && active ? ' (draft only)' : ''}
-          </button>
-        )
-      })}
-    </div>
-  )
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">

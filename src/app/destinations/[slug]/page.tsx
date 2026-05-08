@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 
 const DESTINATIONS: Record<string, {
   name: string
@@ -134,8 +135,8 @@ export default function DestinationPage() {
   return (
     <div className="min-h-screen">
       <nav className="bg-[#1A1A2E] px-6 py-4 flex items-center justify-between">
-        <a href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></a>
-        <a href="/quote" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">Get Quote</a>
+        <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
+        <Link href="/quote" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">Get Quote</Link>
       </nav>
 
       {/* Hero */}
@@ -230,10 +231,10 @@ export default function DestinationPage() {
       <footer className="bg-[#0d0d1a] text-gray-500 py-8 px-6 text-center text-sm">
         <p className="text-white font-bold text-lg mb-2">Vortex<span className="text-[#FF6B35]">Trips</span></p>
         <div className="flex justify-center gap-6 mb-4 flex-wrap">
-          <a href="/" className="hover:text-white transition-colors">Home</a>
-          <a href="/quote" className="hover:text-white transition-colors">Get a Quote</a>
-          <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
-          <a href="/terms" className="hover:text-white transition-colors">Terms</a>
+          <Link href="/" className="hover:text-white transition-colors">Home</Link>
+          <Link href="/quote" className="hover:text-white transition-colors">Get a Quote</Link>
+          <Link href="/privacy" className="hover:text-white transition-colors">Privacy</Link>
+          <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
         </div>
         <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
       </footer>

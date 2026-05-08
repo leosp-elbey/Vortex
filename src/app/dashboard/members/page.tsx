@@ -14,7 +14,7 @@ export default function MembersPage() {
   const [activeMember, setActiveMember] = useState<Contact | null>(null)
   const [memberActions, setMemberActions] = useState<AIActionLog[]>([])
   const [loadingActions, setLoadingActions] = useState(false)
-  const { toasts, show } = useToast()
+  const { toasts } = useToast()
 
   useEffect(() => {
     const supabase = createClient()

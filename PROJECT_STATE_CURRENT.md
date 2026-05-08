@@ -1,14 +1,103 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14T shipping in working tree — local-build tech debt eliminated. `src/lib/resend.ts` lazy-instantiates the Resend client via `getResend()` so module-eval no longer touches `process.env.RESEND_API_KEY` (fixes the local `npm run build` page-data collection failure). `eslint.config.mjs` rewritten to use Next 16's native flat-config subpath exports (`eslint-config-next/core-web-vitals`, `eslint-config-next/typescript`), eliminating the `FlatCompat` circular-JSON crash with ESLint 9.x. `@eslint/eslintrc` devDep removed. `npm run lint` now executes cleanly. No DB writes. No platform calls. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last known good commit:** `c012228` — "Phase 14S: 100% Automation Cron — autoposter route + vercel.json swap"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14S deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14T.1 shipping in working tree — Lint Hygiene Sweep. All 51 pre-existing ESLint findings across 22 files eliminated. `npm run lint` now returns **0 errors, 0 warnings**. Edits were strictly mechanical: `<a>` → `<Link>` for internal nav, JSX entity escapes, unused-var cleanup, targeted `eslint-disable-next-line` directives with justification comments for unavoidable `react-hooks/set-state-in-effect` patterns (data-fetch-on-mount and URL-param sync), and one real refactor — `PlatformChips` + `togglePlatform` extracted out of `WorkflowPanel`'s render scope. Funnel-page behavior preserved. No DB writes. No platform calls. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `2844734` — "Phase 14T: Resend lazy-init + ESLint v9 flat config — local builds clean"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14T deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous operating mode unlocked by Phase 14S.** Once the operator flips `site_settings.autoposter_cron_enabled='true'`, the cron at `/api/cron/autoposter-once` runs daily at 14:00 UTC, posts exactly one Mark-Ready'd row per execution to FB / IG / TikTok via the same gate / atomic-UPDATE contract the manual routes use, and auto-disables on the first failure. Phase 14T closes the last two known local-build artifacts (Resend module-eval, ESLint v9 circular-JSON). The codebase is now functionally complete and locally clean.
+**Live posting status:** **🤖 Fully autonomous operating mode unlocked by Phase 14S.** Once the operator flips `site_settings.autoposter_cron_enabled='true'`, the cron at `/api/cron/autoposter-once` runs daily at 14:00 UTC. Phase 14T eliminated the local-build artifacts. Phase 14T.1 closes the lint backlog so the linter is a useful gate going forward. The codebase is functionally complete, locally clean, **and lint-clean.**
 
 ---
 
-## Phase 14T — Resend Lazy-Init + ESLint v9 Flat Config (in working tree, 2026-05-08 — tech-debt cleanup; no DB writes; no platform calls; no behavioral change to any posting / cron / API surface)
+## Phase 14T.1 — Lint Hygiene Sweep (in working tree, 2026-05-08 — mechanical cleanup of all 51 pre-existing ESLint findings; no DB writes; no platform calls; behavior preserved on every funnel page)
+
+### What this phase ships
+
+Eradicates every ESLint finding `npm run lint` surfaced after Phase 14T fixed the FlatCompat crash. Result: `0 errors, 0 warnings`. The linter is now a useful gate that future PRs can rely on instead of a permanent noise source.
+
+### Files updated (22)
+
+#### API routes (3)
+
+| File | Fix |
+|---|---|
+| `src/app/api/admin/upload-to-youtube/route.ts` | `@ts-ignore` → `@ts-expect-error` with the same justification (lib.dom.d.ts doesn't yet declare `duplex`). |
+| `src/app/api/dashboard/generate-content/route.ts` | Removed unused `request` parameter and the `NextRequest` import. Function is now `POST()`. |
+| `src/app/api/webhooks/bland/route.ts` | Removed unused `call_id` from the destructure. |
+
+#### Dashboard pages (5)
+
+| File | Fix |
+|---|---|
+| `src/app/dashboard/campaigns/page.tsx` | Removed dead `CALENDAR_PLATFORMS` constant (Phase 14Q leftover). Added 3 targeted `eslint-disable-next-line react-hooks/set-state-in-effect` comments with justifications on the data-fetch-on-mount and selection-driven-fetch patterns. |
+| `src/app/dashboard/content/page.tsx` | Added `eslint-disable-next-line @next/next/no-img-element` on the Supabase Storage / Pexels image preview (configuring `next/image` remotePatterns is out of scope). |
+| `src/app/dashboard/leads/page.tsx` | Refactored `next.has(id) ? next.delete(id) : next.add(id)` (unused-expression warning) into an `if/else` — same behavior, no expression-result waste. |
+| `src/app/dashboard/members/page.tsx` | Removed unused `show` from `useToast()` destructure. |
+| `src/app/dashboard/videos/page.tsx` | Added one `eslint-disable-next-line react-hooks/set-state-in-effect` for the URL-param sync on mount. |
+
+#### Public landing pages (11)
+
+Mechanical `<a>` → `<Link>` conversions for internal hrefs (external `mailto:` and `https://` links left as `<a>`), JSX entity escapes (`'` → `&apos;`, `"` → `&quot;`), unused-var cleanup. ALL changes preserve visible behavior — `<Link>` produces the same `<a>` tag in the DOM with optional client-side navigation.
+
+| File | Fix |
+|---|---|
+| `src/app/data-deletion/page.tsx` | `Link` import added; nav `<a>` → `<Link>`; escaped `"Data Deletion Request"` quotes. |
+| `src/app/destinations/[slug]/page.tsx` | `Link` import added; 6 `<a>` → `<Link>` (nav and footer). |
+| `src/app/join/page.tsx` | `Link` import added; nav `<a>` → `<Link>`; escaped `You'll`; removed unused `email`/`setEmail` and the dead `handleSubmit` (which was never bound to any form — the page only has external SBA/portal anchors). `submitted` state remains. |
+| `src/app/page.tsx` | `Link` import added; removed unused `router`/`useRouter`; 13 internal `<a>` → `<Link>` (nav and footer); kept external `mailto:` and `myvortex365.com` as `<a>` (correct); escaped 4 instances (`"{quote}"`, `we'll`); added `eslint-disable-next-line @next/next/no-img-element` on testimonial photo. |
+| `src/app/privacy/page.tsx` | `Link` import added; 2 internal `<a>` → `<Link>` (nav and back-link). |
+| `src/app/quiz/page.tsx` | `Link` import added; nav `<a>` → `<Link>`; escaped `We'll`. |
+| `src/app/quote/page.tsx` | `Link` import added; nav `<a>` → `<Link>`. |
+| `src/app/reviews/page.tsx` | `Link` import added; 5 internal `<a>` → `<Link>` (nav and footer); escaped `"{r.review_text}"`; removed dead `eslint-disable-next-line react/no-danger` directive (rule never fired); added one `eslint-disable-next-line react-hooks/set-state-in-effect` for URL-param `cid` sync. |
+| `src/app/sba/page.tsx` | Escaped `You're` and `it's` in two JSX text nodes. |
+| `src/app/terms/page.tsx` | `Link` import added; 2 internal `<a>` → `<Link>` (nav and back-link). |
+| `src/app/thank-you/page.tsx` | `Link` import added; 2 internal `<a>` → `<Link>` (nav and back-home button); escaped `We'll`. |
+
+#### Components (3)
+
+| File | Fix |
+|---|---|
+| `src/components/ai/JobInspector.tsx` | Added `eslint-disable-next-line react-hooks/set-state-in-effect` on the data-fetch-on-mount `useEffect`. |
+| `src/components/ai/JobsTable.tsx` | Same pattern as `JobInspector` — disable directive with justification. |
+| `src/components/ai/WorkflowPanel.tsx` | **Real refactor** — extracted `PlatformChips` and `togglePlatform` out of the parent component's render scope into module-level declarations. Both are pure (state/setter passed as props/args). Added a `SocialPlatformId` type alias. Eliminates the `react-hooks/static-components` errors at the original render-time component definitions. |
+
+### Decision: targeted `eslint-disable-next-line` for `set-state-in-effect`
+
+Five `react-hooks/set-state-in-effect` violations were silenced with targeted disable directives plus inline justification comments. The rule's official guidance (https://react.dev/learn/you-might-not-need-an-effect) recommends not using effects for these patterns, but the alternatives — React Query, server-component data fetching, or in-effect lazy state initializers — are major refactors that exceed Phase 14T.1's "strictly mechanical" scope. Each disable carries a one-line `--` comment explaining why (data fetch on mount; URL-param sync; selection-driven re-fetch).
+
+This is graceful behavior preservation per the operator's directive. A future phase can revisit if it wants to migrate to React Query or similar.
+
+### Verification
+
+| Test | Result |
+|---|---|
+| `npm run lint` (pre-14T.1) | ❌ 51 problems (39 errors, 12 warnings) |
+| `npm run lint` (post-14T.1) | ✅ **0 problems (0 errors, 0 warnings)** |
+| `npx tsc --noEmit` (after `.next/types` clear) | ✅ PASS — clean |
+| Funnel-page behavior preserved | ✅ All `<a>` → `<Link>` swaps are DOM-equivalent (same tag in HTML output, same href). All entity escapes render identically. No removed feature; only dead-code cleanup (handleSubmit on /join was unbound and unused — removing it changed nothing visible). |
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Migration
+
+**None.** No schema change. All edits are TS/TSX-only.
+
+### Deploy
+
+Vercel will rebuild on the new commit. Production behavior is unchanged — `<Link>` produces the same DOM as `<a>` but adds prefetching for internal navigation (small UX win). Entity escapes, unused-var cleanup, ts-comment swap, and `WorkflowPanel`'s `PlatformChips` refactor are all behavior-preserving.
+
+### Recommended next phase
+
+**Phase 14U — Cron Health Dashboard UI & Alerts:** add a "System Status & Kill Switch" card to a dashboard page reading/toggling `site_settings.autoposter_cron_enabled` via a new admin API route, AND update `/api/cron/autoposter-once` to send an emergency admin email via `sendEmail()` whenever it auto-disables.
+
+---
+
+## Phase 14T — Resend Lazy-Init + ESLint v9 Flat Config (deployed `2844734` 2026-05-08 — tech-debt cleanup; no DB writes; no platform calls; no behavioral change to any posting / cron / API surface)
 
 ### What this phase ships
 

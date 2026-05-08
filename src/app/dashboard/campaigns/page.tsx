@@ -72,7 +72,6 @@ const BATCH_MODEL_OVERRIDE = 'meta-llama/llama-3.3-70b-instruct'
 // video-prompt assets stay out of scope until a future content_calendar
 // reshape (or a separate planning table).
 const CALENDAR_PUSHABLE_ASSET_TYPES = new Set(['social_post'])
-const CALENDAR_PLATFORMS = new Set(['instagram', 'facebook', 'tiktok'])
 
 interface CampaignListRow {
   id: string
@@ -250,6 +249,7 @@ export default function CampaignsPage() {
   }, [filters, show])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount; loadList writes setState internally
     loadList()
   }, [loadList])
 
@@ -273,6 +273,7 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     if (selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-driven data fetch; loadDetail writes setState internally
       loadDetail(selectedId)
     } else {
       setDetail(null)
@@ -299,6 +300,7 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     if (selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-driven data fetch; loadAttribution writes setState internally
       loadAttribution(selectedId)
     } else {
       setAttribution(null)

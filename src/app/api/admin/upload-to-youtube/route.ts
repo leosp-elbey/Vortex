@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     method: 'PUT',
     headers: uploadHeaders,
     body: videoRes.body,
-    // @ts-ignore — required for streaming body in Node
+    // @ts-expect-error — `duplex` is required for streaming a body in Node but is not yet in the lib.dom.d.ts RequestInit shape
     duplex: 'half',
   })
 

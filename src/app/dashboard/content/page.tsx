@@ -268,6 +268,7 @@ export default function ContentPage() {
                   <div className="flex items-start gap-4 flex-1 min-w-0">
                     {/* Image preview or platform icon */}
                     {previewImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- Supabase Storage / Pexels URLs; configuring next/image remotePatterns is out of scope
                       <img
                         src={previewImage}
                         alt="Post image"
