@@ -1,14 +1,123 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14Q shipping in working tree — Twitter/X permanently excised from the codebase. `/api/automations/post-to-twitter/route.ts` deleted; `twitter-api-v2` dependency removed; `'twitter'` removed from every `SUPPORTED_PLATFORMS`-style allowlist, AI generation prompt, dashboard UI, and validator type union. The migration-004 CHECK on `content_calendar.platform` still permits 'twitter' for historical rows — they remain readable. No platform API calls. No DB writes. posted_at: 29; status='posted': 29; counts unchanged.)
-**Last known good commit:** `b181cb8` — "Phase 14P: codify autoposter operator SOP, no code changes"
-**Production:** vortextrips.com (LIVE; **Phase 14A → 14P deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
+**Last updated:** 2026-05-08 (Phase 14R shipping in working tree — full TikTok automation. `src/lib/tiktok-oauth.ts` ships `exchangeCodeForTokens`, `refreshAccessToken`, and `getValidTikTokAccessToken`; the TikTok callback now does token exchange + upserts to `site_settings`; `src/app/api/automations/post-to-tiktok/route.ts` posts via the Direct Post API using `PULL_FROM_URL` against the row's HeyGen video_url, strictly enforces `validateManualPostingGate`, and atomic-UPDATEs on success; the autoposter runner now routes TikTok through the same path. No DB writes in this phase. No platform calls until operator runs `--apply`. posted_at: 29; status='posted': 29; counts unchanged.)
+**Last known good commit:** `5f48ced` — "Phase 14Q: excise Twitter/X — route, dependency, allowlists, UI all removed"
+**Production:** vortextrips.com (LIVE; **Phase 14A → 14Q deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codified the operator SOP at `docs/skills/autoposter-operator-sop.md`. Phase 14Q permanently drops Twitter/X — the route, the dependency, the UI affordances, and the AI generation slots are all gone. Cron stays disabled. TikTok manual-only (no token-exchange helper yet; Phase 14R will land OAuth + Direct Post API). Phase 14S then promotes the runner to a CRON_SECRET-gated route.
+**Live posting status:** Phase 14O.1 / Path D (manual runner before any cron) remains the operating mode. Phase 14P codified the operator SOP at `docs/skills/autoposter-operator-sop.md`. Phase 14Q permanently dropped Twitter/X. Phase 14R wires TikTok end-to-end (OAuth + Direct Post API + runner integration). Cron stays disabled until Phase 14S, which will wrap the runner's `--apply` logic into a CRON_SECRET-gated route and replace the legacy `check-heygen-jobs` slot in `vercel.json`.
 
 ---
 
-## Phase 14Q — Excise Twitter/X (in working tree, 2026-05-08 — code changes only; no DB writes; no platform calls)
+## Phase 14R — TikTok Auto-Poster (in working tree, 2026-05-08 — code changes only; no DB writes during this phase; no platform calls until operator authorizes)
+
+### What this phase ships
+
+End-to-end TikTok automation using the Content Posting API in **Direct Post** mode with `source: PULL_FROM_URL`. The flow is:
+
+1. **OAuth** — operator authorizes the TikTok app once. The callback exchanges `code` for `{access_token, refresh_token, expires_in, open_id}` and persists all four into `site_settings` with the `tiktok_*` key prefix.
+2. **Posting** — `/api/automations/post-to-tiktok` (and the runner's `postToTikTok`) reads tokens via `getValidTikTokAccessToken`, refreshes if within 60 seconds of expiry, and POSTs to `/v2/post/publish/video/init/` with the row's `video_url` (HeyGen-rendered, re-hosted in Supabase Storage per Phase 14L.2.3 to dodge HeyGen's signed-URL expiry).
+3. **Atomic UPDATE** — on init success (`publish_id` returned, no error code), the same `status='posted', posted_at=now()` UPDATE pattern the FB / IG routes use, with the `.eq('status','approved').is('posted_at',null)` guards inline.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `src/lib/tiktok-oauth.ts` | OAuth helpers: `exchangeCodeForTokens(code, redirectUri)`, `refreshAccessToken(refreshToken)` against `https://open.tiktokapis.com/v2/oauth/token/`. Plus token-store helpers: `saveTikTokTokens(supabase, tokens)` (upserts the four `tiktok_*` keys with computed `tiktok_token_expires_at`) and `getValidTikTokAccessToken(supabase)` (auto-refreshes when within 60s of expiry, persists rotated tokens, returns a usable access_token). All functions are server-only (read `process.env`, call `createAdminClient`-shaped supabase). Never logs the OAuth `code` or `state`. |
+| `src/app/api/automations/post-to-tiktok/route.ts` | Mirror of the FB / IG poster pattern. Auth check → joined-fetch → flatten → `validateManualPostingGate({ supportedPlatforms: ['tiktok'] })` → token resolution → POST `/v2/post/publish/video/init/` → atomic UPDATE on success. Defense-in-depth: re-checks `video_url` non-empty after the gate even though `validateMediaReadiness` already requires it for TikTok. Returns 503 when TikTok is not connected (no refresh_token) so the operator sees a precise reason rather than a generic 500. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `src/app/api/auth/tiktok/callback/route.ts` | Wired token exchange. On `code` received → call `exchangeCodeForTokens(code, callbackUrl)` → call `saveTikTokTokens(admin, tokens)` → redirect with `connected=true`. Token-exchange failures redirect with `connected=false&error=<truncated message>`. State CSRF validation still deferred (matches the existing YouTube callback pattern; documented in the route header). |
+| `scripts/run-autoposter-once.js` | Removed `'tiktok'` from `REFUSED_PLATFORMS`; added it to `SUPPORTED_PLATFORMS`. Added in-script JS mirrors of `loadTikTokTokensJs`, `refreshTikTokTokensJs`, `saveTikTokTokensJs`, `getValidTikTokAccessTokenJs` (kept in sync with `src/lib/tiktok-oauth.ts` by hand — same pattern the runner already uses for `validateMediaReadinessJs` etc.). Added `postToTikTok(row, env, supabase)` function. New `else if (platform === 'tiktok')` branches in the Plan and Apply sections. Updated header docstring to reflect Phase 14R. Twitter/X stays in `REFUSED_PLATFORMS` as defense-in-depth. |
+| `.env.example` | Updated TikTok block: documented Phase 14R wiring, listed required scopes (`user.info.basic`, `video.publish`), explained the `site_settings` token-storage convention. Added `TIKTOK_PRIVACY_LEVEL` (default `SELF_ONLY` for unaudited apps; flip to `PUBLIC_TO_EVERYONE` once the app passes audit). |
+| `PROJECT_STATE_CURRENT.md` | This entry. |
+| `BUILD_PROGRESS.md` | Phase 14R entry; current focus shifted. |
+
+### TikTok API contract used
+
+**OAuth** — `POST https://open.tiktokapis.com/v2/oauth/token/`
+- `Content-Type: application/x-www-form-urlencoded`
+- Body: `client_key`, `client_secret`, `code` (or `refresh_token`), `grant_type=authorization_code|refresh_token`, `redirect_uri` (auth_code only)
+- Response: `{ access_token, expires_in, open_id, refresh_token, refresh_expires_in, scope, token_type }`
+- TikTok rotates the `refresh_token` on every refresh — saver helper persists the new refresh_token alongside the new access_token.
+
+**Direct Post init** — `POST https://open.tiktokapis.com/v2/post/publish/video/init/`
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/json; charset=UTF-8`
+- Body: `{ post_info: { title, privacy_level, disable_duet: false, disable_comment: false, disable_stitch: false, video_cover_timestamp_ms: 1000 }, source_info: { source: 'PULL_FROM_URL', video_url } }`
+- Response: `{ data: { publish_id }, error: { code, message, log_id } }`
+- Treats `error.code !== 'ok'` OR `!publish_id` as failure regardless of HTTP status.
+
+### Critical safety gates enforced
+
+- ✅ `validateManualPostingGate(post, { supportedPlatforms: ['tiktok'] })` on the route AND in the runner's `validateAutoposterCandidate` mirror.
+- ✅ `validateMediaReadiness(post)` runs inside the gate; TikTok requires non-empty `video_url` per `PLATFORM_RULES.tiktok.video='required'` in `src/lib/media-readiness.ts`.
+- ✅ Defense-in-depth: route re-checks `video_url` non-empty after gate (cheap; catches any future gate bug).
+- ✅ Atomic UPDATE pattern: `status='posted', posted_at=now()` with `.eq('status','approved').is('posted_at',null)` inline guards. Mirrors FB / IG / runner exactly. Update count must equal 1 — anything else is a 500 with a "manual reconciliation required" warning + the publish_id so the operator can match it on TikTok's side.
+- ✅ No write to `posting_status` / `posting_gate_*` / `queued_for_posting_at` / media columns / campaign_asset_id / tracking_url.
+
+### Privacy default — SELF_ONLY
+
+`TIKTOK_PRIVACY_LEVEL` defaults to `SELF_ONLY`. This means posts go up but are visible **only to the connected creator** until the env var is flipped. This is the safest default for an unaudited TikTok app (TikTok's own audit guidance says unaudited apps must use SELF_ONLY) and gives the operator a way to validate the end-to-end flow on production without going public. To go public:
+
+```
+TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE
+```
+
+(set in Vercel Settings → Environment Variables; redeploy).
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No state CSRF validation in the OAuth callback. Matches the existing YouTube callback. A future phase can introduce a unified session-backed state store.
+- ❌ No `/v2/post/publish/creator_info/query/` pre-flight call to discover allowed privacy levels. We default to SELF_ONLY which is always allowed. Operators flip the env var post-audit.
+- ❌ No `/v2/post/publish/status/fetch/` polling. The init response is authoritative — TikTok validates the URL synchronously and returns an error if it's unreachable / wrong format. The actual download + processing happens server-side and we trust it. A future cron can add async status polling if we want end-state confirmation.
+- ❌ No FILE_UPLOAD source path. PULL_FROM_URL fits the HeyGen → Supabase Storage pipeline and avoids the chunked-upload complexity that would push us past Vercel Hobby's 10s function timeout.
+- ❌ No `vercel.json` change. The autoposter cron still doesn't exist (Phase 14S).
+- ❌ No DB schema change. Migrations remain at 001–033 (immutable per anti-drift). All token storage uses the existing `site_settings` table from migration 007.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI calls | 0 |
+| Facebook / Instagram / TikTok / X / email API calls | 0 (until operator runs `--apply`) |
+| `UPDATE` / `INSERT` / `DELETE` against content_calendar | 0 |
+| `UPSERT` against site_settings | 0 (until operator clicks Connect TikTok or runs `--apply` with stale tokens) |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean (after removing stale `.next/types/` from prior dev-server build) |
+| Static review of `tiktok-oauth.ts` shape | ✅ Functions match TikTok's documented payloads. `expires_in` math computes ISO timestamps correctly. Error path throws descriptive messages. |
+| Static review of `post-to-tiktok/route.ts` gate ordering | ✅ Auth → row fetch → flatten → gate → media-existence re-check → token resolution → init POST → atomic UPDATE → response. No platform call before gate; no UPDATE before init success. |
+| Static review of runner additions | ✅ `postToTikTok` matches the route's behavior 1-for-1 (same payload, same error handling); `getValidTikTokAccessTokenJs` matches `getValidTikTokAccessToken` (same 60s buffer, same upsert pattern); `REFUSED_PLATFORMS = {twitter, x}` and `SUPPORTED_PLATFORMS = {facebook, instagram, tiktok}`. |
+| Live `--apply` test against TikTok | ⏸️ Deferred to operator authorization. Requires (a) TikTok Developer Portal redirect URI configured to point at production callback, (b) operator clicking Connect TikTok once, (c) one approved Mark-Ready'd TikTok row in `/dashboard/content` with a populated `video_url`. |
+| `node scripts/audit-pre-autoposter-readiness.js` | ⚠️ Same pre-existing local Supabase schema-cache transient (environmental, not from this phase). Production deploys hit real Supabase and will run cleanly. |
+
+### Migration
+
+**None.** No schema change. The existing `site_settings` table from migration 007 is the canonical OAuth token store (same pattern YouTube already uses).
+
+### Deploy
+
+Vercel will rebuild on the new commit. Operator must:
+
+1. **TikTok Developer Portal:** confirm the redirect URI is set to `https://www.vortextrips.com/api/auth/tiktok/callback` and the app has the scopes `user.info.basic`, `video.publish`.
+2. **Connect TikTok once:** click the "Connect TikTok" affordance in the dashboard (or hit the OAuth start URL directly). The callback exchanges the code and writes tokens to `site_settings`.
+3. **(Optional) Override privacy:** set `TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE` in Vercel env vars once the TikTok app is fully audited.
+4. **Pilot post:** Mark Ready one TikTok row, run `node scripts/run-autoposter-once.js` (DRY-RUN), verify the plan, then `--apply`.
+
+### Recommended next phase
+
+**Phase 14S — 100% Automation Cron:** wrap `run-autoposter-once.js`'s `--apply` logic into `/api/cron/autoposter-once/route.ts`; replace the `check-heygen-jobs` cron in `vercel.json` (Path A — free); enforce `Authorization: Bearer ${CRON_SECRET}`; auto-disable on the first non-2xx platform response by flipping a `site_settings.autoposter_cron_enabled` kill switch. The cron route MUST mirror the SOP at `docs/skills/autoposter-operator-sop.md` step-for-step.
+
+---
+
+## Phase 14Q — Excise Twitter/X (deployed `5f48ced` 2026-05-08 — code changes only; no DB writes; no platform calls)
 
 ### What this phase ships
 

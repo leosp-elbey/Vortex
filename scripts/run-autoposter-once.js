@@ -4,30 +4,40 @@
  *
  * Mirrors the deployed `/api/cron/autoposter-dry-run` eligibility logic AND
  * (with --apply) the platform-poster routes
- * (`/api/automations/post-to-{facebook,instagram}`) so the operator can
+ * (`/api/automations/post-to-{facebook,instagram,tiktok}`) so the operator can
  * exercise the autoposter pipeline daily WITHOUT a registered cron, while
  * keeping the same gate / atomic-update / safety guarantees the routes
  * already enforce.
+ *
+ * Phase 14R update: TikTok was added to the supported set. The runner now
+ * resolves a TikTok access_token via site_settings (refreshing through
+ * `https://open.tiktokapis.com/v2/oauth/token/` when needed), then posts
+ * via `https://open.tiktokapis.com/v2/post/publish/video/init/` using
+ * `source: PULL_FROM_URL` against the row's HeyGen-rendered video_url
+ * (re-hosted in Supabase Storage per Phase 14L.2.3). Twitter/X stays
+ * permanently refused (Phase 14Q drop).
  *
  * Modes:
  *   default       → DRY-RUN. No platform calls. No DB writes. Selects the
  *                    single eligible row, prints the plan, exits.
  *   --apply       → Posts exactly one eligible row. Refuses if:
  *                    - eligible queue count is not exactly 1
- *                    - selected row's platform is twitter / x / tiktok
+ *                    - selected row's platform is twitter / x
  *                    - any pre-flight gate check fails
  *                    - any post-flight invariant fails
  *
  * Refusal contract (matches Phase 14O plan §6 failure conditions):
  *   - eligible queue must be exactly 1
  *   - manual + autoposter validators must agree
- *   - selected row's platform must be facebook OR instagram
+ *   - selected row's platform must be facebook, instagram, OR tiktok
  *   - validateAutoposterCandidate must return null (eligible)
  *   - validateManualPostingGate (with supportedPlatforms) must allow
  *
  * Allowed writes (only with --apply, only on platform success):
  *   content_calendar.status          → 'posted'   (atomic)
  *   content_calendar.posted_at        → now()     (atomic, Phase 14M.2)
+ *   site_settings.{tiktok_access_token, tiktok_refresh_token,
+ *     tiktok_token_expires_at, tiktok_open_id}        (only on TikTok refresh)
  *
  * NEVER writes:
  *   posting_status / posting_gate_approved / queued_for_posting_at /
@@ -35,7 +45,7 @@
  *   campaign_asset_id / tracking_url
  *
  * NEVER calls:
- *   HeyGen / Pexels / OpenAI / TikTok / X / email / any non-target platform
+ *   HeyGen / Pexels / OpenAI / X / email / any non-target platform
  *
  * Run from project root:
  *   node scripts/run-autoposter-once.js          # DRY-RUN (default)
@@ -50,11 +60,18 @@ const COLORS = {
   cyan: '\x1b[36m', bold: '\x1b[1m', dim: '\x1b[2m',
 }
 
-const REFUSED_PLATFORMS = new Set(['twitter', 'x', 'tiktok'])
-const SUPPORTED_PLATFORMS = new Set(['facebook', 'instagram'])
+// Phase 14R — Twitter/X stays refused (permanent drop in Phase 14Q).
+// TikTok moves into SUPPORTED_PLATFORMS now that token exchange + Direct
+// Post wiring landed in src/lib/tiktok-oauth.ts and post-to-tiktok/route.ts.
+const REFUSED_PLATFORMS = new Set(['twitter', 'x'])
+const SUPPORTED_PLATFORMS = new Set(['facebook', 'instagram', 'tiktok'])
 const TERMINAL_STATUSES = new Set(['posted', 'rejected', 'archived'])
 
 const GRAPH_API = 'https://graph.facebook.com/v25.0'
+const TIKTOK_OAUTH_URL = 'https://open.tiktokapis.com/v2/oauth/token/'
+const TIKTOK_INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/'
+const TIKTOK_REFRESH_BUFFER_MS = 60_000
+const TIKTOK_CAPTION_MAX = 2200
 
 function nonEmpty(v) { return typeof v === 'string' && v.trim().length > 0 }
 
@@ -246,6 +263,158 @@ async function postToFacebook(row, env) {
   }
 }
 
+// ============================================================
+// TikTok helpers — mirrors src/lib/tiktok-oauth.ts and
+// src/app/api/automations/post-to-tiktok/route.ts. The runner reads
+// tokens from site_settings, refreshes when needed, then calls the
+// Direct Post init endpoint. Same atomic-update contract on success.
+// ============================================================
+
+async function loadTikTokTokensJs(supabase) {
+  const keys = ['tiktok_access_token', 'tiktok_refresh_token', 'tiktok_token_expires_at']
+  const { data, error } = await supabase
+    .from('site_settings')
+    .select('key, value')
+    .in('key', keys)
+  if (error) throw new Error(`site_settings load failed: ${error.message}`)
+  const map = new Map()
+  for (const row of data ?? []) {
+    if (row.key && row.value) map.set(row.key, row.value)
+  }
+  return {
+    access_token: map.get('tiktok_access_token') ?? null,
+    refresh_token: map.get('tiktok_refresh_token') ?? null,
+    expires_at: map.get('tiktok_token_expires_at') ?? null,
+  }
+}
+
+async function refreshTikTokTokensJs(env, refreshToken) {
+  const clientKey = env.TIKTOK_CLIENT_KEY
+  const clientSecret = env.TIKTOK_CLIENT_SECRET
+  if (!nonEmpty(clientKey) || !nonEmpty(clientSecret)) {
+    throw new Error('TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured')
+  }
+  const res = await fetch(TIKTOK_OAUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' },
+    body: new URLSearchParams({
+      client_key: clientKey,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.access_token || !data.refresh_token) {
+    const err = data.error_description ?? data.error ?? `HTTP ${res.status}`
+    throw new Error(`TikTok token refresh failed: ${err}`)
+  }
+  return data
+}
+
+async function saveTikTokTokensJs(supabase, tokens) {
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + tokens.expires_in * 1000).toISOString()
+  const updatedAt = now.toISOString()
+  const rows = [
+    { key: 'tiktok_access_token', value: tokens.access_token },
+    { key: 'tiktok_refresh_token', value: tokens.refresh_token },
+    { key: 'tiktok_token_expires_at', value: expiresAt },
+    { key: 'tiktok_open_id', value: tokens.open_id },
+  ]
+  for (const row of rows) {
+    const { error } = await supabase
+      .from('site_settings')
+      .upsert({ key: row.key, value: row.value, updated_at: updatedAt }, { onConflict: 'key' })
+    if (error) throw new Error(`site_settings upsert failed for ${row.key}: ${error.message}`)
+  }
+}
+
+async function getValidTikTokAccessTokenJs(supabase, env) {
+  const stored = await loadTikTokTokensJs(supabase)
+  if (!stored.refresh_token) {
+    throw new Error('TikTok is not connected — no refresh_token in site_settings. Reconnect via /api/auth/tiktok/callback.')
+  }
+  const now = Date.now()
+  const expiresMs = stored.expires_at ? Date.parse(stored.expires_at) : 0
+  if (stored.access_token && expiresMs - now > TIKTOK_REFRESH_BUFFER_MS) {
+    return stored.access_token
+  }
+  const fresh = await refreshTikTokTokensJs(env, stored.refresh_token)
+  await saveTikTokTokensJs(supabase, fresh)
+  return fresh.access_token
+}
+
+function buildTikTokTitle(row) {
+  const tags = Array.isArray(row.hashtags) && row.hashtags.length > 0
+    ? row.hashtags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')
+    : ''
+  const base = (row.caption ?? '').trim()
+  const full = tags ? `${base}\n\n${tags}` : base
+  return full.length <= TIKTOK_CAPTION_MAX ? full : full.slice(0, TIKTOK_CAPTION_MAX - 1) + '…'
+}
+
+function resolveTikTokPrivacyLevel(env) {
+  const raw = (env.TIKTOK_PRIVACY_LEVEL || '').toUpperCase().trim()
+  const allowed = new Set(['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'])
+  return allowed.has(raw) ? raw : 'SELF_ONLY'
+}
+
+/**
+ * Mirror of post-to-tiktok route. Returns { ok, tiktok_publish_id, error }.
+ * Note this poster uniquely needs the supabase client (for site_settings
+ * token rotation) AND env (for TIKTOK_CLIENT_KEY / SECRET / PRIVACY_LEVEL).
+ */
+async function postToTikTok(row, env, supabase) {
+  if (!nonEmpty(row.video_url)) {
+    return { ok: false, error: 'TikTok requires a video — no video_url found on this post' }
+  }
+  let accessToken
+  try {
+    accessToken = await getValidTikTokAccessTokenJs(supabase, env)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'TikTok token resolution failed' }
+  }
+
+  const initBody = {
+    post_info: {
+      title: buildTikTokTitle(row),
+      privacy_level: resolveTikTokPrivacyLevel(env),
+      disable_duet: false,
+      disable_comment: false,
+      disable_stitch: false,
+      video_cover_timestamp_ms: 1000,
+    },
+    source_info: {
+      source: 'PULL_FROM_URL',
+      video_url: row.video_url,
+    },
+  }
+
+  let res
+  try {
+    res = await fetch(TIKTOK_INIT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: JSON.stringify(initBody),
+    })
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'TikTok network error' }
+  }
+  const data = await res.json().catch(() => ({}))
+  const errPayload = data?.error
+  const publishId = data?.data?.publish_id
+  const hasError = !!errPayload && errPayload.code && errPayload.code !== 'ok'
+  if (!res.ok || hasError || !publishId) {
+    const reason = errPayload?.message ?? `HTTP ${res.status}`
+    return { ok: false, error: `TikTok publish init failed: ${reason}` }
+  }
+  return { ok: true, tiktok_publish_id: publishId }
+}
+
 /** Mirror of post-to-instagram route. Three-step: container → wait → publish. */
 async function postToInstagram(row, env) {
   const IG_ACCOUNT_ID = env.INSTAGRAM_BUSINESS_ACCOUNT_ID
@@ -313,7 +482,7 @@ async function main() {
 
   console.log()
   console.log(`${COLORS.bold}Phase 14O.1 — Manual Autoposter Runner [${flags.apply ? 'APPLY (will post + write)' : 'DRY-RUN'}]${COLORS.reset}`)
-  console.log(`${COLORS.dim}One row only. No cron. No Twitter/X. No TikTok.${COLORS.reset}`)
+  console.log(`${COLORS.dim}One row only. No cron. No Twitter/X. TikTok via Direct Post (Phase 14R).${COLORS.reset}`)
   console.log()
 
   // ============================================================
@@ -337,7 +506,7 @@ async function main() {
   console.log(`   eligible queue size: ${eligible.length}`)
 
   if (eligible.length === 0) {
-    console.log(`   ${COLORS.yellow}No eligible row.${COLORS.reset} Mark Ready exactly one approved Facebook or Instagram row in /dashboard/content first.`)
+    console.log(`   ${COLORS.yellow}No eligible row.${COLORS.reset} Mark Ready exactly one approved Facebook, Instagram, or TikTok row in /dashboard/content first.`)
     finalize({ postedAtBefore, postedAtAfter: postedAtBefore, statusPostedBefore, statusPostedAfter: statusPostedBefore, applied: false })
     process.exit(0)
   }
@@ -369,17 +538,15 @@ async function main() {
   // ============================================================
   console.log(`${COLORS.bold}2. Platform safety check${COLORS.reset}`)
   if (REFUSED_PLATFORMS.has(platform)) {
-    console.log(`${COLORS.red}Refused: Phase 14O.1 does not post to '${platform}'.${COLORS.reset}`)
+    console.log(`${COLORS.red}Refused: this runner does not post to '${platform}'.${COLORS.reset}`)
     if (platform === 'twitter' || platform === 'x') {
       console.log(`${COLORS.dim}Twitter/X was permanently removed in Phase 14Q (executive decision). Historical rows are read-only.${COLORS.reset}`)
-    } else if (platform === 'tiktok') {
-      console.log(`${COLORS.dim}TikTok requires manual Creator Center upload + dashboard Mark Posted (no token-exchange helper yet).${COLORS.reset}`)
     }
     process.exit(2)
   }
   if (!SUPPORTED_PLATFORMS.has(platform)) {
-    console.log(`${COLORS.red}Refused: platform '${platform}' is not supported by Phase 14O.1.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Supported: facebook, instagram. Got: ${platform}.${COLORS.reset}`)
+    console.log(`${COLORS.red}Refused: platform '${platform}' is not supported by this runner.${COLORS.reset}`)
+    console.log(`${COLORS.dim}Supported: facebook, instagram, tiktok. Got: ${platform}.${COLORS.reset}`)
     process.exit(2)
   }
   console.log(`   ${COLORS.green}platform '${platform}' is supported${COLORS.reset}`)
@@ -418,6 +585,14 @@ async function main() {
     console.log(`   ${COLORS.cyan}POST${COLORS.reset} ${GRAPH_API}/${env.INSTAGRAM_BUSINESS_ACCOUNT_ID}/media     ${COLORS.dim}(create container){COLORS.reset}`)
     console.log(`   ${COLORS.cyan}GET${COLORS.reset}  ${GRAPH_API}/<container_id>?fields=status_code,status     ${COLORS.dim}(poll up to 6s){COLORS.reset}`)
     console.log(`   ${COLORS.cyan}POST${COLORS.reset} ${GRAPH_API}/${env.INSTAGRAM_BUSINESS_ACCOUNT_ID}/media_publish     ${COLORS.dim}(publish){COLORS.reset}`)
+  } else if (platform === 'tiktok') {
+    console.log(`   ${COLORS.cyan}GET site_settings${COLORS.reset} keys: tiktok_access_token, tiktok_refresh_token, tiktok_token_expires_at`)
+    console.log(`   ${COLORS.dim}(if expired or near expiry):${COLORS.reset}`)
+    console.log(`   ${COLORS.cyan}POST${COLORS.reset} ${TIKTOK_OAUTH_URL}     ${COLORS.dim}(grant_type=refresh_token){COLORS.reset}`)
+    console.log(`   ${COLORS.cyan}UPSERT site_settings${COLORS.reset} (rotated tokens)`)
+    console.log(`   ${COLORS.cyan}POST${COLORS.reset} ${TIKTOK_INIT_URL}`)
+    console.log(`   ${COLORS.dim}headers:${COLORS.reset} Authorization: Bearer <access_token>, Content-Type: application/json; charset=UTF-8`)
+    console.log(`   ${COLORS.dim}body:${COLORS.reset} { post_info: { title, privacy_level: ${resolveTikTokPrivacyLevel(env)}, ... }, source_info: { source: 'PULL_FROM_URL', video_url } }`)
   }
   console.log(`   ${COLORS.dim}on platform success → atomic UPDATE content_calendar SET status='posted', posted_at=<now> WHERE id='${row.id}'${COLORS.reset}`)
   console.log()
@@ -440,6 +615,8 @@ async function main() {
     result = await postToFacebook(row, env)
   } else if (platform === 'instagram') {
     result = await postToInstagram(row, env)
+  } else if (platform === 'tiktok') {
+    result = await postToTikTok(row, env, supabase)
   }
   if (!result?.ok) {
     console.log(`${COLORS.red}✗ Platform call failed:${COLORS.reset} ${result?.error ?? 'unknown error'}`)
@@ -447,7 +624,7 @@ async function main() {
     finalize({ postedAtBefore, postedAtAfter: postedAtBefore, statusPostedBefore, statusPostedAfter: statusPostedBefore, applied: true, failed: true })
     process.exit(3)
   }
-  const platformPostId = result.fb_post_id ?? result.ig_post_id
+  const platformPostId = result.fb_post_id ?? result.ig_post_id ?? result.tiktok_publish_id
   console.log(`   ${COLORS.green}✓ Platform post id:${COLORS.reset} ${platformPostId}`)
 
   // Atomic UPDATE — defensive guards inline:
@@ -531,7 +708,7 @@ function finalize({ postedAtBefore, postedAtAfter, statusPostedBefore, statusPos
   console.log(`   apply mode: ${applied ? 'YES' : 'no'}`)
   if (applied && !failed && platformPostId) console.log(`   platform post id: ${platformPostId}`)
   if (applied && failed) console.log(`   ${COLORS.red}platform call failed; DB unchanged${COLORS.reset}`)
-  console.log(`${COLORS.dim}No cron registered. No Twitter/X. No TikTok. No HeyGen / Pexels / OpenAI.${COLORS.reset}`)
+  console.log(`${COLORS.dim}No cron registered. No Twitter/X. TikTok via Direct Post when --apply. No HeyGen / Pexels / OpenAI.${COLORS.reset}`)
 }
 
 main().catch(err => {

@@ -1,8 +1,8 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14Q shipping in working tree — Twitter/X permanently excised. Route deleted, dependency removed, allowlists/UI/prompts/types all narrowed to {instagram, facebook, tiktok}. Migration-004 CHECK keeps historical 'twitter' rows readable. Code changes only. No DB writes. No platform calls. posted_at: 29; status='posted': 29.)
-**Last code-shipping commit:** `b181cb8` (Phase 14P: codify autoposter operator SOP, no code changes)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14P deployed and verified on prod** · **Phase 14Q in working tree (Twitter/X excised)** — Phase 14R (TikTok OAuth + Direct Post API) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X **permanently removed**. TikTok manual-only (OAuth + Direct Post API incoming in 14R). Cron stays off until 14S.
+**Last updated:** 2026-05-08 (Phase 14R shipping in working tree — full TikTok automation. OAuth lib + callback + posting route + runner integration. No DB writes during this phase. No platform calls until operator authorizes + runs --apply. posted_at: 29; status='posted': 29.)
+**Last code-shipping commit:** `5f48ced` (Phase 14Q: excise Twitter/X — route, dependency, allowlists, UI all removed)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Q deployed and verified on prod** · **Phase 14R in working tree (TikTok end-to-end)** — Phase 14S (100% automation cron) is the next operator-authorized phase. 8 live posts since 2026-05-05. Twitter/X permanently removed (14Q). **TikTok now fully automated** via Direct Post API. Cron stays off until 14S.
 
 Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
@@ -28,9 +28,48 @@ Legend: `[x]` shipped · `[~]` in progress · `[ ]` pending · `[!]` blocked
 
 ## Current focus
 
-**Phase 14Q — Excise Twitter/X (in working tree, 2026-05-08 — code changes only; no DB writes; no platform calls; `twitter-api-v2` package and `/api/automations/post-to-twitter/route.ts` permanently removed; 28 file changes total; typecheck PASS).**
+**Phase 14R — TikTok Auto-Poster (in working tree, 2026-05-08 — full TikTok automation. New OAuth lib, updated callback, new posting route, runner integration. Typecheck PASS).**
 
-Phase 14P deployed at `b181cb8`. Phase 14Q is the executive-decision permanent removal of Twitter/X from VortexTrips' active platform list. The Twitter API Free tier has been read-only since 2024 (every prior post-to-twitter call returned HTTP 402); paid tiers are not justified by ROI for current posting volume. Rather than carry dead code, Phase 14Q deletes it.
+Phase 14Q deployed at `5f48ced`. Phase 14R is the heavy lift: building the TikTok token-exchange flow and Direct Post posting engine end-to-end so TikTok joins Facebook and Instagram as a fully-automated target platform.
+
+**Built in 14R (no DB writes during this phase, no platform calls until operator runs --apply):**
+- [x] `src/lib/tiktok-oauth.ts` (new) — `exchangeCodeForTokens(code, redirectUri)`, `refreshAccessToken(refreshToken)`, `saveTikTokTokens(supabase, tokens)`, `getValidTikTokAccessToken(supabase)`. Calls `https://open.tiktokapis.com/v2/oauth/token/`. Persists `tiktok_{access_token,refresh_token,token_expires_at,open_id}` into `site_settings` with `onConflict: 'key'` upserts. 60s expiry buffer for proactive refresh. Never logs the OAuth code or state.
+- [x] `src/app/api/auth/tiktok/callback/route.ts` (updated) — wired to `exchangeCodeForTokens` + `saveTikTokTokens`. Token-exchange failures redirect with `connected=false&error=<truncated>`. State CSRF still deferred (matches YouTube callback pattern).
+- [x] `src/app/api/automations/post-to-tiktok/route.ts` (new) — Direct Post API consumer. Auth check → joined-fetch with media → flatten → `validateManualPostingGate({ supportedPlatforms: ['tiktok'] })` → defense-in-depth video_url re-check → `getValidTikTokAccessToken` → POST `/v2/post/publish/video/init/` with `{ source: 'PULL_FROM_URL', video_url }` → atomic UPDATE `status='posted', posted_at=now()` with `.eq('status','approved').is('posted_at',null)` guards inline. Returns 503 when TikTok not connected.
+- [x] `scripts/run-autoposter-once.js` (updated) — `'tiktok'` removed from `REFUSED_PLATFORMS`, added to `SUPPORTED_PLATFORMS`. Added in-script JS mirrors of the OAuth + token helpers + `postToTikTok(row, env, supabase)`. New TikTok branches in Plan and Apply sections. Twitter/X stays in `REFUSED_PLATFORMS` as defensive.
+- [x] `.env.example` (updated) — TikTok block documents Phase 14R wiring, lists required scopes (`user.info.basic`, `video.publish`), explains site_settings token storage. Added `TIKTOK_PRIVACY_LEVEL` (default `SELF_ONLY` for unaudited apps).
+
+**Critical safety gates:**
+- ✅ `validateManualPostingGate(post, { supportedPlatforms: ['tiktok'] })` enforced on the route AND in the runner.
+- ✅ `validateMediaReadiness(post)` runs inside the gate; TikTok requires non-empty `video_url`.
+- ✅ Atomic UPDATE pattern with defensive guards mirrors FB / IG / runner exactly.
+- ✅ No write to posting_status / posting_gate_* / queued_for_posting_at / media columns.
+- ✅ TIKTOK_PRIVACY_LEVEL defaults to SELF_ONLY (safest for unaudited app).
+
+**TikTok endpoints used:**
+- OAuth: `POST https://open.tiktokapis.com/v2/oauth/token/`
+- Direct Post: `POST https://open.tiktokapis.com/v2/post/publish/video/init/` with `source: PULL_FROM_URL` against the row's `video_url`
+
+**Operator next steps (post-deploy):**
+1. Confirm TikTok Developer Portal redirect URI = `https://www.vortextrips.com/api/auth/tiktok/callback` and scopes `user.info.basic` + `video.publish`.
+2. Click Connect TikTok once → callback writes tokens to `site_settings`.
+3. (Optional) Set `TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE` in Vercel once the app is fully audited.
+4. Pilot: Mark Ready one TikTok row, `node scripts/run-autoposter-once.js` (DRY-RUN), then `--apply`.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ Static review of route + lib + runner: gate ordering, atomic-UPDATE shape, error paths verified
+- ⏸️ Live `--apply` test deferred to operator authorization
+- ⚠️ `audit-pre-autoposter-readiness.js`: same pre-existing local Supabase schema-cache transient (environmental, not from this phase)
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Next phase:**
+- [ ] **Phase 14S — 100% Automation Cron:** wrap `run-autoposter-once.js` --apply logic into `/api/cron/autoposter-once/route.ts`; replace `check-heygen-jobs` slot in `vercel.json` (Path A); CRON_SECRET-gated; auto-disable on first non-2xx via `site_settings.autoposter_cron_enabled` kill switch; mirror the 5-step SOP from `docs/skills/autoposter-operator-sop.md` step-for-step.
+
+---
+
+### Pre-Phase-14R: Phase 14Q — Excise Twitter/X (saved + pushed `5f48ced`; route deleted, dependency removed, allowlists/UI/prompts/types all narrowed to {instagram, facebook, tiktok}).
 
 **Built in 14Q (no DB writes, no platform calls):**
 - [x] **Deleted:** `src/app/api/automations/post-to-twitter/route.ts`
@@ -64,7 +103,7 @@ Phase 14P deployed at `b181cb8`. Phase 14Q is the executive-decision permanent r
 
 ---
 
-### Pre-Phase-14Q: Phase 14P — Autoposter Operator SOP Skill (saved + pushed `b181cb8`; documentation only; canonical 5-step protocol now lives at `docs/skills/autoposter-operator-sop.md`).
+### Pre-Phase-14Q (now Pre-Phase-14R): Phase 14P — Autoposter Operator SOP Skill (saved + pushed `b181cb8`; documentation only; canonical 5-step protocol now lives at `docs/skills/autoposter-operator-sop.md`).
 
 Phase 14O Scopes C+A deployed at `f74ddfc`. Live dry-run proof captured (HTTP 200 / `dry_run: true` / `live_posting_blocked: true` / `eligible_count: 1` / posted_at unchanged at 30). Operator removed the row from queue (pure dry-run proof) and authorized Phase 14O.1 / Path D instead of a registered cron. Legacy IG WARN row `a0bd9d16…` cleared (forensics confirmed it was never actually posted — 27-second create→posted_at gap, expired DALL·E URL, no gate fields ever set). posted_at: 30 → 29; status='posted': 29 (now perfectly aligned, Check 9 PASS with 0 WARN).
 
