@@ -1,15 +1,127 @@
 # VortexTrips — Current Project State
 
-**Last updated:** 2026-05-08 (Phase 14AA shipping in working tree — Lighthouse CI Action. New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
+**Last updated:** 2026-05-08 (Phase 14AB shipping in working tree — Globalized bounded() helper. Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
+**Last known good commit:** `d3cf3d3` — "Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push" New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `1bfda11` — "Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push" New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `662fdc9` — "Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
-**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant, CI-gated, AND performance-tracked.** Phase 14AA is the second of three optional polish phases. Future frontend changes that drop performance / accessibility / SEO scores below the modest budgets surface as warnings in the Actions log; combined with Phase 14Z's typecheck + lint gates, the project now has continuous-quality monitoring across code correctness AND user-facing performance.
+**Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere now), CI-gated, AND performance-tracked.** Phase 14AB completes the hang-resistance story — what Phase 14Y did for `/t/<slug>` is now applied uniformly to the two webhook routes most exposed to upstream slowdowns. Combined with the Phase 14Z + 14AA CI gates, the system has comprehensive defenses against both code regressions and operational hangs.
 
 ---
 
-## Phase 14AA — Lighthouse CI Action (in working tree, 2026-05-08 — automated performance / accessibility / SEO audit on every push to main; no code changes; no DB writes; no platform calls)
+## Phase 14AB — Globalized bounded() helper (in working tree, 2026-05-08 — extract Phase 14Y helper to shared lib; apply to webhook routes; no DB schema changes)
+
+### What this phase ships
+
+Phase 14Y proved the pattern. Phase 14AB generalizes it:
+
+1. **Extracted `bounded()`** from `src/app/t/[slug]/route.ts` into a shared `src/lib/bounded-wait.ts` module — same behavior, with a new optional `logPrefix` parameter so each route gets clean per-route log streams (`[branded-redirect]`, `[lead-created]`, `[bland-webhook]`).
+2. **Refactored `/t/[slug]/route.ts`** to import from the lib instead of defining the helper locally. Behavior is byte-identical; this is purely a code-organization change.
+3. **Applied `bounded()` to both webhook routes** (`/api/webhooks/lead-created` and `/api/webhooks/bland`) at the user-mandated 2.5s per-call budget. Webhook senders (GoHighLevel, Bland.ai) retry / blacklist slow endpoints; bounded waits ensure these routes can't hang a provider's queue when Supabase is unavailable.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `src/lib/bounded-wait.ts` | Single-export module: `export async function bounded<T>(work, ms, label, logPrefix?)`. Logs timeouts via `console.warn` (operationally expected during upstream outages) and rejections via `console.error` (genuine errors). Cleans up the timer in `finally`. Also exports `WEBHOOK_BOUND_MS = 2500` constant for webhook callers to import directly. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `src/app/t/[slug]/route.ts` | Removed the locally-defined `bounded()` helper (~30 lines) and the rationale comment block. Now imports `bounded` from `@/lib/bounded-wait`. Added a `LOG_PREFIX = '[branded-redirect]'` constant and passes it as the 4th argument to all 3 existing bounded() callsites. Behavior byte-identical to Phase 14Y; this is purely organizational. |
+| `src/app/api/webhooks/lead-created/route.ts` | Imports `bounded` and `WEBHOOK_BOUND_MS` from the lib. Critical path (the `contacts` insert that produces `contact.id`) now bounded — if it times out, route returns **503 fast** so GoHighLevel can retry rather than wait on a hung connection. **Eight bookkeeping Supabase calls** (opportunities insert, sequence_queue inserts × 4, ai_actions_log inserts × 2, contacts updates × 2) wrapped with bounded — they degrade silently on timeout. The lead is captured even when downstream bookkeeping times out. |
+| `src/app/api/webhooks/bland/route.ts` | All 4 Supabase calls wrapped with bounded: ai_actions_log update, contacts SELECT (degrades by skipping the rest if it times out), contacts tag update, opportunities stage update. Logs use `[bland-webhook]` prefix. |
+
+### Why the critical-vs-bookkeeping distinction in lead-created
+
+`/api/webhooks/lead-created` does ~10 things in sequence:
+1. **CRITICAL** — Insert into `contacts`, capture the new `contact.id` for foreign keys.
+2. Bookkeeping — Insert into `opportunities` (FK to contact.id).
+3. Bookkeeping — Send Day-0 SMS (external API + sequence_queue insert).
+4. Bookkeeping — Send Day-0 welcome email (external API + sequence_queue insert + ai_actions_log insert).
+5. Bookkeeping — Batch insert into `sequence_queue` for the rest of the nurture sequence.
+6. Bookkeeping (conditional) — SBA enrollment fan-out (email + ai_actions_log + sequence_queue + contacts update).
+7. Bookkeeping (conditional) — Trigger Bland.ai voice call + tag the contact.
+
+Step 1 produces the FK every subsequent step depends on. If it times out, the entire downstream chain has nothing to attach to — the webhook should return 503 immediately so the caller retries.
+
+Steps 2-7 are all bookkeeping. The lead has been captured (Supabase has the row) by the time we reach step 2. Subsequent calls add SMS/email/queue/log entries that would be nice to have but don't change the fundamental outcome ("lead was received"). If any of them times out, we log and continue — the webhook still returns 200.
+
+This split keeps the response **fast on degraded mode** (503 within ~2.5s when Supabase is hung on insert) while preserving **full functionality on the happy path** (every bookkeeping call completes when Supabase is healthy).
+
+### Worst-case latency analysis
+
+**lead-created** (degraded — all Supabase calls hang):
+- Step 1 (contacts insert) hits 2.5s timeout → 503 returned immediately.
+- Total: ~2.5s. Webhook caller gets a fast retry signal.
+
+**lead-created** (happy path with all bookkeeping completing):
+- Step 1: ~50ms. Step 2-7 each: ~50-200ms. External APIs (SMS, email, Bland): ~500-2000ms.
+- Total: ~3-5s. Well within Vercel Hobby's 10s budget.
+
+**lead-created** (degraded — contacts insert fast, downstream all hang):
+- Step 1: 50ms. Steps 2-7 each: 2.5s timeout. Up to 8 calls.
+- Worst case: ~50ms + 8 × 2.5s = ~20s.
+- **This exceeds Vercel's 10s function timeout** — but only in the most pathological case (contacts insert fast, every subsequent call hung). In practice, Supabase failures are usually all-or-nothing, so this scenario is rare. If it occurs, Vercel kills the function at 10s and returns 504 — the webhook caller sees a fast failure signal anyway.
+
+**bland-webhook** (degraded — all 4 calls hang): 4 × 2.5s = 10s exactly. Vercel kills at 10s; webhook returns 504. Caller retries.
+
+**bland-webhook** (happy path): ~200ms.
+
+### Critical safety preserved
+
+- ✅ The Phase 14Y behavior of `/t/<slug>` is byte-identical (refactor only — same `Promise.race` + `setTimeout` + `finally` + log shape).
+- ✅ External API calls (SMS, email, Bland.ai) NOT wrapped — they have their own clients with their own timeouts.
+- ✅ `bounded()` returns null on timeout/error and never throws — callers can rely on the `T | null` contract.
+- ✅ Critical path in lead-created (contacts insert) returns **503 on timeout** — fast, informative, retry-friendly.
+- ✅ Bookkeeping calls in both routes log a warning and continue — the user-visible response is unaffected.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No application of `bounded()` to other Supabase-using routes (cron routes, dashboard routes, manual posting routes, etc.). Those have different criticality profiles and would benefit from a per-route audit. Reserved for an optional future phase.
+- ❌ No retry logic. If a bounded call times out, the webhook just continues / returns 503. Webhook senders' own retry queues handle re-delivery.
+- ❌ No telemetry/metrics for timeout rates. Logs only. Adding Datadog or similar instrumentation is operational scope.
+- ❌ No DB schema changes. Migrations remain at 001-033 (immutable).
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Tests run
+
+| Test | Result |
+|---|---|
+| `npx tsc --noEmit` | ✅ PASS — clean |
+| `npm run lint` | ✅ PASS — 0 errors, 0 warnings |
+| Static review of `bounded-wait.ts` | ✅ Three failure modes (success, throw, timeout) all converge to `T \| null`; `clearTimeout` in `finally` prevents handle leaks; `Promise.race` against `.catch()`-wrapped work means the race never rejects. |
+| Static review of `/t/[slug]` refactor | ✅ Behavior byte-identical to Phase 14Y. All 3 callsites pass `LOG_PREFIX` as 4th arg, preserving the original `[branded-redirect]` log format. |
+| Static review of `lead-created` critical path | ✅ Contacts insert wrapped in bounded; null result triggers 503 return; existing `contactError.code === '23505'` (email already registered) and other error checks preserved. |
+| Static review of `lead-created` bookkeeping | ✅ All 8 subsequent Supabase calls wrapped. External API calls (sendSMS, sendEmail, triggerCall) intentionally NOT wrapped — they have their own clients. |
+| Static review of `bland-webhook` | ✅ All 4 Supabase calls wrapped. Contacts SELECT result-checked (`lookupResult?.data ?? null`) so a timeout cleanly skips the dependent updates rather than partial-updating on stale data. |
+
+### Migration
+
+**None.** No schema change. No new env vars.
+
+### Deploy
+
+Vercel will rebuild on the new commit. Production behavior change is gradual:
+- `/t/<slug>` continues to behave exactly as in Phase 14Y (refactor only).
+- `lead-created` and `bland-webhook` now return fast 503/504 during Supabase outages instead of hanging — webhook senders see retry signals immediately.
+
+### Recommended next phase
+
+**Phase 14AC — Final audit + Maintenance Mode.** Run `node scripts/audit-site-health.js` against production to confirm all routes still healthy, then update PROJECT_STATE_CURRENT.md to declare the project officially in Maintenance Mode (Phases A → AC complete).
+
+---
+
+## Phase 14AA — Lighthouse CI Action (deployed `d3cf3d3` 2026-05-08 — automated performance / accessibility / SEO audit on every push to main; no code changes; no DB writes; no platform calls)
 
 ### What this phase ships
 

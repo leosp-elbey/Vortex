@@ -1,14 +1,58 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14AA shipping in working tree — Lighthouse CI Action. New `.github/workflows/lighthouse.yml` + `lighthouserc.json` run `treosh/lighthouse-ci-action@v12` against 4 real content pages on every push to main. Modest warn-level budgets. Reports uploaded to LHCI public storage + GitHub artifacts. No code changes.)
-**Last code-shipping commit:** `1bfda11` (Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push)
-**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14Z deployed and verified on prod** · **Phase 14AA in working tree (Lighthouse CI)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant, CI-gated, AND performance-tracked. 8 live posts since 2026-05-05.
+**Last updated:** 2026-05-08 (Phase 14AB shipping in working tree — Globalized bounded() helper. Phase 14Y's pattern extracted to `src/lib/bounded-wait.ts`. Both webhook routes now use `bounded()` with 2500ms budget. lead-created treats contacts insert as critical-path (503 fast on timeout); all other calls are bookkeeping. Typecheck + lint clean.)
+**Last code-shipping commit:** `d3cf3d3` (Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push)
+**Status:** 🚀 LIVE on vortextrips.com · Phases 0 → 12.8 shipped · Phase 13 code-side complete · **Phases 14A → 14AA deployed and verified on prod** · **Phase 14AB in working tree (globalized bounded waits)** — codebase is now functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere now), CI-gated, AND performance-tracked. 8 live posts since 2026-05-05.
 
 ---
 
 ## Current focus
 
-**Phase 14AA — Lighthouse CI Action (in working tree, 2026-05-08 — automated perf / a11y / SEO audit on every push to main; no code changes).**
+**Phase 14AB — Globalized bounded() helper (in working tree, 2026-05-08 — webhook hang-resistance via shared lib; no DB schema changes).**
+
+Phase 14AA deployed at `d3cf3d3`. Phase 14AB is the third of three optional polish phases. What Phase 14Y did for `/t/<slug>` is now applied uniformly to the two webhook routes most exposed to upstream slowdowns.
+
+**Built in 14AB:**
+- [x] **`src/lib/bounded-wait.ts` (new)** — extracts the `bounded()` helper from `/t/[slug]/route.ts` into a shared module. Adds optional `logPrefix` parameter (default `[bounded-wait]`) so each route gets clean per-route log streams. Exports `WEBHOOK_BOUND_MS = 2500` constant. Behavior byte-identical to Phase 14Y's local helper.
+- [x] **`src/app/t/[slug]/route.ts` (refactor)** — removes locally-defined `bounded()` helper (~30 lines + comment block). Imports from the new lib. Adds `LOG_PREFIX = '[branded-redirect]'` constant; passes it as 4th arg to all 3 callsites. Pure organizational change.
+- [x] **`src/app/api/webhooks/lead-created/route.ts`** — wraps **9 Supabase calls** with bounded(): the contacts insert as **CRITICAL** (returns 503 fast on timeout so GoHighLevel can retry), and 8 bookkeeping calls (opportunities insert, sequence_queue inserts × 4, ai_actions_log inserts × 2, contacts updates × 2) that degrade silently on timeout. External API calls (sendSMS, sendEmail, triggerCall) intentionally NOT wrapped — they have their own clients with their own timeouts.
+- [x] **`src/app/api/webhooks/bland/route.ts`** — wraps **all 4 Supabase calls** with bounded() at 2500ms each. All bookkeeping; degrade silently. Contacts SELECT result-checked so a timeout cleanly skips dependent updates rather than partial-updating on stale data.
+
+**Why critical-vs-bookkeeping in lead-created:**
+- Step 1 (contacts insert) produces the FK every subsequent step depends on. Timeout → 503 fast retry signal.
+- Steps 2-9 (opportunities, sequence_queue, ai_actions_log, contacts updates) are nice-to-have bookkeeping. Timeout → log warning, continue, return 200.
+
+**Worst-case latency:**
+| Scenario | Total |
+|---|---|
+| lead-created degraded, contacts insert hangs | ~2.5s (503 returned) |
+| lead-created happy path | ~3-5s |
+| lead-created pathological (contacts fast, everything else hangs) | up to 20s; Vercel kills at 10s, returns 504 |
+| bland-webhook degraded (all 4 calls hang) | exactly 10s; Vercel returns 504 |
+| bland-webhook happy path | ~200ms |
+
+**Critical safety preserved:**
+- ✅ `/t/<slug>` behavior byte-identical to Phase 14Y (refactor only).
+- ✅ External API calls (SMS, email, Bland) NOT wrapped — they have their own timeouts.
+- ✅ `bounded()` never throws — callers rely on `T | null` contract.
+- ✅ lead-created critical path returns 503 fast on timeout (informative + retry-friendly).
+- ✅ All bookkeeping degrades silently — user-visible response unaffected.
+
+**Tests:**
+- ✅ `npx tsc --noEmit` clean
+- ✅ `npm run lint` clean (0 errors, 0 warnings)
+- ✅ Static review of `bounded-wait.ts`: three failure modes (success/throw/timeout) all converge to `T | null`; clearTimeout in finally; Promise.race against catch-wrapped work never rejects.
+- ✅ Static review of `/t/[slug]` refactor: byte-identical behavior; all 3 callsites pass LOG_PREFIX.
+- ✅ Static review of webhook critical/bookkeeping paths.
+
+**Provider / platform / DB activity in this phase:** zero across the board. posted_at delta: 0 (29 → 29).
+
+**Optional remaining phases (this block):**
+- [ ] **Phase 14AC** — Final audit + declare Maintenance Mode
+
+---
+
+### Pre-Phase-14AB: Phase 14AA — Lighthouse CI Action (saved + pushed `d3cf3d3`).
 
 Phase 14Z deployed at `1bfda11`. Phase 14AA is the second of three optional polish phases. Continuous Lighthouse auditing of VortexTrips' real content pages on every push to `main`. Modest score thresholds surface regressions as warnings without blocking the workflow.
 

@@ -1,5 +1,5 @@
-// Phase 14J.2 — Branded campaign tracking redirect (hardened in Phase 14J.2.1
-// and 14Y).
+// Phase 14J.2 — Branded campaign tracking redirect (hardened in Phase 14J.2.1,
+// 14Y, and 14AB).
 //
 // GET /t/<slug>?utm_source=…&utm_medium=event_campaign&utm_campaign=…&utm_content=…
 //
@@ -17,23 +17,22 @@
 // always reaches a destination even if attribution fails.
 //
 // Phase 14Y hardening — bounded waits.
-//   Pre-14Y: try/catch around each Supabase await. If Supabase was 522'd
-//   (Cloudflare origin timeout — common on free-tier projects), the
-//   underlying TCP request would hang for 30+ seconds before the client
-//   gave up. try/catch doesn't bound await time, so the function ate
-//   Vercel Hobby's 10s function-execution budget and the visitor saw a
-//   504 / connection hang. Phase 14X's audit surfaced this as a real bug.
-//   Phase 14Y fix: every Supabase call goes through `bounded()`, which
-//   races the work against a 2.5s timeout. Timeout / throw / success all
-//   converge to a normalized `null | T` return, so callers never wait
-//   longer than the budget. Worst case: 3 × 2.5s = 7.5s, well under the
-//   10s function timeout. The redirect still happens with the correct
-//   Tier-2/Tier-3 fallback even when every Supabase call times out.
+//   Pre-14Y: try/catch around each Supabase await. If Supabase was 522'd,
+//   the underlying TCP request hung for 30+ seconds, eating Vercel Hobby's
+//   10s function-execution budget. Phase 14Y fix: every Supabase call goes
+//   through `bounded()`, racing the work against a 2.5s per-call timeout.
+//
+// Phase 14AB refactor — `bounded()` extracted into the shared
+// `src/lib/bounded-wait.ts` module so the same hang-resistance can be
+// applied uniformly across the codebase (webhook routes, etc.). This file
+// now imports `bounded` instead of defining it locally; behavior is
+// byte-identical.
 //
 // Public route (no admin auth required).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { bounded } from '@/lib/bounded-wait'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -58,45 +57,13 @@ const FINAL_FALLBACK = 'https://www.vortextrips.com'
 const CAMPAIGN_UTM_MEDIUM = 'event_campaign'
 
 /**
- * Phase 14Y — Per-Supabase-call hard timeout. Default 2.5 seconds.
- *
- * Vercel Hobby caps function execution at 10s. Three Supabase awaits in this
- * route × 2.5s each = 7.5s worst case + a small budget for sync work and the
- * redirect itself. Tuned to keep the route under 10s even when EVERY supabase
- * call hangs (e.g. project paused, Cloudflare 522, network blip).
+ * Per-Supabase-call hard timeout. 2.5 seconds × 3 calls = 7.5s worst case,
+ * comfortably under Vercel Hobby's 10s function-execution budget.
  */
 const SUPABASE_CALL_TIMEOUT_MS = 2500
 
-/**
- * Race a Supabase (or any thenable) call against a fixed timeout. Returns
- * `null` on timeout, on rejection, or on a non-thrown error path. NEVER
- * throws to the caller — this is the central guardrail that prevents the
- * route from hanging on a slow Supabase response.
- *
- * Cleans up the timer in `finally` so we don't leak a setTimeout handle
- * when the work resolves before the timeout.
- */
-async function bounded<T>(work: PromiseLike<T>, ms: number, label: string): Promise<T | null> {
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-  try {
-    const timeoutPromise = new Promise<null>(resolve => {
-      timeoutHandle = setTimeout(() => {
-        console.warn(`[branded-redirect] ${label} timed out after ${ms}ms — falling through`)
-        resolve(null)
-      }, ms)
-    })
-    // Wrap the thenable so a rejection becomes a `null` result rather than
-    // a Promise.race rejection. This lets the route degrade gracefully on
-    // ANY Supabase failure mode (timeout, 5xx, malformed response, etc.).
-    const safeWork = Promise.resolve(work).catch(err => {
-      console.error(`[branded-redirect] ${label} threw:`, err)
-      return null as T | null
-    })
-    return await Promise.race([safeWork, timeoutPromise])
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle)
-  }
-}
+/** Log prefix used by every bounded() call in this route. */
+const LOG_PREFIX = '[branded-redirect]'
 
 interface CampaignLookupRow {
   id: string
@@ -191,6 +158,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .maybeSingle<CampaignLookupRow>(),
       SUPABASE_CALL_TIMEOUT_MS,
       'campaign lookup',
+      LOG_PREFIX,
     )
     campaign = result?.data ?? null
   }
@@ -217,6 +185,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .limit(100),
       SUPABASE_CALL_TIMEOUT_MS,
       'asset lookup',
+      LOG_PREFIX,
     )
     const candidates = result?.data ?? []
     const match = candidates.find(
@@ -262,6 +231,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }),
     SUPABASE_CALL_TIMEOUT_MS,
     'click log insert',
+    LOG_PREFIX,
   )
 
   // Verify the medium matches the convention. If a non-event_campaign hit ever
