@@ -11,10 +11,17 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { runAIJob } from '@/lib/ai-router'
 import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
 import { runEventCampaignResearch, type RunResult as EventResearchResult } from '@/lib/event-campaign-generator'
+import { fetchAndStoreVideo } from '@/lib/media-providers'
 
-// Phase 14C: cap how many event seeds get scored per cron tick. Vercel Hobby
-// has a 10-second function timeout — the research pass runs in series after
-// weekly-content's main work completes, so we keep it conservative.
+// Phase 14AG — extend the cron's allowed runtime to 60s. Phase 14L only
+// fetched Pexels images in this cron (sub-second per call). We now also
+// fetch a Pexels Video for each TikTok row, which adds a second HTTP call
+// per TikTok day — still well under 60s for a 7-day plan, but the default
+// 10s ceiling would be tight on weeks where Pexels is slow.
+export const maxDuration = 60
+
+// Phase 14C: cap how many event seeds get scored per cron tick. The
+// research pass runs in series after weekly-content's main work completes.
 const EVENT_RESEARCH_LIMIT_PER_RUN = 6
 
 // Twitter/X removed in Phase 14Q.
@@ -27,6 +34,13 @@ interface ParsedPost {
   caption: string
   hashtags: string[]
   imagePrompt: string
+  /**
+   * Phase 14AG — short text overlay for TikTok B-roll videos (max 10 words).
+   * Stored on every row's `media_metadata.on_screen_hook` if present, but
+   * the AI is only asked to provide one for TikTok. Empty string for
+   * non-TikTok platforms or when the AI omits it.
+   */
+  onScreenHook: string
 }
 
 interface PexelsResponse {
@@ -106,9 +120,13 @@ function parseCalendarMarkdown(text: string): ParsedPost[] {
       const platform = PLATFORMS.find(p => platformLine.startsWith(p))
       if (!platform) continue
 
-      const captionMatch = pBlock.match(/Caption:\s*([\s\S]+?)(?:\n[A-Z][a-z]+:|$)/)
-      const hashtagsMatch = pBlock.match(/Hashtags:\s*([\s\S]+?)(?:\n[A-Z][a-z]+:|$)/)
-      const imageMatch = pBlock.match(/Image(?:\s+Prompt)?:\s*([\s\S]+?)(?:\n[A-Z][a-z]+:|$)/)
+      const captionMatch = pBlock.match(/Caption:\s*([\s\S]+?)(?:\n[A-Z][a-zA-Z\s-]+:|$)/)
+      const hashtagsMatch = pBlock.match(/Hashtags:\s*([\s\S]+?)(?:\n[A-Z][a-zA-Z\s-]+:|$)/)
+      const imageMatch = pBlock.match(/Image(?:\s+Prompt)?:\s*([\s\S]+?)(?:\n[A-Z][a-zA-Z\s-]+:|$)/)
+      // Phase 14AG — capture the new "On-Screen Hook:" line. Optional —
+      // only TikTok rows are required to have one; older rows / FB / IG
+      // simply leave the string empty and we don't write metadata for them.
+      const hookMatch = pBlock.match(/On[-\s]?Screen\s+Hook:\s*([\s\S]+?)(?:\n[A-Z][a-zA-Z\s-]+:|$)/i)
 
       if (!captionMatch) continue
 
@@ -120,8 +138,18 @@ function parseCalendarMarkdown(text: string): ParsedPost[] {
         .filter(h => h.length > 0 && h.length < 50)
         .slice(0, 8)
       const imagePrompt = imageMatch?.[1].trim() ?? ''
+      // Cap on_screen_hook at 10 words / 80 chars defensively even though
+      // the prompt asks the AI for the same. Trailing punctuation kept.
+      const rawHook = hookMatch?.[1].trim() ?? ''
+      const onScreenHook = rawHook
+        .replace(/\s+/g, ' ')
+        .split(' ')
+        .slice(0, 10)
+        .join(' ')
+        .slice(0, 80)
+        .trim()
 
-      posts.push({ date, platform, caption, hashtags, imagePrompt })
+      posts.push({ date, platform, caption, hashtags, imagePrompt, onScreenHook })
     }
   }
   return posts
@@ -150,7 +178,10 @@ For each post, provide:
 - PLATFORM
 - CAPTION (platform-appropriate length: IG 100-200 chars, FB 150-300, TikTok 100-150)
 - HASHTAGS (3-5 relevant tags)
-- IMAGE PROMPT (one sentence describing the ideal photo)
+- IMAGE PROMPT (one sentence describing the ideal photo or — for TikTok — the cinematic travel B-roll clip)
+
+For TikTok ONLY, also provide:
+- ON-SCREEN HOOK (max 10 words; the bold attention-grabbing text we will burn onto the video later, e.g. "Cancun for $1,540. Members only.")
 
 Use this exact markdown structure to make output easy to parse:
 
@@ -168,7 +199,8 @@ Image: <description>
 ### tiktok
 Caption: <text>
 Hashtags: tag1, tag2, tag3
-Image: <description>
+Image: <cinematic travel b-roll description — beach drone shot, resort pool, etc.>
+On-Screen Hook: <max 10 words>
 
 ## Day 2 — <next date>
 ... and so on through Day 7.
@@ -219,11 +251,35 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       }, { status: 500 })
     }
 
-    // Fetch real photos from Pexels in parallel and store in Supabase Storage.
-    // Each fetch is independent; failures don't block other posts.
-    const rowsWithImages = await Promise.all(
+    // Phase 14AG — fetch images for every platform AND a Pexels Video for
+    // each TikTok row in parallel. Pexels Video API is synchronous (returns
+    // an MP4 URL immediately, no async polling), so this stays inside the
+    // cron's 60s budget. Failures on either fetch are non-fatal — the row
+    // still inserts with whatever URLs landed (image_url / video_url may be
+    // null), and an empty video_url means the row will appear as
+    // "Media missing" on the dashboard, which is the correct fallback.
+    const rowsWithMedia = await Promise.all(
       posts.map(async p => {
-        const image_url = await fetchAndStoreImage(p.imagePrompt, p.platform, supabase)
+        const [image_url, videoResult] = await Promise.all([
+          fetchAndStoreImage(p.imagePrompt, p.platform, supabase),
+          p.platform === 'tiktok' && p.imagePrompt
+            ? fetchAndStoreVideo({ query: p.imagePrompt, orientation: 'portrait', size: 'large' })
+            : Promise.resolve(null),
+        ])
+        const video_url = videoResult?.success ? videoResult.url ?? null : null
+        const isTikTok = p.platform === 'tiktok'
+        // Build media_metadata for TikTok rows so the on_screen_hook + the
+        // Pexels video provenance survive into the dashboard / autoposter.
+        // Non-TikTok rows don't carry media_metadata — keep the row shape
+        // compatible with the pre-14AG insert path for FB/IG.
+        const media_metadata = isTikTok
+          ? {
+              source: 'pexels-video',
+              on_screen_hook: p.onScreenHook || null,
+              pexels_video_id: videoResult?.success ? videoResult.external_id ?? null : null,
+              fetched_at: new Date().toISOString(),
+            }
+          : null
         return {
           week_of: startDate,
           platform: p.platform,
@@ -231,12 +287,24 @@ Be terse. Skip filler. Optimize for parseability over prose.`
           hashtags: p.hashtags,
           image_prompt: p.imagePrompt,
           image_url,
+          video_url,
+          // Phase 14AG — TikTok rows that landed a Pexels MP4 are
+          // immediately media-ready; non-TikTok rows skip these columns.
+          ...(video_url
+            ? {
+                media_status: 'ready' as const,
+                media_source: 'pexels' as const,
+                media_generated_at: new Date().toISOString(),
+              }
+            : {}),
+          ...(media_metadata ? { media_metadata } : {}),
           status: 'draft' as const,
         }
       }),
     )
-    const rows = rowsWithImages
+    const rows = rowsWithMedia
     const imagesGenerated = rows.filter(r => r.image_url).length
+    const videosGenerated = rows.filter(r => 'video_url' in r && r.video_url).length
 
     const { error: insertError } = await supabase.from('content_calendar').insert(rows)
     if (insertError) {
@@ -267,6 +335,7 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       response_payload: {
         generated: rows.length,
         images_generated: imagesGenerated,
+        videos_generated: videosGenerated,
         weekOf: startDate,
         model: result.modelUsed,
         cost: result.costEstimate,
@@ -287,6 +356,7 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       success: true,
       generated: rows.length,
       images_generated: imagesGenerated,
+      videos_generated: videosGenerated,
       weekOf: startDate,
       model: result.modelUsed,
       cost: result.costEstimate,

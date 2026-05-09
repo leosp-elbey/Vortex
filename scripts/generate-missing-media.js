@@ -1,48 +1,29 @@
 #!/usr/bin/env node
 /**
- * Phase 14L.2.6 — Media generation worker (controlled HeyGen batch unlock).
- *
- * Replaces the Phase 14L.2.2 hard-coded `--limit=1` HeyGen pilot guard with
- * a controlled batch cap:
- *   - default cap: 5 HeyGen renders per invocation
- *   - --allow-large-heygen-batch: lifts the cap to 10
- *   - absolute ceiling: 10 (--limit=11+ is refused even with the flag)
- *   - --videos-only --provider=auto follows the same caps (auto fans out to HeyGen)
- *
- * New flags:
- *   --allow-large-heygen-batch  lift the cap from 5 to 10
- *   --allow-when-pending        permit queueing while pending HeyGen jobs exist
- *
- * Pre-flight refusal contract for the HeyGen path (any provider=heygen run,
- * or videos-only + provider=auto):
- *   - refuses if --limit > the active cap
- *   - refuses if pending HeyGen jobs exist (override with --allow-when-pending)
- *   - refuses if any selected row is posted, has video_url, or has no script
- *   - all checks run BEFORE any provider call
- *
- * Original Phase 14L.2.1 docs follow.
- *
- * --- ORIGINAL ---
- *
- * Phase 14L.2.1 — Media generation worker.
+ * Phase 14AG — Media generation worker (Pexels image + OpenAI fallback +
+ * Pexels Video). HeyGen was excised in Phase 14AG: the avatar pipeline did
+ * not match brand voice, was async-only (incompatible with the synchronous
+ * weekly-content cron), and was expensive. Pexels Video Search returns
+ * cinematic stock travel B-roll synchronously, free, at vertical HD —
+ * exactly what TikTok / IG Reels want.
  *
  * SAFETY MODES:
  *   default                                    → DRY-RUN. No provider calls. No DB writes.
  *   --dry-run                                  → DRY-RUN. Same as default; explicit form.
- *   --generate                                 → Calls provider APIs. Prints fetched/generated URLs. NO DB writes.
+ *   --generate                                 → Calls provider APIs. Prints fetched URLs. NO DB writes.
  *   --generate --apply                         → Calls provider APIs AND writes allowed media columns.
  *   --apply (without --generate)               → Refuses with a clear message — no input source for known URLs in this phase.
  *
  * Always allowed flags:
- *   --limit=N            cap rows processed (default 5)
- *   --provider=pexels    force a specific image provider (default 'pexels' with openai fallback when 'auto')
- *   --provider=openai
- *   --provider=heygen
- *   --provider=auto      pexels-then-openai for image; heygen for video
+ *   --limit=N            cap rows processed (default 5; ceiling 50)
+ *   --provider=pexels    force Pexels (image search; video defaults to Pexels regardless)
+ *   --provider=openai    force OpenAI image generation (no video path)
+ *   --provider=auto      pexels-then-openai for image; pexels-video for video (default)
  *   --images-only        only process rows that need image
  *   --videos-only        only process rows that need video
  *   --campaign-only      only process rows whose target_table is campaign_assets
  *   --content-only       only process rows whose target_table is content_calendar (organic)
+ *   --id=<row_id>        process exactly one row by content_calendar.id or campaign_asset_id
  *
  * Allowed writes (with --generate --apply only):
  *   content_calendar.image_url
@@ -51,6 +32,7 @@
  *   content_calendar.media_source
  *   content_calendar.media_generated_at
  *   content_calendar.media_error
+ *   content_calendar.media_metadata
  *   campaign_assets.image_url
  *   campaign_assets.video_url
  *   campaign_assets.image_source
@@ -65,11 +47,11 @@
  *   any platform publishing API (Facebook / Instagram / TikTok / X / email)
  *
  * Storage:
- *   Pexels + OpenAI return temporary URLs. We download + re-upload to the
- *   Supabase Storage `media` bucket (same pattern as
- *   src/app/api/cron/weekly-content/route.ts) so the URL is durable. HeyGen
- *   is async; we DO NOT re-upload here — instead we store the video_id and
- *   let scripts/check-video-generation-status.js poll it later.
+ *   Pexels image returns a CDN URL; we re-upload to Supabase Storage so
+ *   the URL is durable. Pexels Video returns a stable CDN MP4 URL — we do
+ *   NOT re-upload (5–30 MB MP4s, slower, and Pexels CDN URLs are months+
+ *   stable). The cron uses the same pattern. If durability becomes a
+ *   concern, a future hardening phase can add an async re-upload step.
  */
 
 const fs = require('fs')
@@ -163,11 +145,7 @@ function recommend(row) {
   const target_id = row.campaign_asset_id ?? row.id
 
   const source_image = needs_image ? 'pexels (fallback: openai-image)' : null
-  let source_video = null
-  if (needs_video) {
-    if (nonEmpty(row.video_script) || nonEmpty(row.video_prompt)) source_video = 'heygen'
-    else source_video = '⚠ blocked: video script missing'
-  }
+  const source_video = needs_video ? 'pexels-video' : null
 
   let needs
   if (needs_image && needs_video) needs = 'both'
@@ -184,11 +162,6 @@ function recommend(row) {
   }
 }
 
-// Phase 14L.2.6 — batch caps for HeyGen. Default cap is 5 renders per
-// invocation; lifting to up to 10 requires --allow-large-heygen-batch.
-const HEYGEN_DEFAULT_BATCH_MAX = 5
-const HEYGEN_ABSOLUTE_BATCH_MAX = 10
-
 function parseArgs(argv) {
   const args = argv.slice(2)
   const flags = {
@@ -201,17 +174,7 @@ function parseArgs(argv) {
     videosOnly: false,
     campaignOnly: false,
     contentOnly: false,
-    /** Phase 14L.2.2 — single-row pilot pin. When set, only this row is
-     *  considered for processing; matched against either content_calendar.id
-     *  or campaign_asset_id. */
     id: null,
-    /** Phase 14L.2.6 — lift the default HeyGen batch cap (5) up to the
-     *  absolute cap (10). Required to use --limit > 5 with HeyGen. */
-    allowLargeHeygenBatch: false,
-    /** Phase 14L.2.6 — by default the HeyGen path refuses to queue when
-     *  pending HeyGen jobs already exist (avoids stacking renders before
-     *  the first batch lands). Set this flag to override. */
-    allowWhenPending: false,
   }
   for (const a of args) {
     if (a === '--apply') flags.apply = true
@@ -221,35 +184,18 @@ function parseArgs(argv) {
     else if (a === '--videos-only') flags.videosOnly = true
     else if (a === '--campaign-only') flags.campaignOnly = true
     else if (a === '--content-only') flags.contentOnly = true
-    else if (a === '--allow-large-heygen-batch') flags.allowLargeHeygenBatch = true
-    else if (a === '--allow-when-pending') flags.allowWhenPending = true
     else if (a.startsWith('--limit=')) {
       const n = Number(a.split('=')[1])
       if (Number.isFinite(n) && n > 0) flags.limit = Math.min(Math.floor(n), 50)
     } else if (a.startsWith('--provider=')) {
       const p = a.split('=')[1]?.toLowerCase()
-      if (['pexels', 'openai', 'heygen', 'auto'].includes(p)) flags.provider = p
+      if (['pexels', 'openai', 'auto'].includes(p)) flags.provider = p
     } else if (a.startsWith('--id=')) {
       const v = a.split('=')[1]?.trim()
       if (v) flags.id = v
     }
   }
   return flags
-}
-
-/**
- * Phase 14L.2.2 — strip director cues so HeyGen does not speak them.
- * Removes bracketed direction blocks like `[VISUAL: …]`, `[B-ROLL: …]`,
- * `[CTA: …]`, plus stage-direction lines starting with "Hook:" / "Outro:".
- * The cleaned text is what HeyGen actually voices.
- */
-function cleanScriptForHeyGen(raw) {
-  if (typeof raw !== 'string') return ''
-  let s = raw.replace(/\[[^\]]*\]/g, ' ')      // drop [VISUAL: ...] / [CTA:] / etc
-  s = s.replace(/\s+(Hook|Outro|CTA|Intro|Pause)\s*:\s*/gi, ' ')   // drop labels
-  s = s.replace(/^\s*(Hook|Outro|CTA|Intro|Pause)\s*:\s*/i, '')    // ditto at start
-  s = s.replace(/\s{2,}/g, ' ').trim()
-  return s
 }
 
 // ============================================================
@@ -319,34 +265,82 @@ async function generateOpenAIImage(env, { prompt, size }) {
   }
 }
 
-async function createHeyGenVideo(env, { script, title }) {
-  const key = env.HEYGEN_API_KEY
-  if (!key) return { success: false, provider: 'heygen', error: 'HEYGEN_API_KEY not set' }
-  if (!nonEmpty(script)) return { success: false, provider: 'heygen', error: 'video script is empty' }
-  const avatarId = env.HEYGEN_AVATAR_ID
-  const voiceId = env.HEYGEN_VOICE_ID
-  if (!avatarId) return { success: false, provider: 'heygen', error: 'HEYGEN_AVATAR_ID not set' }
-  if (!voiceId)  return { success: false, provider: 'heygen', error: 'HEYGEN_VOICE_ID not set' }
+/**
+ * Phase 14AG — pick the best vertical HD MP4 from a Pexels video entry.
+ * Same logic as `pickBestPortraitMp4` in src/lib/media-providers.ts.
+ */
+function pickBestPortraitMp4(entry) {
+  const files = (entry.video_files ?? []).filter(f => typeof f.link === 'string' && f.link.length > 0)
+  if (files.length === 0) return null
+  const mp4 = files.filter(f => (f.file_type ?? 'video/mp4').toLowerCase().includes('mp4'))
+  const pool = mp4.length > 0 ? mp4 : files
+  const portrait = pool.filter(f => (f.height ?? 0) > (f.width ?? 0))
+  const target = portrait.length > 0 ? portrait : pool
+  const qualityRank = q => {
+    const lower = (q ?? '').toLowerCase()
+    if (lower === 'uhd') return 3
+    if (lower === 'hd') return 2
+    if (lower === 'sd') return 1
+    return 0
+  }
+  return target.slice().sort((a, b) => {
+    const dq = qualityRank(b.quality) - qualityRank(a.quality)
+    if (dq !== 0) return dq
+    return (b.height ?? 0) - (a.height ?? 0)
+  })[0] ?? null
+}
+
+async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDuration, maxDuration }) {
+  const key = env.PEXELS_API_KEY
+  if (!key) return { success: false, provider: 'pexels-video', error: 'PEXELS_API_KEY not set' }
+  if (!nonEmpty(query)) return { success: false, provider: 'pexels-video', error: 'query is required' }
+  const params = new URLSearchParams({
+    query: query.slice(0, 200),
+    per_page: String(Math.max(1, Math.min(perPage ?? 5, 80))),
+    orientation: orientation ?? 'portrait',
+    size: size ?? 'large',
+  })
+  const minDur = Math.max(1, minDuration ?? 5)
+  const maxDur = Math.max(minDur, maxDuration ?? 30)
   try {
-    const res = await fetch('https://api.heygen.com/v2/video/generate', {
-      method: 'POST',
-      headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        video_inputs: [{
-          character: { type: 'avatar', avatar_id: avatarId, avatar_style: 'normal' },
-          voice: { type: 'text', input_text: script, voice_id: voiceId, speed: 1.0 },
-        }],
-        dimension: { width: 720, height: 1280 },
-        title: title?.slice(0, 120),
-      }),
+    const res = await fetch(`https://api.pexels.com/videos/search?${params.toString()}`, {
+      headers: { Authorization: key },
     })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) return { success: false, provider: 'heygen', error: normalizeError(data) || `heygen http ${res.status}` }
-    const videoId = data?.data?.video_id
-    if (!videoId) return { success: false, provider: 'heygen', error: 'heygen returned no video_id', raw: data }
-    return { success: true, provider: 'heygen', external_id: videoId, status: 'queued', raw: data?.data }
+    if (!res.ok) return { success: false, provider: 'pexels-video', error: normalizeError(data) || `pexels-video http ${res.status}` }
+    const videos = data?.videos ?? []
+    if (videos.length === 0) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no videos' }
+    let chosen = null
+    for (const entry of videos) {
+      const dur = entry.duration ?? 0
+      if (dur < minDur || dur > maxDur) continue
+      const file = pickBestPortraitMp4(entry)
+      if (file?.link) { chosen = { entry, file }; break }
+    }
+    if (!chosen) {
+      for (const entry of videos) {
+        const file = pickBestPortraitMp4(entry)
+        if (file?.link) { chosen = { entry, file }; break }
+      }
+    }
+    if (!chosen?.file?.link) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no usable mp4' }
+    return {
+      success: true,
+      provider: 'pexels-video',
+      url: chosen.file.link,
+      external_id: chosen.entry.id != null ? String(chosen.entry.id) : undefined,
+      raw: {
+        video_id: chosen.entry.id,
+        duration: chosen.entry.duration,
+        width: chosen.file.width,
+        height: chosen.file.height,
+        quality: chosen.file.quality,
+        file_type: chosen.file.file_type,
+        page_url: chosen.entry.url,
+      },
+    }
   } catch (err) {
-    return { success: false, provider: 'heygen', error: normalizeError(err) }
+    return { success: false, provider: 'pexels-video', error: normalizeError(err) }
   }
 }
 
@@ -387,7 +381,6 @@ async function processImage(supabase, env, row, flags) {
     const orientation = imageOrientationFor(row.platform)
     result = await fetchPexelsImage(env, { query, orientation })
     if (!result.success && flags.provider === 'auto') {
-      // Fall through to OpenAI fallback only when explicitly auto.
       const promptText = nonEmpty(row.image_prompt) ? row.image_prompt : query
       const fallback = await generateOpenAIImage(env, { prompt: promptText })
       if (fallback.success) result = fallback
@@ -400,9 +393,6 @@ async function processImage(supabase, env, row, flags) {
   }
   if (!result.success) return { ok: false, provider: result.provider, error: result.error }
 
-  // We have a remote URL. In --apply mode, re-upload to Supabase Storage so
-  // the URL is durable; in --generate-only mode, hand back the provider URL
-  // for the operator to inspect (no Storage write).
   if (!flags.apply) {
     return { ok: true, provider: result.provider, url: result.url, external_id: result.external_id, durable: false }
   }
@@ -411,48 +401,56 @@ async function processImage(supabase, env, row, flags) {
   return { ok: true, provider: result.provider, url: stored.url, external_id: result.external_id, durable: true }
 }
 
+/**
+ * Phase 14AG — fetch a Pexels Video for the row. Synchronous — Pexels
+ * returns the MP4 URL immediately, so the row can land at
+ * media_status='ready' in a single pass. Search query priority:
+ *   1. row.image_prompt   (preferred — already curated by the AI for this row)
+ *   2. row.video_prompt
+ *   3. row.caption        (truncated; last-resort)
+ * Returns { ok, url, external_id, raw } on success.
+ */
 async function processVideo(supabase, env, row, flags) {
   void supabase
-  const rawScript = pickVideoScript(row)
-  if (!nonEmpty(rawScript)) {
-    return { ok: false, error: 'video script missing — refusing to call HeyGen', skipped: true }
+  if (flags.provider !== 'pexels' && flags.provider !== 'auto') {
+    return { ok: false, error: `provider '${flags.provider}' is not configured for video — only 'auto' or 'pexels' fetches Pexels Video` }
   }
-  if (flags.provider !== 'heygen' && flags.provider !== 'auto') {
-    return { ok: false, error: `provider '${flags.provider}' is not a video provider` }
+  const query = buildVideoQuery(row)
+  if (!nonEmpty(query)) {
+    return { ok: false, error: 'no video search query available (no image_prompt / video_prompt / caption)', skipped: true }
   }
-  // Phase 14L.2.2 — strip director cues so HeyGen doesn't speak them.
-  const script = cleanScriptForHeyGen(rawScript)
-  if (!nonEmpty(script)) {
-    return { ok: false, error: 'video script became empty after stripping director cues', skipped: true }
-  }
-  const result = await createHeyGenVideo(env, { script, title: `${row.platform} ${row.id?.slice(0, 8) ?? ''}` })
-  if (!result.success) return { ok: false, provider: 'heygen', error: result.error }
-  // HeyGen returned a video_id — the URL is NOT yet available. We keep
-  // status='queued' and return external_id; the apply-write path stores
-  // it and the operator runs scripts/check-video-generation-status.js
-  // later to land the final URL.
+  const result = await fetchPexelsVideo(env, {
+    query,
+    orientation: 'portrait',
+    size: 'large',
+    perPage: 5,
+    minDuration: 5,
+    maxDuration: 30,
+  })
+  if (!result.success) return { ok: false, provider: 'pexels-video', error: result.error }
   return {
     ok: true,
-    provider: 'heygen',
-    pending: true,
+    provider: 'pexels-video',
+    url: result.url,
     external_id: result.external_id,
+    raw: result.raw,
   }
 }
 
 function buildImageQuery(row) {
-  // Build a focused Pexels search string. Prefer explicit image_prompt
-  // text if present (it's already curated). Fall back to the campaign /
-  // event name + the platform.
   if (nonEmpty(row.image_prompt)) return row.image_prompt.slice(0, 100)
   if (nonEmpty(row.campaign_event_name)) return `${row.campaign_event_name} travel`
   if (nonEmpty(row.caption)) return row.caption.slice(0, 60)
   return 'travel destination scenic'
 }
 
-function pickVideoScript(row) {
-  if (nonEmpty(row.video_script)) return row.video_script
-  if (nonEmpty(row.video_prompt)) return row.video_prompt
-  if (nonEmpty(row.caption))      return row.caption.slice(0, 600)
+function buildVideoQuery(row) {
+  // Phase 14AG — prefer image_prompt because the new ai-prompts.ts asks the
+  // AI to write the TikTok image_prompt as a Pexels Video search query.
+  if (nonEmpty(row.image_prompt)) return row.image_prompt.slice(0, 100)
+  if (nonEmpty(row.video_prompt)) return row.video_prompt.slice(0, 100)
+  if (nonEmpty(row.campaign_event_name)) return `${row.campaign_event_name} travel cinematic`
+  if (nonEmpty(row.caption)) return row.caption.slice(0, 60)
   return ''
 }
 
@@ -470,11 +468,6 @@ function imageOrientationFor(platform) {
 // ============================================================
 
 async function writeMediaToContentCalendar(supabase, contentId, payload) {
-  // Defensive guardrails — refuse to send a payload that includes any
-  // forbidden key. Never use `as any`; explicit allow-list keeps the
-  // surface small and reviewable.
-  // Phase 14L.2.2 — `media_metadata` (migration 033) is the clean home
-  // for HeyGen video_id storage on organic rows.
   const ALLOWED = new Set(['image_url', 'video_url', 'media_status', 'media_source', 'media_generated_at', 'media_error', 'media_metadata'])
   const safe = {}
   for (const [k, v] of Object.entries(payload)) {
@@ -529,11 +522,11 @@ async function main() {
       : 'DRY-RUN'
 
   console.log()
-  console.log(`${COLORS.bold}Phase 14L.2.6 — Media Generation Worker [${mode}]${COLORS.reset}`)
+  console.log(`${COLORS.bold}Phase 14AG — Media Generation Worker [${mode}]${COLORS.reset}`)
   if (!flags.generate) {
     console.log(`${COLORS.dim}No provider API calls. No platform calls. No mutations.${COLORS.reset}`)
   } else if (!flags.apply) {
-    console.log(`${COLORS.yellow}May call provider APIs (Pexels / OpenAI / HeyGen). DB writes are DISABLED.${COLORS.reset}`)
+    console.log(`${COLORS.yellow}May call provider APIs (Pexels image/video / OpenAI image fallback). DB writes are DISABLED.${COLORS.reset}`)
   } else {
     console.log(`${COLORS.red}May call provider APIs AND write media columns to DB. NEVER posts to platforms.${COLORS.reset}`)
   }
@@ -545,44 +538,18 @@ async function main() {
     process.exit(2)
   }
 
-  // Phase 14L.2.6 — controlled HeyGen batch unlock.
-  //
-  // Replaces the Phase 14L.2.2 "must be --limit=1" pilot guard. HeyGen
-  // calls are now allowed in small batches:
-  //   - Default cap: 5 renders per invocation.
-  //   - With --allow-large-heygen-batch: up to 10 renders per invocation.
-  //   - --allow-large-heygen-batch CANNOT exceed 10 (hard ceiling).
-  //   - --videos-only + --provider=auto follows the same caps because the
-  //     auto path fans out to HeyGen for video rows.
-  const heygenPath = flags.provider === 'heygen' || (flags.provider === 'auto' && flags.videosOnly)
-  if (heygenPath) {
-    const cap = flags.allowLargeHeygenBatch ? HEYGEN_ABSOLUTE_BATCH_MAX : HEYGEN_DEFAULT_BATCH_MAX
-    if (flags.limit > cap) {
-      console.log(`${COLORS.red}Refused: HeyGen batch cap exceeded.${COLORS.reset}`)
-      console.log(`${COLORS.dim}--limit=${flags.limit} > ${cap}.${COLORS.reset}`)
-      if (!flags.allowLargeHeygenBatch && flags.limit <= HEYGEN_ABSOLUTE_BATCH_MAX) {
-        console.log(`${COLORS.dim}Pass --allow-large-heygen-batch to lift the cap from ${HEYGEN_DEFAULT_BATCH_MAX} to ${HEYGEN_ABSOLUTE_BATCH_MAX}.${COLORS.reset}`)
-      } else {
-        console.log(`${COLORS.dim}The absolute HeyGen batch ceiling is ${HEYGEN_ABSOLUTE_BATCH_MAX} renders per invocation. Re-run later for more.${COLORS.reset}`)
-      }
-      process.exit(2)
-    }
-  }
-
   // 0. posted_at no-mutation snapshot.
   const { count: postedBefore } = await supabase
     .from('content_calendar')
     .select('id', { count: 'exact', head: true })
     .not('posted_at', 'is', null)
 
-  // 1. Pull unposted rows + linked assets. Phase 14L.2.1 trusts migration
-  //    032 is applied (the prior phase verified it). No fallback path here
-  //    because writes need the new columns; if the SELECT errors, abort.
+  // 1. Pull unposted rows + linked assets.
   const { data: rows, error: selErr } = await supabase
     .from('content_calendar')
     .select(
       'id, status, platform, week_of, caption, image_url, video_url, video_script, image_prompt, ' +
-      'media_status, media_error, media_generated_at, media_source, ' +
+      'media_status, media_error, media_generated_at, media_source, media_metadata, ' +
       'campaign_asset_id, posted_at, ' +
       'campaign_asset:campaign_assets!campaign_asset_id(id, campaign_id, asset_type, image_url, video_url, image_source, video_source, body)'
     )
@@ -628,12 +595,6 @@ async function main() {
   const unposted = all.filter(isUnposted)
 
   // 3. Build the candidate queue, applying flag filters.
-  // Phase 14L.2.2 — when --videos-only or --provider=heygen is in effect,
-  // pre-filter rows that HeyGen can't (or shouldn't) render:
-  //   - rows whose video_url is already populated  → already done
-  //   - rows whose pickVideoScript() returns empty → no script to speak
-  // The processVideo function ALSO refuses these, but pre-filtering at the
-  // queue level keeps the printed queue counts honest.
   const queue = []
   for (const r of unposted) {
     if (flags.id && r.id !== flags.id && r.campaign_asset_id !== flags.id) continue
@@ -643,127 +604,28 @@ async function main() {
     if (flags.videosOnly && rec.needs === 'image') continue
     if (flags.campaignOnly && rec.target_table !== 'campaign_assets') continue
     if (flags.contentOnly && rec.target_table !== 'content_calendar') continue
-    if (flags.provider === 'heygen' || flags.videosOnly) {
-      if (nonEmpty(r.video_url) || nonEmpty(r.asset_video_url)) continue
-      // Phase 14L.2.2 — strict pilot script check: only an explicit
-      // video_script or video_prompt counts. caption-as-script (the legacy
-      // pickVideoScript fallback) is too loose for HeyGen voice rendering.
-      if (!nonEmpty(r.video_script) && !nonEmpty(r.video_prompt)) continue
-    }
+    // Phase 14AG — skip rows that have no usable video search query when
+    // the row needs a video. Prevents wasted Pexels-video calls.
+    if ((rec.needs === 'video' || rec.needs === 'both') && !nonEmpty(buildVideoQuery(r))) continue
     queue.push({ row: r, rec })
   }
-
-  // Phase 14L.2.6 — count pending HeyGen jobs (in-flight renders that
-  // haven't been polled to completion yet) so the operator sees them
-  // alongside the queue. By default the HeyGen path refuses to queue
-  // when ANY pending jobs exist; --allow-when-pending overrides.
-  let pendingHeygenJobs = 0
-  if (heygenPath) {
-    const { count: ccPending } = await supabase
-      .from('content_calendar')
-      .select('id', { count: 'exact', head: true })
-      .eq('media_source', 'heygen')
-      .eq('media_status', 'pending')
-    const { data: caRows } = await supabase
-      .from('campaign_assets')
-      .select('id, video_source_metadata')
-      .eq('video_source', 'heygen')
-      .is('video_url', null)
-    const caPending = (caRows ?? []).filter(r => nonEmpty(r.video_source_metadata?.heygen_video_id)).length
-    pendingHeygenJobs = (ccPending ?? 0) + caPending
-  }
-
-  const heygenCap = heygenPath
-    ? (flags.allowLargeHeygenBatch ? HEYGEN_ABSOLUTE_BATCH_MAX : HEYGEN_DEFAULT_BATCH_MAX)
-    : null
 
   console.log(`${COLORS.bold}Queue${COLORS.reset}`)
   console.log(`   total scanned (unposted):  ${unposted.length}`)
   console.log(`   matched filters:           ${queue.length}`)
   console.log(`   limit:                     ${flags.limit}`)
   console.log(`   provider preference:       ${flags.provider}`)
-  if (heygenPath) {
-    console.log(`   heygen batch cap:          ${heygenCap}  ${flags.allowLargeHeygenBatch ? COLORS.dim + '(--allow-large-heygen-batch)' + COLORS.reset : COLORS.dim + '(default; --allow-large-heygen-batch lifts to ' + HEYGEN_ABSOLUTE_BATCH_MAX + ')' + COLORS.reset}`)
-    console.log(`   pending heygen jobs:       ${pendingHeygenJobs}  ${flags.allowWhenPending ? COLORS.dim + '(--allow-when-pending)' + COLORS.reset : ''}`)
-  }
   console.log()
 
-  // Phase 14L.2.6 — pre-flight refusals for the HeyGen path. These run
-  // BEFORE any provider call. The queue pre-filter already drops
-  // ineligible rows, but we also explicitly refuse the whole batch when
-  // pending jobs exist (operator must clear them first or override).
-  if (heygenPath && pendingHeygenJobs > 0 && !flags.allowWhenPending) {
-    console.log(`${COLORS.red}Refused: ${pendingHeygenJobs} pending HeyGen job(s) already in flight.${COLORS.reset}`)
-    console.log(`${COLORS.dim}Run scripts/check-video-generation-status.js --apply to land them, or pass --allow-when-pending to override.${COLORS.reset}`)
-    process.exit(2)
-  }
-
   const work = queue.slice(0, flags.limit)
-
-  // Phase 14L.2.6 — per-row sanity verification of the pre-flight contract.
-  // The pre-filter above already excludes these, but this defensive pass
-  // guarantees the contract holds even if a future refactor loosens the
-  // filter. Fails the run before any provider call if any selected row
-  // violates an invariant.
-  if (heygenPath && work.length > 0) {
-    const violations = []
-    for (const { row } of work) {
-      if (row.posted_at) {
-        violations.push({ id: row.id, reason: 'row is posted (has posted_at)' })
-        continue
-      }
-      const status = (row.status ?? '').toLowerCase()
-      if (TERMINAL_STATUSES.has(status)) {
-        violations.push({ id: row.id, reason: `row status='${row.status}' is terminal` })
-        continue
-      }
-      if (nonEmpty(row.video_url) || nonEmpty(row.asset_video_url)) {
-        violations.push({ id: row.id, reason: 'row already has video_url' })
-        continue
-      }
-      if (!nonEmpty(row.video_script) && !nonEmpty(row.video_prompt)) {
-        violations.push({ id: row.id, reason: 'row has no video_script / video_prompt' })
-        continue
-      }
-    }
-    if (violations.length > 0) {
-      console.log(`${COLORS.red}Refused: ${violations.length} selected row(s) violate the HeyGen pre-flight contract.${COLORS.reset}`)
-      for (const v of violations.slice(0, 10)) {
-        console.log(`   ${COLORS.dim}${v.id}${COLORS.reset} — ${v.reason}`)
-      }
-      if (violations.length > 10) console.log(`   ${COLORS.dim}… +${violations.length - 10} more${COLORS.reset}`)
-      console.log(`${COLORS.dim}No provider calls were made.${COLORS.reset}`)
-      process.exit(2)
-    }
-  }
   if (work.length === 0) {
-    if (flags.provider === 'heygen' && flags.id) {
+    if (flags.id) {
       console.log(`${COLORS.yellow}No eligible row for --id=${flags.id}.${COLORS.reset}`)
-      console.log(`${COLORS.dim}Either the id doesn't exist, the row is already posted, the row already has video_url, or the row has no video script.${COLORS.reset}`)
-    } else if (flags.provider === 'heygen') {
-      console.log(`${COLORS.yellow}No eligible HeyGen rows.${COLORS.reset}`)
-      console.log(`${COLORS.dim}Run scripts/inspect-heygen-pilot-candidates.js to see candidate ids.${COLORS.reset}`)
+      console.log(`${COLORS.dim}Either the id doesn't exist, the row is already posted, or it already has the media it needs.${COLORS.reset}`)
     } else {
       console.log(`${COLORS.dim}Nothing to do. (queue empty after filters)${COLORS.reset}`)
     }
     process.exit(0)
-  }
-
-  // Phase 14L.2.6 — DRY-RUN preview for the HeyGen path: list each row
-  // that WOULD be queued, with its week_of and a short script preview.
-  // No provider call. No write.
-  if (heygenPath && !flags.generate) {
-    console.log(`${COLORS.bold}HeyGen rows that would be queued (DRY-RUN; --generate not set)${COLORS.reset}`)
-    for (const { row, rec } of work) {
-      const script = nonEmpty(row.video_script) ? row.video_script
-                   : nonEmpty(row.video_prompt) ? row.video_prompt
-                   : ''
-      const wc = script.trim().split(/\s+/).filter(Boolean).length
-      const preview = script.replace(/\s+/g, ' ').slice(0, 90)
-      console.log(`   ${COLORS.cyan}${row.id}${COLORS.reset}  platform=${row.platform}  week_of=${row.week_of}  status=${row.status}`)
-      console.log(`     ${COLORS.dim}target:${COLORS.reset} ${rec.target_table}  ${COLORS.dim}script:${COLORS.reset} ${wc} words · ${COLORS.dim}${preview}${preview.length < script.length ? '…' : ''}${COLORS.reset}`)
-    }
-    console.log()
   }
 
   // 4. Process each row.
@@ -775,7 +637,6 @@ async function main() {
   for (const { row, rec } of work) {
     const item = { id: row.id, platform: row.platform, target: rec.target_table, needs: rec.needs }
 
-    // DRY-RUN — describe only.
     if (!flags.generate) {
       samples.push({ ...item, action: 'dry-run', detail: 'no provider call' })
       continue
@@ -787,18 +648,12 @@ async function main() {
       if (!r.ok) {
         failed++
         samples.push({ ...item, action: 'image', success: false, error: r.error, provider: r.provider })
-        if (flags.apply) {
-          // Mark failed only when --apply explicitly requests writes.
-          if (rec.target_table === 'content_calendar') {
-            await writeMediaToContentCalendar(supabase, row.id, {
-              media_status: 'failed',
-              media_source: r.provider ?? null,
-              media_error: (r.error ?? 'image generation failed').slice(0, 1000),
-            })
-          }
-          // For campaign_assets we don't have a media_status column; record
-          // provenance via image_source_metadata only on success. On
-          // failure leave the asset alone so a re-run can try again.
+        if (flags.apply && rec.target_table === 'content_calendar') {
+          await writeMediaToContentCalendar(supabase, row.id, {
+            media_status: 'failed',
+            media_source: r.provider ?? null,
+            media_error: (r.error ?? 'image generation failed').slice(0, 1000),
+          })
         }
       } else {
         samples.push({ ...item, action: 'image', success: true, provider: r.provider, url: r.url, durable: r.durable })
@@ -818,7 +673,7 @@ async function main() {
               image_source: r.provider,
               image_source_metadata: {
                 generated_by: 'scripts/generate-missing-media.js',
-                phase: '14L.2.1',
+                phase: '14AG',
                 external_id: r.external_id ?? null,
                 generated_at: new Date().toISOString(),
               },
@@ -831,63 +686,63 @@ async function main() {
       if (rec.needs === 'both') continue
     }
 
-    // Video path.
+    // Video path — Pexels Video, synchronous, lands at media_status='ready'.
     if (rec.needs === 'video' || (rec.needs === 'both' && flags.videosOnly)) {
       const r = await processVideo(supabase, env, row, flags)
       if (!r.ok) {
         if (r.skipped) {
           skipped++
           samples.push({ ...item, action: 'video', success: false, skipped: true, error: r.error })
-          // Per spec — "do not write failed unless --apply explicitly requests"
-          // For 'video script missing' we simply log and move on. Operator
-          // can extend the upstream content generator to author scripts.
         } else {
           failed++
           samples.push({ ...item, action: 'video', success: false, error: r.error, provider: r.provider })
           if (flags.apply && rec.target_table === 'content_calendar') {
             await writeMediaToContentCalendar(supabase, row.id, {
               media_status: 'failed',
-              media_source: 'heygen',
-              media_error: (r.error ?? 'heygen call failed').slice(0, 1000),
+              media_source: 'pexels',
+              media_error: (r.error ?? 'pexels-video fetch failed').slice(0, 1000),
             })
           }
         }
-      } else if (r.pending) {
-        // HeyGen returned a video_id — render in progress. Don't write a
-        // URL; mark pending and persist the id where it can be polled.
+      } else {
         succeeded++
-        samples.push({ ...item, action: 'video', success: true, provider: 'heygen', pending: true, external_id: r.external_id })
+        samples.push({ ...item, action: 'video', success: true, provider: 'pexels-video', url: r.url, external_id: r.external_id })
         if (flags.apply) {
           if (rec.target_table === 'campaign_assets') {
-            // campaign_assets has video_source_metadata JSONB — clean home
-            // for the heygen video_id.
             await writeMediaToCampaignAsset(supabase, rec.target_id, {
-              video_source: 'heygen',
+              video_url: r.url,
+              video_source: 'pexels',
               video_source_metadata: {
-                heygen_video_id: r.external_id,
-                status: 'queued',
-                queued_at: new Date().toISOString(),
+                pexels_video_id: r.external_id ?? null,
                 generated_by: 'scripts/generate-missing-media.js',
-                phase: '14L.2.1',
+                phase: '14AG',
+                generated_at: new Date().toISOString(),
+                ...(r.raw ?? {}),
               },
             })
           } else {
-            // Phase 14L.2.2 — clean storage in content_calendar.media_metadata
-            // (migration 033). Replaces the Phase 14L.2.1 media_error
-            // overload. The polling script reads media_metadata first and
-            // falls back to media_error for legacy in-flight jobs.
+            // Phase 14AG — preserve existing media_metadata (e.g.
+            // on_screen_hook from the cron) and merge Pexels-video provenance.
+            const { data: cur } = await supabase
+              .from('content_calendar')
+              .select('media_metadata')
+              .eq('id', row.id)
+              .maybeSingle()
+            const existing = (cur?.media_metadata && typeof cur.media_metadata === 'object') ? cur.media_metadata : {}
             await writeMediaToContentCalendar(supabase, row.id, {
-              media_status: 'pending',
-              media_source: 'heygen',
-              media_metadata: {
-                heygen_video_id: r.external_id,
-                queued_at: new Date().toISOString(),
-                generated_by: 'scripts/generate-missing-media.js',
-                phase: '14L.2.2',
-              },
-              // Defensively clear any legacy media_error sentinel left over
-              // from a Phase 14L.2.1 run on this row (no-op if absent).
+              video_url: r.url,
+              media_status: 'ready',
+              media_source: 'pexels',
+              media_generated_at: new Date().toISOString(),
               media_error: null,
+              media_metadata: {
+                ...existing,
+                source: 'pexels-video',
+                pexels_video_id: r.external_id ?? null,
+                fetched_at: new Date().toISOString(),
+                fetched_by: 'scripts/generate-missing-media.js',
+                ...(r.raw ?? {}),
+              },
             })
           }
         }
@@ -903,7 +758,7 @@ async function main() {
               : s.success === false ? `${COLORS.red}err${COLORS.reset}`
               : `${COLORS.dim}plan${COLORS.reset}`
     const url = s.url ? ` ${COLORS.dim}${s.url}${COLORS.reset}` : ''
-    const ext = s.external_id ? ` ${COLORS.dim}(heygen_id=${s.external_id})${COLORS.reset}` : ''
+    const ext = s.external_id ? ` ${COLORS.dim}(pexels_id=${s.external_id})${COLORS.reset}` : ''
     const err = s.error ? ` ${COLORS.dim}— ${s.error}${COLORS.reset}` : ''
     const dur = s.durable === false ? ` ${COLORS.yellow}[provider URL — not stored]${COLORS.reset}` : ''
     console.log(`   [${tag}] ${s.id} ${s.platform} ${s.action ?? 'plan'} → ${s.target}${url}${ext}${dur}${err}`)
@@ -918,11 +773,8 @@ async function main() {
   // 6. Provider key presence.
   console.log(`${COLORS.bold}Provider key presence${COLORS.reset}`)
   for (const [name, role] of [
-    ['PEXELS_API_KEY',  'image (primary)'],
+    ['PEXELS_API_KEY',  'image + video (primary)'],
     ['OPENAI_API_KEY',  'image (fallback)'],
-    ['HEYGEN_API_KEY',  'video'],
-    ['HEYGEN_AVATAR_ID','video — avatar'],
-    ['HEYGEN_VOICE_ID', 'video — voice'],
   ]) {
     const present = !!(env[name] && env[name].length > 0)
     console.log(`   ${present ? COLORS.green + '✓' : COLORS.yellow + '·'} ${name}${COLORS.reset}  (${role}) ${present ? 'present' : 'MISSING'}`)

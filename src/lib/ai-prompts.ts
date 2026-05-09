@@ -86,6 +86,12 @@ TIKTOK:
 - One hook line + a hashtag burst. The video itself carries the story; the caption hooks the algorithm.
 - Minimal emojis (1-2 max) — the visual is the video.
 
+TIKTOK-SPECIFIC: Image Prompt + On-Screen Hook (Phase 14AG)
+- Phase 14AG removed the talking-head avatar pipeline. TikTok rows now use cinematic stock travel B-roll fetched from Pexels Video Search, with text burned on top in a future render step.
+- Image Prompt for TikTok rows: write it as a Pexels Video search query (3-7 words), describing a cinematic vertical travel B-roll clip. Examples: "cinematic beach drone overhead", "luxury resort pool aerial", "couple walking paris night street", "infinity pool ocean view sunset", "tropical waterfall slow motion".
+- Strongly prefer concrete travel imagery (destinations, landscapes, water, architecture, transportation, lifestyle moments) over abstract concepts. The Pexels library is curated for travel — search like a travel photographer would tag a clip.
+- On-Screen Hook: write a short text overlay (MAX 10 WORDS, hard cap) that will be burned onto the video. This is the hook the viewer reads in the first second — it must contain a savings number or curiosity gap. Examples: "Cancun for $1,540. Members only.", "Paris hotel: $89 a night.", "Hotels have wholesale rates.", "Stop overpaying for vacations." Avoid generic taglines ("Travel more, spend less"); be specific.
+
 ═══════════════════════════════════════════════════════════════════════════
 RULE 3 — VALUE-FIRST CTA STRUCTURE
 ═══════════════════════════════════════════════════════════════════════════

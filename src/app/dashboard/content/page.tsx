@@ -299,38 +299,39 @@ export default function ContentPage() {
                         >
                           {mediaBadgeLabel}
                         </span>
-                        {/* Phase 14L.2.1 — surface pending HeyGen renders so
-                            operators see "video generating" instead of just
-                            "media missing" while the worker polls. */}
-                        {item.media_status === 'pending' && item.media_source === 'heygen' && (
+                        {/* Phase 14AG — surface legacy HeyGen rows that
+                            never got polled to completion. After Phase 14AG
+                            the new pipeline uses Pexels Video synchronously
+                            in the weekly cron, so any row sitting at
+                            media_source='heygen' is a stale leftover from
+                            the old async worker. The label now points the
+                            operator at the action that resolves it. */}
+                        {item.media_source === 'heygen' && (
                           <span
-                            className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-indigo-50 text-indigo-700"
-                            title="HeyGen render is in progress — run scripts/check-video-generation-status.js to poll."
+                            className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700"
+                            title="Legacy HeyGen row — re-run the weekly content cron or use generate-missing-media.js to swap in a Pexels B-roll clip."
                           >
-                            🎬 Video generating
+                            ⚠ Legacy HeyGen row
                           </span>
                         )}
                         <span className="text-xs text-gray-400">Week of {formatDate(item.week_of)}</span>
                       </div>
 
-                      {/* Phase 14AF — TikTok drafts whose video hasn't been
-                          rendered yet show "Media missing" / "Media failed",
-                          which reads like an error. The actual state is the
-                          deliberate Phase 14L design: HeyGen renders are
-                          gated to a manual operator command (API quota
-                          protection). Surface that command inline so the
-                          state becomes actionable, not confusing. Skipped
-                          when the row is already in the pending-HeyGen
-                          state — that pill above already explains itself. */}
+                      {/* Phase 14AG — under the new Pexels Video pipeline,
+                          fresh TikTok rows from the weekly cron land with
+                          media_status='ready' and never reach this branch.
+                          Keep an inline actionable hint for any TikTok row
+                          that *did* fall to missing/failed (rare — typically
+                          a transient Pexels failure or a legacy row) so the
+                          state stays one click from resolution. */}
                       {item.platform === 'tiktok'
-                        && (media.outcome === 'missing' || media.outcome === 'failed')
-                        && !(item.media_status === 'pending' && item.media_source === 'heygen') && (
+                        && (media.outcome === 'missing' || media.outcome === 'failed') && (
                         <p className="text-[11px] text-gray-500 mb-2">
                           Run{' '}
                           <code className="px-1 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-700">
-                            node scripts/generate-missing-media.js --provider=heygen
+                            node scripts/generate-missing-media.js --videos-only --content-only --generate --apply
                           </code>
-                          {' '}to render video
+                          {' '}to fetch a Pexels B-roll clip
                         </p>
                       )}
 

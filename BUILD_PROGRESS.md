@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. Audit of `scripts/generate-missing-media.js` confirms the "Media missing" badge on TikTok drafts is a correct, deliberate signal (HeyGen renders are gated to a manual operator command per Phase 14L's API-quota design), not a bug. Single dashboard edit in `src/app/dashboard/content/page.tsx` adds an inline actionable helper under the badge row when a TikTok row is in the missing-or-failed state — surfaces the exact command "node scripts/generate-missing-media.js --provider=heygen" so the state becomes actionable instead of confusing. Lint + typecheck clean. No DB; no platform calls.)
+**Last updated:** 2026-05-09 (Phase 14AG shipping in working tree — Video Pipeline Swap. HeyGen excised from the SOCIAL CONTENT PIPELINE (avatar voice was off-brand, async-only flow incompatible with the synchronous weekly cron, and rendering costs added up). Pexels Video Search wired in as the replacement: cinematic vertical HD travel B-roll, free, synchronous, lands on the row immediately. The TikTok "Media missing" state is now eliminated at the source — every TikTok row from the weekly cron lands at `media_status='ready'` with a Pexels MP4 in `video_url`. New `fetchAndStoreVideo()` in `src/lib/media-providers.ts`. Cron updated with `maxDuration=60`, parallel image+video fetch, `on_screen_hook` parsing into `media_metadata`. `ai-prompts.ts` rewritten with TikTok-specific image-prompt-as-search-query + 10-word On-Screen Hook directives. `scripts/generate-missing-media.js` rewritten — HeyGen surface fully removed; `processVideo` calls Pexels Video. `scripts/check-video-generation-status.js` and `scripts/inspect-heygen-pilot-candidates.js` deleted. Dashboard "🎬 Video generating" pill replaced by "⚠ Legacy HeyGen row" pill. Admin SBA welcome-video stack deliberately untouched (separate feature; `/sba` page would break). Lint + typecheck clean. No DB; no platform calls.)
+**Earlier this session:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. Audit of `scripts/generate-missing-media.js` confirms the "Media missing" badge on TikTok drafts is a correct, deliberate signal (HeyGen renders are gated to a manual operator command per Phase 14L's API-quota design), not a bug. Single dashboard edit in `src/app/dashboard/content/page.tsx` adds an inline actionable helper under the badge row when a TikTok row is in the missing-or-failed state — surfaces the exact command "node scripts/generate-missing-media.js --provider=heygen" so the state becomes actionable instead of confusing. Lint + typecheck clean. No DB; no platform calls.)
 **Earlier this session:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905" added to shared `Footer.tsx`, replacing the `<!-- TODO -->` placeholder from 14AE. Surfaces on all three TCR-submitted pages via the shared component. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six edits across four files plus one new shared `Footer.tsx`. Lint + typecheck clean. No DB; no platform calls.)
 **Last code-shipping commit:** `03c9ca4` (Phase 14AC: Final System Audit + Maintenance Mode declaration)
@@ -9,6 +10,32 @@
 ---
 
 ## Current focus
+
+**Phase 14AG — Video Pipeline Swap: HeyGen → Pexels Video (in working tree, 2026-05-09 — full HeyGen excision from social content pipeline + new Pexels Video fetcher + automated TikTok video on the weekly cron; no DB schema change; no platform calls).**
+
+The TikTok "Media missing" state from Phase 14AF is now resolved at the source — Phase 14AF made it actionable; Phase 14AG eliminates it. The weekly-content cron now fetches a Pexels Video synchronously for every TikTok row and lands `video_url` + `media_status='ready'` in the same insert.
+
+**Built in 14AG:**
+- [x] **`src/lib/media-providers.ts` — full rewrite of the type surface.** Removed `createHeyGenVideo`, `getHeyGenVideoStatus`, all HeyGen types/env plumbing, the `'heygen'` arm of `MediaProviderName`, the `status` field on `MediaProviderResult`. Added `fetchAndStoreVideo()`, the supporting type interfaces, and `pickBestPortraitMp4()`. Calls `https://api.pexels.com/videos/search` with `orientation=portrait`, `size=large`, `per_page=5`, picks the highest-quality vertical MP4 with duration in [5, 30] seconds. Returns the Pexels CDN URL directly (no re-hosting).
+- [x] **`src/app/api/cron/weekly-content/route.ts`.** Added `export const maxDuration = 60`, `fetchAndStoreVideo` import, an `onScreenHook` field on the `ParsedPost` type, and a markdown-parser pass that captures `On-Screen Hook:` lines. The user prompt now teaches the AI a TikTok-specific format. Row builder runs image + video fetches in parallel per post; TikTok rows that get a `video_url` land with `media_status='ready'`, `media_source='pexels'`, `media_generated_at`, and `media_metadata: { source, on_screen_hook, pexels_video_id, fetched_at }`. `videos_generated` added to the cron's success log + response payload.
+- [x] **`src/lib/ai-prompts.ts`.** New TIKTOK-SPECIFIC subsection in `SOCIAL_SYSTEM`'s Rule 2 block. (a) `image_prompt` written as a 3–7 word Pexels Video search query for cinematic vertical travel B-roll; (b) `On-Screen Hook` of max 10 words containing a savings number or curiosity gap. Examples and banned generic taglines included.
+- [x] **`src/app/dashboard/content/page.tsx`.** The "🎬 Video generating" indigo pill replaced by an amber "⚠ Legacy HeyGen row" pill (any row with `media_source='heygen'`). The Phase 14AF helper text updated to point at the new command shape `node scripts/generate-missing-media.js --videos-only --content-only --generate --apply` (no `--provider=heygen`).
+- [x] **`scripts/generate-missing-media.js` — full rewrite of the HeyGen surface.** Removed all HeyGen caps/flags/sanity-checks/preview/cleanScript/createHeyGenVideo, plus the `'heygen'` provider option. Added `pickBestPortraitMp4`, `fetchPexelsVideo`, `buildVideoQuery`. `processVideo()` calls Pexels Video synchronously and lands rows at `media_status='ready'` with `media_metadata.pexels_video_id` (preserving any existing metadata, e.g. `on_screen_hook` from the cron, via merge).
+- [x] **`scripts/check-video-generation-status.js` deleted.**
+- [x] **`scripts/inspect-heygen-pilot-candidates.js` deleted.**
+- [x] **`.env.example`.** `PEXELS_API_KEY` comment now mentions video. `HEYGEN_*` block rewritten to make clear those vars are now ONLY used by the (separate, untouched) admin SBA welcome-video feature.
+
+**Open question for the operator:** the admin SBA welcome-video stack on `/dashboard/videos` (and the public `/sba` page) still uses HeyGen. Phase 14AG deliberately did NOT touch that path because it's a separate feature from the social content pipeline and deleting it would break `/sba`. If you want full HeyGen removal, that's Phase 14AG.1.
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Image + video parallelism verified
+- ✅ Conditional video fetch — non-TikTok rows skip the video API call entirely
+
+---
+
+## Earlier focus
 
 **Phase 14AF — Media Pipeline Audit & UI Polish (in working tree, 2026-05-09 — single dashboard component edit + script audit; no DB; no platform calls).**
 

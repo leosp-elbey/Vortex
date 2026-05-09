@@ -1,46 +1,43 @@
-// Phase 14L.2.1 — Media provider helpers (Pexels / OpenAI image / HeyGen).
+// Phase 14AG — Media provider helpers (Pexels image + OpenAI image fallback +
+// Pexels Video). HeyGen was excised in this phase: the avatar pipeline did
+// not match brand voice, was expensive, and was async-only (incompatible
+// with the synchronous weekly-content cron under Vercel Hobby's 60s ceiling).
 //
-// Pure HTTP wrappers for the three providers the media-generation worker
-// needs. Each function returns a normalized `MediaProviderResult` so the
-// worker can branch uniformly on success/failure across providers.
+// Pure HTTP wrappers. No DB, no platform posting. Each function returns a
+// normalized `MediaProviderResult` so callers can branch uniformly.
 //
-// Design notes:
-//   - No DB calls. Callers (the worker / future routes) are responsible for
-//     persisting the returned URL / external_id.
-//   - No platform posting calls. Even though some providers return public
-//     URLs that COULD be embedded in a post, this module never publishes.
-//   - Reads API keys from env at call time. A missing key returns a
-//     normalized `{ success: false }` rather than throwing — the worker
-//     can decide whether to fall back to another provider.
-//   - HeyGen is async-only: createHeyGenVideo returns the job id, status
-//     'queued', and NO video_url. A separate polling step (already shipped
-//     for the SBA video at /api/cron/check-heygen-jobs) must observe
-//     completion. The worker uses media_status='pending' + media_source=
-//     'heygen' until the polling step writes the final URL.
+// Key design notes for the new Pexels Video path:
+//   - Synchronous: a successful return has `url` set immediately.
+//   - Returns the Pexels-hosted MP4 URL directly. We do NOT re-upload to
+//     Supabase Storage in this phase — Pexels CDN URLs are stable, and
+//     re-hosting 5–30 MB MP4s inside the cron would push the function past
+//     Vercel's 60s ceiling on weeks with multiple TikTok rows. If durability
+//     becomes a concern, a separate hardening phase can add an async
+//     re-upload pass without touching this signature.
+//   - Picks the highest-quality vertical/portrait MP4 from the Pexels
+//     `video_files` array (TikTok / Reels / Shorts are all 9:16). Falls
+//     back to the highest-resolution file regardless of orientation if no
+//     portrait match is available — better to land a usable URL than to
+//     fail the whole cron over a strict filter.
 
-export type MediaProviderName = 'pexels' | 'openai' | 'heygen'
+export type MediaProviderName = 'pexels' | 'openai' | 'pexels-video'
 
 export interface MediaProviderResult {
-  /** True when the provider returned a usable artifact (URL or job id). */
+  /** True when the provider returned a usable artifact (URL). */
   success: boolean
   provider: MediaProviderName
-  /** The fetched/generated public URL. Empty for HeyGen until polling completes. */
+  /** The fetched/generated public URL. */
   url?: string
-  /** Provider-specific id (Pexels photo id, HeyGen video id, etc). */
+  /** Provider-specific id (Pexels photo/video id). */
   external_id?: string
   /**
-   * Raw provider payload, primarily for diagnostics. The worker may persist
-   * a small subset into campaign_assets.image_source_metadata /
+   * Raw provider payload, primarily for diagnostics. Callers may persist a
+   * small subset into campaign_assets.image_source_metadata /
    * .video_source_metadata; full bodies should not be stored.
    */
   raw?: unknown
   /** Normalized error message when success=false. */
   error?: string
-  /**
-   * For HeyGen — 'queued' / 'processing' / 'completed' / 'failed'. Other
-   * providers omit this (they're synchronous, so success=true → completed).
-   */
-  status?: 'queued' | 'processing' | 'completed' | 'failed'
 }
 
 export interface PexelsImageOptions {
@@ -57,21 +54,25 @@ export interface OpenAIImageOptions {
   size?: '1024x1024' | '1792x1024' | '1024x1792' | string
 }
 
-export interface HeyGenVideoOptions {
-  /** Required: the spoken text. HeyGen needs a script — refuse without one. */
-  script: string
-  /** Optional title metadata (HeyGen accepts via callback URL etc.; we don't pass). */
-  title?: string
-  /** Override avatar — defaults to env HEYGEN_AVATAR_ID. */
-  avatarId?: string
-  /** Override voice — defaults to env HEYGEN_VOICE_ID. */
-  voiceId?: string
+export interface PexelsVideoOptions {
+  /** Search query (typically the AI-generated `image_prompt`). */
+  query: string
+  /** 'landscape' | 'portrait' | 'square' — defaults to 'portrait' for vertical reels. */
+  orientation?: 'landscape' | 'portrait' | 'square'
+  /** Pexels size hint: 'large' | 'medium' | 'small'. Defaults to 'large'. */
+  size?: 'large' | 'medium' | 'small'
+  /** Per-page count Pexels returns. Defaults to 5 so we can pick the best portrait MP4. */
+  perPage?: number
+  /** Min seconds — Pexels returns clips of various lengths. Defaults to 5. */
+  minDurationSeconds?: number
+  /** Max seconds — caps clip length so we don't ship a 60s loop. Defaults to 30. */
+  maxDurationSeconds?: number
 }
 
 const PROVIDER_ENV_KEY: Record<MediaProviderName, string> = {
   pexels: 'PEXELS_API_KEY',
   openai: 'OPENAI_API_KEY',
-  heygen: 'HEYGEN_API_KEY',
+  'pexels-video': 'PEXELS_API_KEY',
 }
 
 /**
@@ -86,8 +87,8 @@ export function isMediaProviderConfigured(provider: MediaProviderName): boolean 
 
 /**
  * Coerce arbitrary thrown values / response payloads into a short string.
- * Handles common shapes: Error, OpenAI's `{ error: { message } }`, HeyGen's
- * `{ message }`, Pexels's `{ error: '...' }`, and bare strings.
+ * Handles common shapes: Error, OpenAI's `{ error: { message } }`,
+ * Pexels's `{ error: '...' }`, and bare strings.
  */
 export function normalizeProviderError(err: unknown): string {
   if (!err) return 'unknown error'
@@ -122,7 +123,7 @@ interface PexelsPhoto {
   url?: string
   photographer?: string
 }
-interface PexelsResponse {
+interface PexelsImageResponse {
   photos?: PexelsPhoto[]
   error?: string
 }
@@ -152,7 +153,7 @@ export async function fetchPexelsImage(opts: PexelsImageOptions): Promise<MediaP
     const res = await fetch(url, {
       headers: { Authorization: process.env.PEXELS_API_KEY as string },
     })
-    const data = (await res.json().catch(() => ({}))) as PexelsResponse
+    const data = (await res.json().catch(() => ({}))) as PexelsImageResponse
     if (!res.ok) {
       return {
         success: false,
@@ -239,173 +240,171 @@ export async function generateOpenAIImage(opts: OpenAIImageOptions): Promise<Med
   }
 }
 
-interface HeyGenGenerateResponse {
-  data?: { video_id?: string }
-  message?: string
-  error?: unknown
+interface PexelsVideoFile {
+  id?: number
+  /** 'hd' | 'sd' | 'uhd' | string */
+  quality?: string
+  /** 'video/mp4' | 'video/quicktime' | string */
+  file_type?: string
+  width?: number
+  height?: number
+  fps?: number
+  link?: string
+}
+interface PexelsVideoEntry {
+  id?: number | string
+  width?: number
+  height?: number
+  duration?: number
+  url?: string
+  video_files?: PexelsVideoFile[]
+}
+interface PexelsVideoResponse {
+  videos?: PexelsVideoEntry[]
+  error?: string
+  total_results?: number
+  page?: number
+  per_page?: number
 }
 
 /**
- * Kicks off a HeyGen video render. ASYNC — the function returns as soon as
- * HeyGen accepts the job (status='queued'); a separate polling step (see
- * scripts/check-video-generation-status.js + the existing
- * /api/cron/check-heygen-jobs route) must observe completion and write the
- * final video_url.
- *
- * Refuses to call when:
- *   - HEYGEN_API_KEY missing
- *   - HEYGEN_AVATAR_ID / HEYGEN_VOICE_ID missing AND no override passed
- *   - script is empty (HeyGen needs spoken text)
- *
- * The worker MUST treat a `success: true, status: 'queued'` result as
- * `media_status='pending'` + `media_source='heygen'` and persist the
- * `external_id` (video_id) somewhere safe so the polling step can find it.
+ * Pick the best video_file from a Pexels video entry for vertical reels:
+ *   1. Prefer `video/mp4` (TikTok/IG Reels need MP4).
+ *   2. Prefer portrait orientation (height > width).
+ *   3. Among matching files, prefer 'hd' / 'uhd' over 'sd'.
+ *   4. Among same-quality files, prefer the highest height.
+ * Returns null if no usable file found.
  */
-export async function createHeyGenVideo(opts: HeyGenVideoOptions): Promise<MediaProviderResult> {
-  const provider: MediaProviderName = 'heygen'
-  if (!isMediaProviderConfigured(provider)) {
-    return { success: false, provider, error: 'HEYGEN_API_KEY not set' }
-  }
-  if (!opts.script || !opts.script.trim()) {
-    return { success: false, provider, error: 'video script is empty — HeyGen needs spoken text' }
-  }
-  const avatarId = opts.avatarId ?? process.env.HEYGEN_AVATAR_ID
-  const voiceId = opts.voiceId ?? process.env.HEYGEN_VOICE_ID
-  if (!avatarId) {
-    return { success: false, provider, error: 'HEYGEN_AVATAR_ID not set and no avatarId override provided' }
-  }
-  if (!voiceId) {
-    return { success: false, provider, error: 'HEYGEN_VOICE_ID not set and no voiceId override provided' }
+function pickBestPortraitMp4(entry: PexelsVideoEntry): PexelsVideoFile | null {
+  const files = (entry.video_files ?? []).filter(f => typeof f.link === 'string' && f.link.length > 0)
+  if (files.length === 0) return null
+
+  const mp4 = files.filter(f => (f.file_type ?? 'video/mp4').toLowerCase().includes('mp4'))
+  const pool = mp4.length > 0 ? mp4 : files
+
+  const portrait = pool.filter(f => (f.height ?? 0) > (f.width ?? 0))
+  const target = portrait.length > 0 ? portrait : pool
+
+  const qualityRank = (q?: string) => {
+    const lower = (q ?? '').toLowerCase()
+    if (lower === 'uhd') return 3
+    if (lower === 'hd') return 2
+    if (lower === 'sd') return 1
+    return 0
   }
 
+  return target.slice().sort((a, b) => {
+    const dq = qualityRank(b.quality) - qualityRank(a.quality)
+    if (dq !== 0) return dq
+    return (b.height ?? 0) - (a.height ?? 0)
+  })[0] ?? null
+}
+
+/**
+ * Fetch a single Pexels video URL for `query`. Synchronous: a successful
+ * return has `url` set immediately, ready to drop into
+ * content_calendar.video_url with media_status='ready'.
+ *
+ * The function is named `fetchAndStoreVideo` (per Phase 14AG directive) but
+ * the "store" portion is a no-op in this phase — we return the Pexels CDN
+ * URL directly. Pexels URLs are durable (months+ stability), and re-hosting
+ * 5–30 MB MP4s inside the weekly cron would risk Vercel's 60s ceiling on
+ * weeks with multiple TikTok rows. If durability becomes a concern, a
+ * future phase can add an async re-upload pass without changing this
+ * function's signature — callers persist whatever `url` is returned.
+ *
+ * Filters:
+ *   - orientation defaults to 'portrait' (TikTok / IG Reels are 9:16).
+ *   - size defaults to 'large' (Pexels HD/UHD bias).
+ *   - duration filter (default 5–30s) keeps clips usable as B-roll loops.
+ */
+export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<MediaProviderResult> {
+  const provider: MediaProviderName = 'pexels-video'
+  if (!isMediaProviderConfigured(provider)) {
+    return { success: false, provider, error: 'PEXELS_API_KEY not set' }
+  }
+  if (!opts.query || !opts.query.trim()) {
+    return { success: false, provider, error: 'query is required' }
+  }
+  const perPage = Math.max(1, Math.min(opts.perPage ?? 5, 80))
+  const orientation = opts.orientation ?? 'portrait'
+  const size = opts.size ?? 'large'
+  const minDuration = Math.max(1, opts.minDurationSeconds ?? 5)
+  const maxDuration = Math.max(minDuration, opts.maxDurationSeconds ?? 30)
+
+  const params = new URLSearchParams({
+    query: opts.query.slice(0, 200),
+    per_page: String(perPage),
+    orientation,
+    size,
+  })
+  const url = `https://api.pexels.com/videos/search?${params.toString()}`
+
   try {
-    const res = await fetch('https://api.heygen.com/v2/video/generate', {
-      method: 'POST',
-      headers: {
-        'X-Api-Key': process.env.HEYGEN_API_KEY as string,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        video_inputs: [{
-          character: {
-            type: 'avatar',
-            avatar_id: avatarId,
-            avatar_style: 'normal',
-          },
-          voice: {
-            type: 'text',
-            input_text: opts.script,
-            voice_id: voiceId,
-            speed: 1.0,
-          },
-        }],
-        // 9:16 portrait — works for TikTok / Reels / Stories. Caller can
-        // swap to 1280x720 (16:9) by editing this file when an organic
-        // YouTube row appears; until then portrait is the right default.
-        dimension: { width: 720, height: 1280 },
-        title: opts.title?.slice(0, 120),
-      }),
+    const res = await fetch(url, {
+      headers: { Authorization: process.env.PEXELS_API_KEY as string },
     })
-    const data = (await res.json().catch(() => ({}))) as HeyGenGenerateResponse
+    const data = (await res.json().catch(() => ({}))) as PexelsVideoResponse
     if (!res.ok) {
       return {
         success: false,
         provider,
-        error: normalizeProviderError(data) || `heygen http ${res.status}`,
+        error: normalizeProviderError(data) || `pexels-video http ${res.status}`,
         raw: data,
       }
     }
-    const videoId = data.data?.video_id
-    if (!videoId) {
+    const videos = data.videos ?? []
+    if (videos.length === 0) {
       return {
         success: false,
         provider,
-        error: 'heygen returned no video_id',
+        error: 'pexels-video returned no videos for query',
+        raw: data,
+      }
+    }
+    // Pick the first video matching the duration filter that yields a usable
+    // portrait MP4. Fall through to ANY usable file if no duration match.
+    let chosen: { entry: PexelsVideoEntry; file: PexelsVideoFile } | null = null
+    for (const entry of videos) {
+      const dur = entry.duration ?? 0
+      if (dur < minDuration || dur > maxDuration) continue
+      const file = pickBestPortraitMp4(entry)
+      if (file && file.link) {
+        chosen = { entry, file }
+        break
+      }
+    }
+    if (!chosen) {
+      for (const entry of videos) {
+        const file = pickBestPortraitMp4(entry)
+        if (file && file.link) {
+          chosen = { entry, file }
+          break
+        }
+      }
+    }
+    if (!chosen || !chosen.file.link) {
+      return {
+        success: false,
+        provider,
+        error: 'pexels-video returned no usable mp4 file',
         raw: data,
       }
     }
     return {
       success: true,
       provider,
-      external_id: videoId,
-      status: 'queued',
-      raw: data.data,
-    }
-  } catch (err) {
-    return { success: false, provider, error: normalizeProviderError(err) }
-  }
-}
-
-interface HeyGenStatusResponse {
-  data?: {
-    status?: string
-    video_url?: string | null
-    thumbnail_url?: string | null
-    error?: unknown
-  }
-  message?: string
-  error?: unknown
-}
-
-/**
- * Poll HeyGen for the status of a previously-created video. Mirrors the
- * pattern used by /api/cron/check-heygen-jobs. Returns:
- *   - success: true,  status: 'completed', url    when the render finished
- *   - success: false, status: 'failed',    error  when HeyGen rejected the job
- *   - success: false, status: 'queued' | 'processing'  while still rendering
- *     (caller treats this as "still pending; try again later")
- */
-export async function getHeyGenVideoStatus(videoId: string): Promise<MediaProviderResult> {
-  const provider: MediaProviderName = 'heygen'
-  if (!isMediaProviderConfigured(provider)) {
-    return { success: false, provider, error: 'HEYGEN_API_KEY not set' }
-  }
-  if (!videoId || !videoId.trim()) {
-    return { success: false, provider, error: 'videoId is required' }
-  }
-  try {
-    const res = await fetch(
-      `https://api.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
-      { headers: { 'X-Api-Key': process.env.HEYGEN_API_KEY as string } },
-    )
-    const data = (await res.json().catch(() => ({}))) as HeyGenStatusResponse
-    if (!res.ok) {
-      return {
-        success: false,
-        provider,
-        error: normalizeProviderError(data) || `heygen status http ${res.status}`,
-        raw: data,
-      }
-    }
-    const status = (data.data?.status ?? 'queued') as MediaProviderResult['status']
-    const videoUrl = data.data?.video_url ?? undefined
-    if (status === 'completed' && videoUrl) {
-      return {
-        success: true,
-        provider,
-        url: videoUrl,
-        external_id: videoId,
-        status: 'completed',
-        raw: data.data,
-      }
-    }
-    if (status === 'failed') {
-      return {
-        success: false,
-        provider,
-        external_id: videoId,
-        status: 'failed',
-        error: normalizeProviderError(data.data?.error) || 'heygen reported failure',
-        raw: data.data,
-      }
-    }
-    return {
-      success: false,
-      provider,
-      external_id: videoId,
-      status,
-      error: `heygen status: ${status}`,
-      raw: data.data,
+      url: chosen.file.link,
+      external_id: chosen.entry.id != null ? String(chosen.entry.id) : undefined,
+      raw: {
+        video_id: chosen.entry.id,
+        duration: chosen.entry.duration,
+        width: chosen.file.width,
+        height: chosen.file.height,
+        quality: chosen.file.quality,
+        file_type: chosen.file.file_type,
+        page_url: chosen.entry.url,
+      },
     }
   } catch (err) {
     return { success: false, provider, error: normalizeProviderError(err) }
