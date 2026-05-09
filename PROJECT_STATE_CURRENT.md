@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with seven operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day). All planned phases (0 → 14AC) shipped; 14AD–14AJ are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with eight operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route). All planned phases (0 → 14AC) shipped; 14AD–14AK are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AK shipping in working tree — TikTok OAuth Login Route. The operator hit a 404 visiting `https://www.vortextrips.com/api/auth/tiktok/login` while trying to authorize the TikTok Direct Post API. Diagnosis: Phase 14R built only the OAuth callback at `/api/auth/tiktok/callback` (the route that receives TikTok's redirect after the user authorizes); the corresponding LOGIN route — the one that builds the authorize URL and 302-redirects the browser to TikTok — was never created. This phase fills that gap with `src/app/api/auth/tiktok/login/route.ts`. The route reads `TIKTOK_CLIENT_KEY` from env, generates a CSRF state via `crypto.randomUUID()`, computes the same `redirect_uri` the callback uses (`${NEXT_PUBLIC_APP_URL || request.origin}/api/auth/tiktok/callback`), and issues a 302 to `https://www.tiktok.com/v2/auth/authorize/` with `client_key`, `scope=user.info.basic,video.publish`, `response_type=code`, `redirect_uri`, and `state`. Refuses with a clear 500 message if `TIKTOK_CLIENT_KEY` is unset (so the operator knows what to configure). State validation is intentionally still deferred — matches the callback's existing `void state` stance; a future phase can add a session-backed state store and validate at the callback hook point. No DB writes; no platform calls beyond the redirect itself; never logs sensitive values. Lint + typecheck clean.)
+**Last known good commit:** `3f26874` — "Phase 14AJ: Vercel Pro scale up — 3 autoposter ticks/day, FIFO drain"
 **Last updated:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. The operator upgraded to Vercel Pro, removing Hobby's "once per cron path per day" limit. The autoposter cron `vercel.json` schedule changes from `0 14 * * *` (10 AM EST once daily) to `0 14,18,22 * * *` (10 AM, 2 PM, 6 PM EST = 14:00, 18:00, 22:00 UTC), giving 3 autoposter ticks per day. The previous Phase 14S "queue_size_gt_1" refusal in `src/app/api/cron/autoposter-once/route.ts` (which forced the operator to Mark Ready exactly one row at a time) is removed: the cron now picks the OLDEST eligible row by `queued_for_posting_at` ascending (FIFO), posts it, and leaves the rest for the next tick. Three ticks × one row per tick = up to 3 posts per day. The kill switch still acts as the per-failure circuit breaker — first auto-disable halts the remaining ticks until the operator re-enables. The eligibility query limit raised from 5 to 50 so the cron sees the full FIFO queue. Response payload now includes `queue_depth_before` and `queue_depth_remaining` for operator visibility. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior — the script's `eligible.length > 1` refusal is gone; it now picks the oldest and announces remaining queue depth. Lint + typecheck clean. No DB schema change; no platform calls.)
 **Last known good commit:** `60957da` — "Phase 14AI: manual Generate This Week route — wire Pexels Video for TikTok"
 **Last updated:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, which was NOT updated in Phase 14AG and was producing TikTok rows with `video_url=null` (and no Pexels image either — the image fetch was gated to `instagram|facebook` only). This phase brings the manual route into sync with the Phase 14AG/AH/AH.1 cron behavior: image fetch now runs for ALL platforms (with `orientation=portrait` for IG/TikTok, `landscape` for FB), TikTok rows synchronously call `fetchAndStoreVideo()` from `src/lib/media-providers.ts` and land at `media_status='ready'`, `media_source='pexels'`, with `video_url` populated and `media_metadata` carrying the on-screen hook + Pexels video provenance. The route's user prompt now teaches the AI a TikTok-specific format (image_prompt as a 3–7 word Pexels Video search query; on_screen_hook of max 10 words). `maxDuration=60` added to match the cron. The route's `ai_actions_log` payload + JSON response now include `videos_generated`. Lint + typecheck clean.)
@@ -28,6 +30,88 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AK — TikTok OAuth Login Route (in working tree, 2026-05-09 — single new route; no DB schema change; no platform calls beyond the redirect; no new dependencies)
+
+### What this phase ships
+
+A single new file: `src/app/api/auth/tiktok/login/route.ts`. Pairs with the existing Phase 14R callback at `/api/auth/tiktok/callback` so the OAuth handshake is end-to-end functional. The operator can now visit `https://www.vortextrips.com/api/auth/tiktok/login` to authorize the TikTok Direct Post API; the route builds the TikTok v2 authorize URL and 302-redirects the browser to it.
+
+### Why this gap existed
+
+Phase 14R (TikTok OAuth + Direct Post wiring) shipped:
+- `src/lib/tiktok-oauth.ts` — `exchangeCodeForTokens`, `refreshAccessToken`, `getValidTikTokAccessToken`, `saveTikTokTokens`
+- `src/app/api/auth/tiktok/callback/route.ts` — receives TikTok's redirect, exchanges code → tokens, persists to `site_settings`
+- `src/app/api/automations/post-to-tiktok/route.ts` — uses the stored tokens to publish
+
+But the LOGIN side (the user-initiated step that sends the browser TO TikTok) was never built. The expectation was that an external "Connect TikTok" button in the dashboard would construct the authorize URL inline. Without that UI, the operator had no way to start the flow except by manually constructing the URL.
+
+The error message in `scripts/run-autoposter-once.js` told the operator to "Reconnect via /api/auth/tiktok/callback" — which is wrong (the callback receives the redirect, it doesn't initiate it). 14AK gives them a real entry point.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/app/api/auth/tiktok/login/route.ts` (new) | GET handler that reads `TIKTOK_CLIENT_KEY`, generates a CSRF `state` via `crypto.randomUUID()`, computes the callback URL the same way the callback route does (`NEXT_PUBLIC_APP_URL` with `request.nextUrl.origin` fallback), and issues a 302 to `https://www.tiktok.com/v2/auth/authorize/` with `client_key` / `scope=user.info.basic,video.publish` / `response_type=code` / `redirect_uri` / `state`. Returns 500 with a clear setup message if `TIKTOK_CLIENT_KEY` is not configured. Never logs sensitive values. No DB writes. |
+
+### The end-to-end OAuth flow after Phase 14AK
+
+```
+1. Operator visits  →  https://www.vortextrips.com/api/auth/tiktok/login
+2. (NEW) Login route → 302 to https://www.tiktok.com/v2/auth/authorize/?<params>
+3. Operator authorizes the app on TikTok's UI
+4. TikTok redirects → https://www.vortextrips.com/api/auth/tiktok/callback?code=...&state=...
+5. Callback (Phase 14R) → exchanges code for tokens → upserts site_settings → 302 to /dashboard/settings
+6. Future post-to-tiktok / autoposter calls use getValidTikTokAccessToken() → uses stored tokens
+```
+
+### Pre-flight checklist for the operator
+
+Before visiting `/api/auth/tiktok/login`, ensure:
+1. `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` are set in Vercel → Project Settings → Environment Variables
+2. The TikTok Developer Portal has `https://www.vortextrips.com/api/auth/tiktok/callback` registered as an authorized redirect URI (this MUST match exactly — if `NEXT_PUBLIC_APP_URL` includes a trailing slash or differs from the registered URI, TikTok rejects the auth flow with `redirect_uri_mismatch`)
+3. The TikTok app's required scopes include `user.info.basic` and `video.publish`
+
+### Refusals
+
+- **TIKTOK_CLIENT_KEY missing/empty** → 500 JSON `{ error: 'TIKTOK_CLIENT_KEY is not configured. Set it in Vercel → Project Settings → Environment Variables and redeploy before starting the OAuth flow.' }`
+- **Anything else (invalid app, scope rejection, user denial)** → falls through to TikTok; the platform's own error message lands at the callback which surfaces it via `/dashboard/settings?platform=tiktok&connected=false&error=…`
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No state validation. The callback still does `void state`. Adding state validation would require a session-backed store and unifying it with the YouTube callback. Tracked as a future phase.
+- ❌ No "Connect TikTok" button in the dashboard. The login URL is direct-paste / direct-link only. A UI affordance can be added in a small dashboard-page edit later.
+- ❌ No update to the misleading error message in `scripts/run-autoposter-once.js` (it still says "Reconnect via /api/auth/tiktok/callback" — wrong route). The same string also lives in `src/lib/tiktok-oauth.ts` line 237. These are operator-facing nits but not blocking; can be batch-fixed in a docs sync.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (the route only redirects when called; no API call is made server-side) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 1 new |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ `redirect_uri` computed via the SAME function shape as the callback route (`callbackUrl(request)`) — the two URIs are guaranteed byte-equivalent so TikTok accepts the round-trip
+- ✅ `state` generated via `crypto.randomUUID()` (Node 18+ / Vercel runtime — available since the existing routes use the same pattern)
+- ✅ Operator-facing 500 message includes specific configuration instructions (no opaque "internal error")
+
+### Migration
+
+**No.** No DB schema change.
+
+### Recommended next phase
+
+**14AK.1 — Operator-facing fix (optional):** update `src/lib/tiktok-oauth.ts` line 237 and `scripts/run-autoposter-once.js` "reconnect via /api/auth/tiktok/callback" string to point at `/api/auth/tiktok/login`. Cosmetic; clears up the misleading reconnect hint.
+
+**14AK.2 — State validation (optional):** add a session-backed CSRF store (or a short-lived signed JWT) and validate `state` at both the TikTok and YouTube callbacks. Eliminates the `void state` no-op.
 
 ---
 

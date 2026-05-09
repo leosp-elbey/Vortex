@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. Operator upgraded to Vercel Pro; autoposter cron schedule now `0 14,18,22 * * *` (10 AM / 2 PM / 6 PM EST = 3 posts/day in steady state). The Phase 14S `queue_size_gt_1` refusal is removed: cron picks the OLDEST eligible row by `queued_for_posting_at` FIFO, leaves the rest for the next tick. Eligibility limit raised from 5 to 50 for full queue visibility. Response payload includes `queue_depth_before` / `queue_depth_remaining`. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior. Kill switch + atomic UPDATE invariants unchanged. Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AK shipping in working tree — TikTok OAuth Login Route. Operator hit a 404 visiting `/api/auth/tiktok/login` while trying to authorize the TikTok Direct Post API. Phase 14R built only the callback at `/api/auth/tiktok/callback`; the corresponding LOGIN route — the user-initiated step that constructs the authorize URL and 302-redirects the browser to TikTok — was never created. 14AK adds it: `src/app/api/auth/tiktok/login/route.ts` reads `TIKTOK_CLIENT_KEY`, generates a CSRF `state`, computes the same `redirect_uri` the callback uses, and 302-redirects to `https://www.tiktok.com/v2/auth/authorize/` with `scope=user.info.basic,video.publish`. The full OAuth handshake is now end-to-end functional. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. Operator upgraded to Vercel Pro; autoposter cron schedule now `0 14,18,22 * * *` (10 AM / 2 PM / 6 PM EST = 3 posts/day in steady state). The Phase 14S `queue_size_gt_1` refusal is removed: cron picks the OLDEST eligible row by `queued_for_posting_at` FIFO, leaves the rest for the next tick. Eligibility limit raised from 5 to 50 for full queue visibility. Response payload includes `queue_depth_before` / `queue_depth_remaining`. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior. Kill switch + atomic UPDATE invariants unchanged. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, a separate route from the cron that wasn't updated in Phase 14AG. Pre-14AI it produced TikTok rows with `video_url=null` (and no Pexels image either — image fetch was IG/FB-only). 14AI brings the manual route into sync: image fetch runs for ALL platforms; TikTok rows synchronously call `fetchAndStoreVideo()` and land at `media_status='ready'` with `video_url` populated and `media_metadata` carrying `on_screen_hook` + Pexels provenance. User prompt teaches AI the TikTok-specific format. `maxDuration=60`. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes in one revision: (1) `scripts/generate-missing-media.js` now refuses upfront on missing PEXELS_API_KEY before any SELECT, preventing config errors from corrupting DB rows (the very failure mode hit during the earlier 14AH backfill attempt). (2) `fetchAndStoreVideo` swapped from deterministic "page 1 → fallback page 2–6 → first-fit" to **random page 1–5 + random unused index** for visual variety. Cron's DB pre-query removed per operator directive; in-run accumulator preserved. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. The new Pexels Video pipeline from Phase 14AG could pick the same MP4 twice when two posts have similar `image_prompt` values (Pexels search is deterministic). `fetchAndStoreVideo` now accepts `excludePexelsIds` and `excludeUrls` exclude sets; walks page 1 first, retries with a randomized page 2–6 if all page-1 results are excluded, falls back to a tagged duplicate as last resort. Both callers (weekly cron + manual script) pre-query existing `video_url` + `media_metadata.pexels_video_id` and accumulate newly-picked URLs/IDs as the run progresses. Cron's TikTok video fetches serialized (image fetches stay parallel). Lint + typecheck clean.)
@@ -14,6 +15,37 @@
 ---
 
 ## Current focus
+
+**Phase 14AK — TikTok OAuth Login Route (in working tree, 2026-05-09 — single new route to complete the OAuth handshake; no DB schema change; no platform calls).**
+
+Operator visited `https://www.vortextrips.com/api/auth/tiktok/login` to start TikTok auth and got a 404. Diagnosis: Phase 14R built only the callback half of OAuth; the login half was missing. 14AK fills the gap.
+
+**Built in 14AK:**
+- [x] **`src/app/api/auth/tiktok/login/route.ts` (new).** GET handler. Reads `TIKTOK_CLIENT_KEY`, generates CSRF `state` via `crypto.randomUUID()`, computes callback URL the same way the callback route does, and issues a 302 to `https://www.tiktok.com/v2/auth/authorize/` with `client_key`, `scope=user.info.basic,video.publish`, `response_type=code`, `redirect_uri`, and `state`. Refuses with a clear 500 if `TIKTOK_CLIENT_KEY` is unset. No DB writes; no platform calls beyond the redirect.
+
+**End-to-end OAuth flow now functional:**
+1. Operator visits `/api/auth/tiktok/login`
+2. Login route → 302 to `https://www.tiktok.com/v2/auth/authorize/?<params>`
+3. Operator authorizes on TikTok's UI
+4. TikTok → 302 back to `/api/auth/tiktok/callback?code=...&state=...`
+5. Callback (Phase 14R) exchanges code for tokens, upserts `site_settings`, → `/dashboard/settings`
+6. `getValidTikTokAccessToken()` uses stored tokens for autoposter / manual platform routes
+
+**Pre-flight checklist for the operator:**
+- `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` set in Vercel env vars
+- TikTok Developer Portal has `https://www.vortextrips.com/api/auth/tiktok/callback` registered as a valid redirect URI
+- App's required scopes include `user.info.basic` and `video.publish`
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ `redirect_uri` computed via the same shape as the callback (byte-equivalent — TikTok accepts the round-trip)
+
+**Operator handoff:** after Vercel deploys this commit (~1–2 min), visit `https://www.vortextrips.com/api/auth/tiktok/login` and authorize. The callback writes tokens; the autoposter/manual routes pick them up automatically.
+
+---
+
+## Earlier focus
 
 **Phase 14AJ — Vercel Pro Scale Up: 3 Autoposter Ticks Per Day (in working tree, 2026-05-09 — `vercel.json` schedule + autoposter route + manual script; no DB schema change; no platform calls).**
 
