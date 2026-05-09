@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. The new Pexels Video pipeline from Phase 14AG could pick the same MP4 twice when two posts have similar `image_prompt` values (Pexels search is deterministic). `fetchAndStoreVideo` now accepts `excludePexelsIds` and `excludeUrls` exclude sets; walks page 1 first, retries with a randomized page 2–6 if all page-1 results are excluded, falls back to a tagged duplicate as last resort. Both callers (weekly cron + manual script) pre-query existing `video_url` + `media_metadata.pexels_video_id` and accumulate newly-picked URLs/IDs as the run progresses. Cron's TikTok video fetches serialized (image fetches stay parallel). Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes in one revision: (1) `scripts/generate-missing-media.js` now refuses upfront on missing PEXELS_API_KEY before any SELECT, preventing config errors from corrupting DB rows (the very failure mode hit during the earlier 14AH backfill attempt). (2) `fetchAndStoreVideo` swapped from deterministic "page 1 → fallback page 2–6 → first-fit" to **random page 1–5 + random unused index** for visual variety. Cron's DB pre-query removed per operator directive; in-run accumulator preserved. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. The new Pexels Video pipeline from Phase 14AG could pick the same MP4 twice when two posts have similar `image_prompt` values (Pexels search is deterministic). `fetchAndStoreVideo` now accepts `excludePexelsIds` and `excludeUrls` exclude sets; walks page 1 first, retries with a randomized page 2–6 if all page-1 results are excluded, falls back to a tagged duplicate as last resort. Both callers (weekly cron + manual script) pre-query existing `video_url` + `media_metadata.pexels_video_id` and accumulate newly-picked URLs/IDs as the run progresses. Cron's TikTok video fetches serialized (image fetches stay parallel). Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AG shipping in working tree — Video Pipeline Swap. HeyGen excised from the SOCIAL CONTENT PIPELINE (avatar voice was off-brand, async-only flow incompatible with the synchronous weekly cron, and rendering costs added up). Pexels Video Search wired in as the replacement: cinematic vertical HD travel B-roll, free, synchronous, lands on the row immediately. The TikTok "Media missing" state is now eliminated at the source — every TikTok row from the weekly cron lands at `media_status='ready'` with a Pexels MP4 in `video_url`. New `fetchAndStoreVideo()` in `src/lib/media-providers.ts`. Cron updated with `maxDuration=60`, parallel image+video fetch, `on_screen_hook` parsing into `media_metadata`. `ai-prompts.ts` rewritten with TikTok-specific image-prompt-as-search-query + 10-word On-Screen Hook directives. `scripts/generate-missing-media.js` rewritten — HeyGen surface fully removed; `processVideo` calls Pexels Video. `scripts/check-video-generation-status.js` and `scripts/inspect-heygen-pilot-candidates.js` deleted. Dashboard "🎬 Video generating" pill replaced by "⚠ Legacy HeyGen row" pill. Admin SBA welcome-video stack deliberately untouched (separate feature; `/sba` page would break). Lint + typecheck clean. No DB; no platform calls.)
 **Earlier this session:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. Audit of `scripts/generate-missing-media.js` confirms the "Media missing" badge on TikTok drafts is a correct, deliberate signal (HeyGen renders are gated to a manual operator command per Phase 14L's API-quota design), not a bug. Single dashboard edit in `src/app/dashboard/content/page.tsx` adds an inline actionable helper under the badge row when a TikTok row is in the missing-or-failed state — surfaces the exact command "node scripts/generate-missing-media.js --provider=heygen" so the state becomes actionable instead of confusing. Lint + typecheck clean. No DB; no platform calls.)
 **Earlier this session:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905" added to shared `Footer.tsx`, replacing the `<!-- TODO -->` placeholder from 14AE. Surfaces on all three TCR-submitted pages via the shared component. Lint + typecheck clean.)
@@ -12,18 +13,37 @@
 
 ## Current focus
 
-**Phase 14AH — Pexels Duplicate Prevention (in working tree, 2026-05-09 — dedup in `fetchAndStoreVideo` + DB pre-query in cron + script + accumulating exclude set; no DB schema change; no platform calls).**
+**Phase 14AH.1 — Pre-Flight Hardening + Randomized Pexels Fetch (in working tree, 2026-05-09 — script refuses upfront on missing API key + lib uses random page + random index; no DB schema change; no platform calls).**
 
-Pexels Video Search is deterministic, so two TikTok posts with similar prompts would otherwise collide on the same MP4. `fetchAndStoreVideo` now skips already-used videos using exclude sets the caller builds from existing `content_calendar.video_url` + `media_metadata.pexels_video_id`. Page 1 → randomized page 2–6 fallback → last-resort tagged duplicate (extremely rare).
+Phase 14AH originally used a deterministic first-fit strategy with a cron DB pre-query. After 14AH landed, the backfill failed because `.env.local` had `PEXELS_API_KEY=""` empty — the script wrote `media_status='failed'` to both queued rows. 14AH.1 fixes the safety hole AND swaps the dedup strategy to randomization per the operator's directive.
 
-**Built in 14AH:**
-- [x] **`src/lib/media-providers.ts`.** `PexelsVideoOptions` gains optional `excludePexelsIds: ReadonlySet<string>` and `excludeUrls: ReadonlySet<string>`. New internal `fetchPage(page)` + `pickFirstUnusedVideo()` helpers. `perPage` default raised from 5 to 15. `raw.duplicate_fallback = true` set on the last-resort path.
-- [x] **`src/app/api/cron/weekly-content/route.ts`.** Pre-query before the row loop. Image fetches stay parallel; TikTok video fetches serialize so the accumulator stays consistent. ~3.5s extra for 7 sequential fetches; well inside 60s.
-- [x] **`scripts/generate-missing-media.js`.** JS mirror of the lib changes. Pre-queries both `content_calendar` and `campaign_assets` for cross-table dedup. New "Dedup state" block prints existing counts. Sample-row labels append `(DUP)` when fallback fires.
+**Built in 14AH.1:**
+- [x] **`scripts/generate-missing-media.js` pre-flight.** New refusal block in `main()` AFTER the apply/generate flag validation but BEFORE the posted_at snapshot or any SELECT: when `--generate` is set with `--provider=auto` or `--provider=pexels` and `env.PEXELS_API_KEY` is empty/missing, the script prints "Refused: PEXELS_API_KEY is missing or empty in .env.local" and `process.exit(1)`. Dry-run still allowed without keys.
+- [x] **`src/lib/media-providers.ts` randomized fetch.** `fetchAndStoreVideo` rewritten around `fetchRandomPage(excludePages)` (random page 1–5, re-roll on dup) and `collectUsableVideos` (returns the full filtered candidate list — caller picks a random index). Up to 2 random pages tried; last resort returns a random duplicate with `raw.duplicate_fallback = true`.
+- [x] **`scripts/generate-missing-media.js` JS mirror.** `fetchPexelsVideo` rewritten with the same random-page + random-index logic. `pickFirstUnusedVideo` removed; `collectUsableVideos` added.
+- [x] **`src/app/api/cron/weekly-content/route.ts`.** Phase 14AH's DB pre-query (`SELECT video_url, media_metadata FROM content_calendar WHERE video_url IS NOT NULL`) removed. The empty `existingUrls` / `existingPexelsIds` Sets still construct and thread to `fetchAndStoreVideo` for in-run accumulator dedup. Cross-week dedup is now statistical (random page × random index across thousands of Pexels results = acceptable for weekly cadence).
+
+**Algorithm:**
+- Random page 1–5 (re-roll on collisions, max 10 attempts)
+- Within page, build candidate list (duration filter + exclude sets)
+- Random index pick from candidates
+- Up to 2 random pages tried; last-resort flagged duplicate
 
 **Verification:**
 - ✅ `npm run lint` clean
 - ✅ `npx tsc --noEmit` clean
+- ✅ Pre-flight fires BEFORE SELECT — verified by code path inspection
+- ✅ Random-page re-roll capped at 10 — cannot infinite-loop
+
+**Operator handoff:** the codebase is pushed; operator runs the backfill in their local terminal (which has the real Pexels key) to clear the failed-state rows from the previous attempt.
+
+---
+
+## Earlier focus
+
+**Phase 14AH — Pexels Duplicate Prevention (shipped in `be860ca`; superseded by 14AH.1 above).**
+
+The deterministic first-fit + cron DB pre-query strategy from 14AH was replaced. The exclude-set plumbing through `fetchAndStoreVideo` survives 14AH.1 (the standalone script still pre-queries the DB), but the cron's hot-path SELECT is gone and the lib's first-fit walker was replaced by random page + random index.
 
 ---
 

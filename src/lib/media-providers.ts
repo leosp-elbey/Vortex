@@ -315,23 +315,25 @@ function pickBestPortraitMp4(entry: PexelsVideoEntry): PexelsVideoFile | null {
 }
 
 /**
- * Walk a Pexels videos[] array (one page of search results) and pick the
- * first entry that:
+ * Build the list of usable candidates from a Pexels videos[] array:
  *   1. has a usable portrait MP4 file, AND
- *   2. has duration in [minDuration, maxDuration] (relaxed if no match), AND
- *   3. is not already used (per `excludePexelsIds` / `excludeUrls`).
+ *   2. has duration in [minDuration, maxDuration] (or — when relaxed —
+ *      any duration), AND
+ *   3. is not already used (per `excludePexelsIds` / `excludeUrls`)
+ *      unless `allowExcluded` is true.
  *
- * Returns null if every result was excluded — caller then falls back to a
- * different page or accepts a duplicate. Pure logic, no I/O.
+ * Returns the candidates in the order Pexels returned them. Pure logic,
+ * no I/O. Caller picks an index (typically random).
  */
-function pickFirstUnusedVideo(
+function collectUsableVideos(
   videos: PexelsVideoEntry[],
   minDuration: number,
   maxDuration: number,
   excludePexelsIds: ReadonlySet<string>,
   excludeUrls: ReadonlySet<string>,
-  allowExcluded = false,
-): { entry: PexelsVideoEntry; file: PexelsVideoFile } | null {
+  allowExcluded: boolean,
+  enforceDuration: boolean,
+): Array<{ entry: PexelsVideoEntry; file: PexelsVideoFile }> {
   const isExcluded = (entry: PexelsVideoEntry, file: PexelsVideoFile): boolean => {
     if (allowExcluded) return false
     const idStr = entry.id != null ? String(entry.id) : ''
@@ -339,23 +341,18 @@ function pickFirstUnusedVideo(
     if (file.link && excludeUrls.has(file.link)) return true
     return false
   }
-  // First pass: respect duration filter.
+  const out: Array<{ entry: PexelsVideoEntry; file: PexelsVideoFile }> = []
   for (const entry of videos) {
-    const dur = entry.duration ?? 0
-    if (dur < minDuration || dur > maxDuration) continue
+    if (enforceDuration) {
+      const dur = entry.duration ?? 0
+      if (dur < minDuration || dur > maxDuration) continue
+    }
     const file = pickBestPortraitMp4(entry)
     if (!file?.link) continue
     if (isExcluded(entry, file)) continue
-    return { entry, file }
+    out.push({ entry, file })
   }
-  // Second pass: relax duration filter (any usable MP4).
-  for (const entry of videos) {
-    const file = pickBestPortraitMp4(entry)
-    if (!file?.link) continue
-    if (isExcluded(entry, file)) continue
-    return { entry, file }
-  }
-  return null
+  return out
 }
 
 /**
@@ -363,28 +360,35 @@ function pickFirstUnusedVideo(
  * return has `url` set immediately, ready to drop into
  * content_calendar.video_url with media_status='ready'.
  *
- * Phase 14AH — duplicate prevention. The function walks Pexels results
- * skipping any video whose `id` is in `excludePexelsIds` or whose chosen
- * MP4 URL is in `excludeUrls`. If every page-1 result is excluded, retries
- * once with a randomized page (2–6) for variety. If page 2 is also fully
- * excluded (extremely rare for travel queries), falls back to returning
- * the first usable result regardless — better to ship a duplicate than
- * fail the row entirely. The exclude sets are built by the caller from
- * the existing `content_calendar.video_url` and
- * `media_metadata->>'pexels_video_id'` columns.
+ * Phase 14AH.1 — randomized fetch for visual variety. Pexels search is
+ * deterministic, so two posts with similar `image_prompt` values would
+ * otherwise collide on the same top result. The fix is two-pronged:
  *
- * The function is named `fetchAndStoreVideo` (per Phase 14AG directive) but
- * the "store" portion is a no-op — we return the Pexels CDN URL directly.
- * Pexels URLs are durable (months+ stability); re-hosting 5–30 MB MP4s
- * inside the weekly cron would risk Vercel's 60s ceiling on weeks with
- * multiple TikTok rows. If durability becomes a concern, a future phase
- * can add an async re-upload pass without changing this function's
- * signature — callers persist whatever `url` is returned.
+ *   1. **Randomized page** — every call requests a random page in 1–5.
+ *      Pexels has 1k+ results for typical travel queries, so 5 pages
+ *      times the per-page count gives us a very wide candidate pool.
+ *   2. **Randomized index** — within the returned `videos[]` array,
+ *      pick a random unused candidate (not always index 0).
  *
- * Filters:
- *   - orientation defaults to 'portrait' (TikTok / IG Reels are 9:16).
- *   - size defaults to 'large' (Pexels HD/UHD bias).
- *   - duration filter (default 5–30s) keeps clips usable as B-roll loops.
+ * Optional `excludePexelsIds` / `excludeUrls` sets layer extra dedup on
+ * top of the random pick. Callers that already track used videos (e.g.,
+ * the standalone backfill script that pre-queries the DB) pass them in;
+ * the cron passes only an in-run accumulator (no DB pre-query — the
+ * randomization is enough for a 7-row weekly batch and DB calls were
+ * deliberately removed from the cron's hot path).
+ *
+ * Fallback chain:
+ *   - First random page → pick a random unused candidate that matches
+ *     the duration filter.
+ *   - If none survive duration + exclude filtering, relax the duration
+ *     filter (any usable MP4).
+ *   - If still nothing, fetch a SECOND random page and try again.
+ *   - Last resort: return a random candidate even if excluded with
+ *     `raw.duplicate_fallback = true` so callers can flag the row.
+ *
+ * The function is named `fetchAndStoreVideo` (per Phase 14AG directive)
+ * but the "store" portion is a no-op — we return the Pexels CDN URL
+ * directly. See the file header for the durability rationale.
  */
 export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<MediaProviderResult> {
   const provider: MediaProviderName = 'pexels-video'
@@ -402,7 +406,17 @@ export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<Medi
   const excludePexelsIds = opts.excludePexelsIds ?? new Set<string>()
   const excludeUrls = opts.excludeUrls ?? new Set<string>()
 
-  const fetchPage = async (page: number): Promise<{ ok: true; data: PexelsVideoResponse } | { ok: false; error: string; raw?: unknown; status?: number }> => {
+  const fetchRandomPage = async (
+    excludePages: ReadonlySet<number>,
+  ): Promise<{ ok: true; data: PexelsVideoResponse; page: number } | { ok: false; error: string; raw?: unknown }> => {
+    // Pages 1–5 give us a wide enough pool while staying cheap. If the
+    // first try collides with an already-attempted page, pick another.
+    let page = 1 + Math.floor(Math.random() * 5)
+    let attempts = 0
+    while (excludePages.has(page) && attempts < 10) {
+      page = 1 + Math.floor(Math.random() * 5)
+      attempts++
+    }
     const params = new URLSearchParams({
       query: opts.query.slice(0, 200),
       per_page: String(perPage),
@@ -421,16 +435,15 @@ export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<Medi
           ok: false,
           error: normalizeProviderError(data) || `pexels-video http ${res.status}`,
           raw: data,
-          status: res.status,
         }
       }
-      return { ok: true, data }
+      return { ok: true, data, page }
     } catch (err) {
       return { ok: false, error: normalizeProviderError(err) }
     }
   }
 
-  const buildResult = (entry: PexelsVideoEntry, file: PexelsVideoFile, duplicate: boolean): MediaProviderResult => ({
+  const buildResult = (entry: PexelsVideoEntry, file: PexelsVideoFile, duplicate: boolean, page: number): MediaProviderResult => ({
     success: true,
     provider,
     url: file.link as string,
@@ -443,38 +456,59 @@ export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<Medi
       quality: file.quality,
       file_type: file.file_type,
       page_url: entry.url,
+      pexels_page: page,
       ...(duplicate ? { duplicate_fallback: true } : {}),
     },
   })
 
-  // Page 1 — strict exclusion.
-  const page1 = await fetchPage(1)
-  if (!page1.ok) {
-    return { success: false, provider, error: page1.error, raw: page1.raw }
-  }
-  const videos1 = page1.data.videos ?? []
-  if (videos1.length === 0) {
-    return { success: false, provider, error: 'pexels-video returned no videos for query', raw: page1.data }
-  }
-  const pick1 = pickFirstUnusedVideo(videos1, minDuration, maxDuration, excludePexelsIds, excludeUrls, false)
-  if (pick1) return buildResult(pick1.entry, pick1.file, false)
+  const tried = new Set<number>()
+  let lastData: PexelsVideoResponse | null = null
+  let lastPage = 1
 
-  // Page 1 was fully excluded. Try a randomized page 2–6 for variety.
-  const fallbackPage = 2 + Math.floor(Math.random() * 5)
-  const pageN = await fetchPage(fallbackPage)
-  if (pageN.ok) {
-    const videosN = pageN.data.videos ?? []
-    const pickN = pickFirstUnusedVideo(videosN, minDuration, maxDuration, excludePexelsIds, excludeUrls, false)
-    if (pickN) return buildResult(pickN.entry, pickN.file, false)
+  // Try up to two random pages for an unused candidate.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await fetchRandomPage(tried)
+    if (!r.ok) {
+      if (attempt === 0) {
+        return { success: false, provider, error: r.error, raw: r.raw }
+      }
+      break
+    }
+    tried.add(r.page)
+    lastData = r.data
+    lastPage = r.page
+    const videos = r.data.videos ?? []
+    if (videos.length === 0) continue
+
+    // Pick a random unused candidate (duration-enforced).
+    const candidates = collectUsableVideos(videos, minDuration, maxDuration, excludePexelsIds, excludeUrls, false, true)
+    if (candidates.length > 0) {
+      const pick = candidates[Math.floor(Math.random() * candidates.length)]
+      return buildResult(pick.entry, pick.file, false, r.page)
+    }
+
+    // Relax duration filter — random unused candidate.
+    const relaxed = collectUsableVideos(videos, minDuration, maxDuration, excludePexelsIds, excludeUrls, false, false)
+    if (relaxed.length > 0) {
+      const pick = relaxed[Math.floor(Math.random() * relaxed.length)]
+      return buildResult(pick.entry, pick.file, false, r.page)
+    }
   }
-  // Both pages fully excluded. Last resort: return the first usable video
-  // from page 1 even if it duplicates — better than failing the row.
-  const fallback = pickFirstUnusedVideo(videos1, minDuration, maxDuration, excludePexelsIds, excludeUrls, true)
-  if (fallback) return buildResult(fallback.entry, fallback.file, true)
+
+  // Last resort — pick a random candidate from the most recent page even
+  // if it was excluded. Better to ship a duplicate than fail the row.
+  if (lastData) {
+    const videos = lastData.videos ?? []
+    const fallback = collectUsableVideos(videos, minDuration, maxDuration, excludePexelsIds, excludeUrls, true, false)
+    if (fallback.length > 0) {
+      const pick = fallback[Math.floor(Math.random() * fallback.length)]
+      return buildResult(pick.entry, pick.file, true, lastPage)
+    }
+  }
   return {
     success: false,
     provider,
     error: 'pexels-video returned no usable mp4 file',
-    raw: page1.data,
+    raw: lastData,
   }
 }

@@ -251,36 +251,24 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       }, { status: 500 })
     }
 
-    // Phase 14AH — duplicate prevention. Pexels search is deterministic
-    // (the same query returns the same top results), so two TikTok rows
-    // with similar `image_prompt` values would otherwise collide on the
-    // same MP4. Pre-query every existing `video_url` and stored
-    // `pexels_video_id` from `content_calendar`, then pass the resulting
-    // exclude sets to each `fetchAndStoreVideo` call. The lib helper walks
-    // page 1 first, falls back to a randomized page 2–6 if every page-1
-    // result is excluded, and only ships a duplicate as a last-resort
-    // fallback (extremely rare for travel queries).
-    const { data: existingVideoRows } = await supabase
-      .from('content_calendar')
-      .select('video_url, media_metadata')
-      .not('video_url', 'is', null)
-      .limit(2000)
+    // Phase 14AH.1 — duplicate prevention strategy. Phase 14AH originally
+    // pre-queried `content_calendar.video_url` + `media_metadata.pexels_
+    // video_id` here to seed an exclude set. The operator decided in
+    // 14AH.1 to remove that DB read from the cron's hot path and rely on
+    // randomized page (1–5) + random index selection inside
+    // `fetchAndStoreVideo` for visual variety. Inside a single cron run,
+    // the in-run accumulator below still prevents the cron from picking
+    // the same MP4 twice in one tick. Cross-week dedup is statistical
+    // rather than guaranteed under this strategy, but with random page ×
+    // random index across thousands of Pexels results per query, the
+    // collision probability is acceptable for the weekly cadence.
     const existingUrls = new Set<string>()
     const existingPexelsIds = new Set<string>()
-    for (const r of existingVideoRows ?? []) {
-      if (typeof r.video_url === 'string' && r.video_url.length > 0) existingUrls.add(r.video_url)
-      const meta = (r.media_metadata && typeof r.media_metadata === 'object')
-        ? r.media_metadata as Record<string, unknown>
-        : null
-      const pid = meta?.pexels_video_id
-      if (typeof pid === 'string' && pid.length > 0) existingPexelsIds.add(pid)
-      else if (typeof pid === 'number') existingPexelsIds.add(String(pid))
-    }
 
     // Phase 14AG/14AH — fetch images for every platform in PARALLEL (image
     // dedup is not a concern — Pexels image variety is broad and FB/IG don't
     // collide visually the way two identical TikTok B-roll clips would).
-    // Then fetch TikTok videos SEQUENTIALLY so the dedup accumulator stays
+    // Then fetch TikTok videos SEQUENTIALLY so the in-run accumulator stays
     // consistent — two parallel video fetches with the same exclude set
     // could both pick the same MP4 before either write lands. Sequential
     // video fetches are ~200–500ms each, so 7 TikTok rows = ~3.5s extra,

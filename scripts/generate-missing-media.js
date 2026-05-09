@@ -291,36 +291,34 @@ function pickBestPortraitMp4(entry) {
 }
 
 /**
- * Phase 14AH — dedup-aware Pexels Video fetcher. JS mirror of
- * `fetchAndStoreVideo` in src/lib/media-providers.ts. Walks page 1 first
- * skipping any video whose `id` is in `excludePexelsIds` or whose chosen
- * MP4 URL is in `excludeUrls`. If page 1 is fully excluded, retries once
- * with a randomized page (2–6). Last resort returns a duplicate (better
- * than failing the row entirely).
+ * Phase 14AH.1 — randomized Pexels Video fetcher. JS mirror of
+ * `fetchAndStoreVideo` in src/lib/media-providers.ts. Picks a random page
+ * 1–5 and a random unused candidate from that page, falling back to a
+ * second random page and finally a last-resort duplicate. Optional
+ * exclude sets layer extra dedup on top of the random pick (the
+ * standalone script pre-queries the DB; the cron passes only an in-run
+ * accumulator).
  */
-function pickFirstUnusedVideo(videos, minDur, maxDur, excludePexelsIds, excludeUrls, allowExcluded) {
+function collectUsableVideos(videos, minDur, maxDur, exIds, exUrls, allowExcluded, enforceDuration) {
   const isExcluded = (entry, file) => {
     if (allowExcluded) return false
     const idStr = entry.id != null ? String(entry.id) : ''
-    if (idStr && excludePexelsIds.has(idStr)) return true
-    if (file.link && excludeUrls.has(file.link)) return true
+    if (idStr && exIds.has(idStr)) return true
+    if (file.link && exUrls.has(file.link)) return true
     return false
   }
+  const out = []
   for (const entry of videos) {
-    const dur = entry.duration ?? 0
-    if (dur < minDur || dur > maxDur) continue
+    if (enforceDuration) {
+      const dur = entry.duration ?? 0
+      if (dur < minDur || dur > maxDur) continue
+    }
     const file = pickBestPortraitMp4(entry)
     if (!file?.link) continue
     if (isExcluded(entry, file)) continue
-    return { entry, file }
+    out.push({ entry, file })
   }
-  for (const entry of videos) {
-    const file = pickBestPortraitMp4(entry)
-    if (!file?.link) continue
-    if (isExcluded(entry, file)) continue
-    return { entry, file }
-  }
-  return null
+  return out
 }
 
 async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDuration, maxDuration, excludePexelsIds, excludeUrls }) {
@@ -335,7 +333,13 @@ async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDur
   const exIds = excludePexelsIds ?? new Set()
   const exUrls = excludeUrls ?? new Set()
 
-  const fetchPage = async page => {
+  const fetchRandomPage = async excludePages => {
+    let page = 1 + Math.floor(Math.random() * 5)
+    let attempts = 0
+    while (excludePages.has(page) && attempts < 10) {
+      page = 1 + Math.floor(Math.random() * 5)
+      attempts++
+    }
     const params = new URLSearchParams({ query: query.slice(0, 200), per_page: pp, orientation: ori, size: sz, page: String(page) })
     try {
       const res = await fetch(`https://api.pexels.com/videos/search?${params.toString()}`, {
@@ -343,13 +347,13 @@ async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDur
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) return { ok: false, error: normalizeError(data) || `pexels-video http ${res.status}` }
-      return { ok: true, data }
+      return { ok: true, data, page }
     } catch (err) {
       return { ok: false, error: normalizeError(err) }
     }
   }
 
-  const buildResult = (entry, file, duplicate) => ({
+  const buildResult = (entry, file, duplicate, page) => ({
     success: true,
     provider: 'pexels-video',
     url: file.link,
@@ -362,26 +366,47 @@ async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDur
       quality: file.quality,
       file_type: file.file_type,
       page_url: entry.url,
+      pexels_page: page,
       ...(duplicate ? { duplicate_fallback: true } : {}),
     },
   })
 
-  const p1 = await fetchPage(1)
-  if (!p1.ok) return { success: false, provider: 'pexels-video', error: p1.error }
-  const videos1 = p1.data?.videos ?? []
-  if (videos1.length === 0) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no videos' }
-  const pick1 = pickFirstUnusedVideo(videos1, minDur, maxDur, exIds, exUrls, false)
-  if (pick1) return buildResult(pick1.entry, pick1.file, false)
+  const tried = new Set()
+  let lastData = null
+  let lastPage = 1
 
-  const fallbackPage = 2 + Math.floor(Math.random() * 5)
-  const pN = await fetchPage(fallbackPage)
-  if (pN.ok) {
-    const videosN = pN.data?.videos ?? []
-    const pickN = pickFirstUnusedVideo(videosN, minDur, maxDur, exIds, exUrls, false)
-    if (pickN) return buildResult(pickN.entry, pickN.file, false)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await fetchRandomPage(tried)
+    if (!r.ok) {
+      if (attempt === 0) return { success: false, provider: 'pexels-video', error: r.error }
+      break
+    }
+    tried.add(r.page)
+    lastData = r.data
+    lastPage = r.page
+    const videos = r.data?.videos ?? []
+    if (videos.length === 0) continue
+
+    const candidates = collectUsableVideos(videos, minDur, maxDur, exIds, exUrls, false, true)
+    if (candidates.length > 0) {
+      const pick = candidates[Math.floor(Math.random() * candidates.length)]
+      return buildResult(pick.entry, pick.file, false, r.page)
+    }
+    const relaxed = collectUsableVideos(videos, minDur, maxDur, exIds, exUrls, false, false)
+    if (relaxed.length > 0) {
+      const pick = relaxed[Math.floor(Math.random() * relaxed.length)]
+      return buildResult(pick.entry, pick.file, false, r.page)
+    }
   }
-  const fallback = pickFirstUnusedVideo(videos1, minDur, maxDur, exIds, exUrls, true)
-  if (fallback) return buildResult(fallback.entry, fallback.file, true)
+
+  if (lastData) {
+    const videos = lastData.videos ?? []
+    const fallback = collectUsableVideos(videos, minDur, maxDur, exIds, exUrls, true, false)
+    if (fallback.length > 0) {
+      const pick = fallback[Math.floor(Math.random() * fallback.length)]
+      return buildResult(pick.entry, pick.file, true, lastPage)
+    }
+  }
   return { success: false, provider: 'pexels-video', error: 'pexels-video returned no usable mp4' }
 }
 
@@ -585,6 +610,22 @@ async function main() {
     console.log(`${COLORS.red}Refused: --apply without --generate has no input source for known URLs in this phase.${COLORS.reset}`)
     console.log(`${COLORS.dim}Pass --generate alongside --apply to fetch + persist; or drop --apply to dry-run.${COLORS.reset}`)
     process.exit(2)
+  }
+
+  // Phase 14AH.1 — pre-flight: refuse to run when PEXELS_API_KEY is empty
+  // and the chosen provider needs it. Fails the run BEFORE any DB SELECT
+  // or row update, so a config error never marks rows as media_status=
+  // 'failed'. Only enforced under --generate (dry-run mode is allowed to
+  // proceed for queue inspection without provider keys).
+  if (flags.generate && (flags.provider === 'auto' || flags.provider === 'pexels')) {
+    const k = env.PEXELS_API_KEY
+    if (typeof k !== 'string' || k.trim().length === 0) {
+      console.error(`${COLORS.red}Refused: PEXELS_API_KEY is missing or empty in .env.local.${COLORS.reset}`)
+      console.error(`${COLORS.dim}provider='${flags.provider}' requires Pexels for image search and (since 14AG) video search.${COLORS.reset}`)
+      console.error(`${COLORS.dim}Add a real key to .env.local line 37 (PEXELS_API_KEY="...") and re-run.${COLORS.reset}`)
+      console.error(`${COLORS.dim}No DB rows touched.${COLORS.reset}`)
+      process.exit(1)
+    }
   }
 
   // 0. posted_at no-mutation snapshot.
