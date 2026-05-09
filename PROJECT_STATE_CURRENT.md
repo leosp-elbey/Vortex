@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with two operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance). All planned phases (0 → 14AC) shipped; 14AD/14AE are external-trigger patches (Supabase advisor warnings + Twilio TCR rejection) following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with three operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish). All planned phases (0 → 14AC) shipped; 14AD–14AF are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. The operator noticed TikTok drafts in the dashboard show "Media missing", which reads like an error. The actual state is the deliberate Phase 14L design: HeyGen video renders are gated to a manual `node scripts/generate-missing-media.js --provider=heygen` invocation so the operator controls API quota burn. This phase audits the script (no silent failures; pre-flight contract is enforced before any provider call) and adds an inline actionable helper to `src/app/dashboard/content/page.tsx` directly under the badge row: when `platform === 'tiktok'` and `media.outcome` is `missing` or `failed` (and the row is NOT already in the existing pending-HeyGen pill state), a small gray `<p>` renders "Run `node scripts/generate-missing-media.js --provider=heygen` to render video". Confusing state → actionable instruction. No DB writes; no platform calls; no migrations; no new dependencies. Lint + typecheck clean.)
+**Last known good commit:** `3799d23` — "Phase 14AE.1: add physical mailing address to shared Footer"
 **Last updated:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address added to shared Footer. Operator provided the business address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905"; the `<!-- TODO -->` placeholder in `src/components/Footer.tsx` is replaced by a real `<p>` line rendering the address above the copyright. The address surfaces on all three TCR-submitted pages (`/`, `/privacy`, `/terms`) automatically because they share the Footer component. No other files touched. Lint + typecheck clean.)
 **Last known good commit:** `f586b73` — "Phase 14AE: Twilio A2P 10DLC compliance — homepage form + privacy + terms + shared Footer"
 **Last updated:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six changes: (1) `src/app/page.tsx` LeadForm — phone placeholder updated to "Phone Number (required for SMS updates)", phone input now `required={form.smsConsent}` (browser enforces phone presence iff consent is checked), `required` removed from the consent checkbox HTML attribute (checkbox starts unchecked already), checkbox label rewritten to the exact TCR-mandated wording with explicit Msg/HELP/STOP disclosure inline, Privacy and Terms links open in a new tab via `target="_blank" rel="noopener noreferrer"`. (2) `src/app/page.tsx` hero — headline changed from "Save 40-60% on Every Trip" to "Save Up to 40-60% on Member Travel Rates" for defensible marketing claims. (3) `src/app/privacy/page.tsx` — new "SMS / Mobile Information Sharing" section inserted at the top of the policy body, explicitly excluding SMS opt-in data from any third-party sharing. (4) `src/app/terms/page.tsx` — section 2 body replaced with the full TCR-required SMS Program Terms (Program Name "VortexTrips SMS Notifications", how to opt in / opt out, HELP keyword, message frequency, message-and-data-rate disclosure, supported carriers including T-Mobile non-liability, privacy reference). (5) New `src/components/Footer.tsx` shared component (Privacy Policy, Terms of Service, Contact/Support mailto, business name, and a `<!-- TODO: Add physical mailing address -->` placeholder) wired into all three TCR-submitted pages: `/`, `/privacy`, `/terms`. The previous inline footer in `src/app/page.tsx` was removed in favor of the shared component. (6) Lint and typecheck pass. No DB writes; no platform calls; no migrations; no new dependencies.)
@@ -16,6 +18,93 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AF — Media Pipeline Audit & UI Polish (in working tree, 2026-05-09 — single dashboard component edit + script audit; no DB; no platform calls; no new dependencies)
+
+### What this phase ships
+
+A single edit to `src/app/dashboard/content/page.tsx` that turns a confusing TikTok dashboard state ("Media missing") into an actionable instruction ("Run `node scripts/generate-missing-media.js --provider=heygen` to render video"). Backed by an audit confirming the underlying script is healthy and the "missing" badge is the correct, deliberate signal, not a bug.
+
+### The operator's question
+
+The weekly-content cron generates TikTok drafts with a populated `video_script` and no `video_url` (HeyGen renders are deliberately gated to a manual operator command, per Phase 14L's API-quota-protection design). On the dashboard, those rows show the "Media missing" amber badge. The operator asked: is this a bug, or is it intended? Answer: intended — but the UX did not surface the next action.
+
+### What the audit confirmed (script is healthy)
+
+`scripts/generate-missing-media.js` (Phase 14L.2.6) was reviewed end-to-end. The TikTok-relevant logic is intact:
+- **Platform rule** (line 92): `tiktok: { image: 'none', video: 'required', either_satisfies: false }` — correctly classifies TikTok rows as needing video only.
+- **Recommendation** (`recommend()` at line 139): TikTok rows without `video_url` AND without `asset_video_url` return `needs: 'video'`, with `source_video: 'heygen'` (when a script is present).
+- **HeyGen path filter** (line 646–651): pre-filters out rows that already have `video_url` OR have no `video_script`/`video_prompt`. Rows generated by the weekly-content cron pass this filter (script is present, video_url is null).
+- **Pre-flight refusal** (line 695–699): aborts the whole batch if any pending HeyGen jobs are in flight (operator must clear them first or pass `--allow-when-pending`).
+- **Per-row sanity check** (line 708–738): explicitly re-validates each selected row before any provider call; logs and refuses on contract violations.
+- **No silent failures**: every error path increments `failed`/`skipped`, surfaces in the per-row outcomes, and writes `media_status='failed'` + `media_error` (when `--apply` is set) so the dashboard reflects the failure state.
+
+The "Media missing" badge is therefore the correct signal for a TikTok row that has been queued for video but has not yet been rendered. The fix is UX, not pipeline.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/app/dashboard/content/page.tsx` | New conditional `<p>` rendered directly below the badge row (before the caption). Visible only when `item.platform === 'tiktok'` AND `media.outcome` is `missing` or `failed` AND the row is NOT already in the existing pending-HeyGen pill state (Phase 14L.2.1, line 305 — that pill already carries its own actionable tooltip). Renders a small gray helper line with the exact command in a `<code>` tag, formatted in 10px monospace on a light-gray background. |
+
+### Why a `<p>` and not a `title` attribute
+
+The badge already has `title={media.reasons[0] ?? mediaBadgeLabel}` (line 298) — so a tooltip-only fix would only show when the operator hovered with a mouse, and would be invisible on touch devices. Per the directive's "best customer experience" framing, the helper is rendered inline as a visible line so any operator scanning the dashboard sees the next action without hovering. Color is `text-gray-500` so it doesn't compete with the caption.
+
+### Why the conditional excludes the pending-HeyGen state
+
+When a TikTok row has `media_status='pending'` AND `media_source='heygen'`, the existing Phase 14L.2.1 pill ("🎬 Video generating") with title="HeyGen render is in progress — run scripts/check-video-generation-status.js to poll." is already visible. Stacking a "render the video" hint underneath would contradict it (the render is already running; the operator should poll, not re-queue). The condition `!(item.media_status === 'pending' && item.media_source === 'heygen')` keeps the two states cleanly separated.
+
+### Why `failed` is included in the trigger condition
+
+`media.outcome === 'failed'` is the same recovery path as `missing` — operator re-runs the same command. Treating them identically in the UX matches the script's behavior (the script will pick up failed rows on the next run).
+
+### Operator runbook (the diagnostic answer)
+
+To resolve the existing TikTok "Media missing" rows from a terminal at the project root:
+
+```bash
+# 1. Render the pending TikTok video drafts via HeyGen (cap: 5 by default)
+node scripts/generate-missing-media.js --provider=heygen --videos-only --content-only --generate --apply
+
+# 2. After 1–3 minutes, poll HeyGen for the finished video URLs and write them to content_calendar
+node scripts/check-video-generation-status.js --apply
+```
+
+The first command queues the renders (writes `media_status='pending'`, stores `heygen_video_id` in `media_metadata`). The second polls HeyGen and lands `video_url` once ready (flips `media_status` to `ready`). Both refuse to write without `--apply`; both refuse to mutate `posted_at` or `posting_status`.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No change to the script itself. The audit found no bugs; rewriting working code would invite drift.
+- ❌ No change to `media-readiness.ts`, `posting-gate.ts`, or any backend logic. The "Media missing" outcome is the correct signal; only the dashboard's surfacing of it changes.
+- ❌ No automation of the script. Phase 14L deliberately gated HeyGen renders to a manual command; auto-running on cron would re-introduce the API-quota risk that gating prevented.
+- ❌ No change to the existing "🎬 Video generating" pill (Phase 14L.2.1). It already covers its own state.
+- ❌ No change to non-TikTok platforms. Facebook / Instagram already render with Pexels images on the weekly-content cron, so they show "Media ready" as expected and don't need a helper.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (29 → 29) |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Trigger condition manually validated against the existing rendering tree: badge → optional 14L.2.1 pill → optional 14AF helper → caption. No layout overlap.
+
+### Migration
+
+**No.** No DB changes.
+
+### Recommended next phase
+
+**None mandated.** The operator can run the diagnostic command above to clear existing TikTok drafts. Future weekly-content runs will keep producing TikTok rows in the same "needs HeyGen render" state by design; the dashboard now points at the resolution command directly.
 
 ---
 

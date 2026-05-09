@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905" added to shared `Footer.tsx`, replacing the `<!-- TODO -->` placeholder from 14AE. Surfaces on all three TCR-submitted pages via the shared component. Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. Audit of `scripts/generate-missing-media.js` confirms the "Media missing" badge on TikTok drafts is a correct, deliberate signal (HeyGen renders are gated to a manual operator command per Phase 14L's API-quota design), not a bug. Single dashboard edit in `src/app/dashboard/content/page.tsx` adds an inline actionable helper under the badge row when a TikTok row is in the missing-or-failed state — surfaces the exact command "node scripts/generate-missing-media.js --provider=heygen" so the state becomes actionable instead of confusing. Lint + typecheck clean. No DB; no platform calls.)
+**Earlier this session:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905" added to shared `Footer.tsx`, replacing the `<!-- TODO -->` placeholder from 14AE. Surfaces on all three TCR-submitted pages via the shared component. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six edits across four files plus one new shared `Footer.tsx`. Lint + typecheck clean. No DB; no platform calls.)
 **Last code-shipping commit:** `03c9ca4` (Phase 14AC: Final System Audit + Maintenance Mode declaration)
 **Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · **Phase 14AD in working tree (DB security patch)** · **Phase 14AE in working tree (Twilio A2P 10DLC compliance)** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, audited, security-advisor-clean, AND now A2P 10DLC compliant.
@@ -8,6 +9,31 @@
 ---
 
 ## Current focus
+
+**Phase 14AF — Media Pipeline Audit & UI Polish (in working tree, 2026-05-09 — single dashboard component edit + script audit; no DB; no platform calls).**
+
+The operator noticed TikTok drafts show "Media missing" while FB/IG show "Media ready". Audit confirmed this is the deliberate Phase 14L design — HeyGen video renders are gated to a manual `node scripts/generate-missing-media.js --provider=heygen` invocation to protect the HeyGen API quota — not a pipeline bug. The pipeline correctly classifies TikTok as `video: required` and the script's pre-flight contract (batch caps, pending-job check, per-row sanity validation) is intact with no silent failures. Fix is UX-only: surface the resolution command in the dashboard so the state becomes actionable.
+
+**Built in 14AF:**
+- [x] **`src/app/dashboard/content/page.tsx`** — new conditional helper `<p>` rendered directly below the badge row. Visible only when `item.platform === 'tiktok'` AND `media.outcome` is `missing` or `failed` AND the row is NOT already in the existing pending-HeyGen pill state (Phase 14L.2.1's `<span>🎬 Video generating</span>` carries its own actionable tooltip and would conflict with a re-queue hint). Renders "Run `node scripts/generate-missing-media.js --provider=heygen` to render video" in 11px gray text with the command in a 10px monospace `<code>` tag.
+
+**Operator runbook (the diagnostic answer to the original question):**
+```bash
+# 1. Queue HeyGen renders for pending TikTok video drafts
+node scripts/generate-missing-media.js --provider=heygen --videos-only --content-only --generate --apply
+
+# 2. After 1–3 minutes, poll HeyGen and write the finished URLs to content_calendar
+node scripts/check-video-generation-status.js --apply
+```
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Helper does not stack on top of the existing "Video generating" pill (mutually-exclusive condition)
+
+---
+
+## Earlier focus
 
 **Phase 14AE — Twilio A2P 10DLC Compliance (in working tree, 2026-05-08 — homepage form + legal pages + shared footer; no DB; no platform calls; no new dependencies).**
 

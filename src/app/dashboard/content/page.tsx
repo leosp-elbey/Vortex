@@ -313,6 +313,27 @@ export default function ContentPage() {
                         <span className="text-xs text-gray-400">Week of {formatDate(item.week_of)}</span>
                       </div>
 
+                      {/* Phase 14AF — TikTok drafts whose video hasn't been
+                          rendered yet show "Media missing" / "Media failed",
+                          which reads like an error. The actual state is the
+                          deliberate Phase 14L design: HeyGen renders are
+                          gated to a manual operator command (API quota
+                          protection). Surface that command inline so the
+                          state becomes actionable, not confusing. Skipped
+                          when the row is already in the pending-HeyGen
+                          state — that pill above already explains itself. */}
+                      {item.platform === 'tiktok'
+                        && (media.outcome === 'missing' || media.outcome === 'failed')
+                        && !(item.media_status === 'pending' && item.media_source === 'heygen') && (
+                        <p className="text-[11px] text-gray-500 mb-2">
+                          Run{' '}
+                          <code className="px-1 py-0.5 bg-gray-100 rounded text-[10px] font-mono text-gray-700">
+                            node scripts/generate-missing-media.js --provider=heygen
+                          </code>
+                          {' '}to render video
+                        </p>
+                      )}
+
                       <p className="text-gray-700 text-sm leading-relaxed mb-2">{item.caption}</p>
 
                       {item.hashtags && item.hashtags.length > 0 && (
