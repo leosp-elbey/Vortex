@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/autoposter-once",
-      "schedule": "0 14 * * *"
+      "schedule": "0 14,18,22 * * *"
     }
   ]
 }

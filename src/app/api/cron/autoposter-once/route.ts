@@ -1,4 +1,13 @@
-// Phase 14S — 100% Automation Cron. Autoposter, scheduled daily.
+// Phase 14S — Autoposter Cron.
+// Phase 14AJ — schedule scaled to 3 ticks/day (10am, 2pm, 6pm Eastern =
+// 14:00, 18:00, 22:00 UTC) on Vercel Pro. The "one row per tick"
+// invariant is preserved (the cron still posts exactly one row per
+// execution), but the prior `queue_size_gt_1` refusal has been removed:
+// the operator can now Mark Ready a BATCH of rows and the 3 daily ticks
+// pick them off oldest-first via the existing `queued_for_posting_at`
+// ascending order. Three ticks × one row per tick = up to 3 posts per
+// day, with the kill switch still acting as the per-failure circuit
+// breaker.
 //
 // GET /api/cron/autoposter-once
 // Authorization: Bearer <CRON_SECRET>
@@ -374,10 +383,16 @@ export async function GET(request: NextRequest) {
   // Pre-flight snapshot.
   const before = await snapshotPostedCounts(supabase)
 
-  // Eligibility — read at most 5 candidates; we only post if exactly 1 is eligible.
+  // Phase 14AJ — eligibility now returns up to 50 candidates so the cron
+  // can see the full FIFO queue when the operator Marks Ready a batch.
+  // The cron still posts exactly ONE row per tick (the oldest by
+  // `queued_for_posting_at`, which is the order `getAutoposterEligibleRows`
+  // already returns). With 3 ticks/day on Vercel Pro, a queue of N >= 3
+  // gets drained over 3 ticks. The earlier "queue_size_gt_1" refusal
+  // (Phase 14S Hobby-era) has been removed.
   let plan
   try {
-    plan = await getAutoposterEligibleRows({ limit: 5 })
+    plan = await getAutoposterEligibleRows({ limit: 50 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'eligibility query failed'
     console.error('[autoposter-once] eligibility query failed', { error: message })
@@ -396,22 +411,12 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  if (plan.eligible.length > 1) {
-    // Operator-fixable; do NOT auto-disable. Operator should Unqueue all but one.
-    const ids = plan.eligible.map(r => r.id)
-    console.warn('[autoposter-once] queue size > 1 — refusing', { startedAt, queue: ids })
-    return NextResponse.json({
-      success: true,
-      skipped: true,
-      reason: 'queue_size_gt_1',
-      eligible_count: plan.eligible.length,
-      eligible_ids: ids,
-      message: 'One-row-per-cron is a hard guardrail. Unqueue all but one row, then wait for the next cron tick.',
-      started_at: startedAt,
-    })
-  }
-
+  // FIFO: pick the oldest queued row. Remaining rows wait for the next
+  // tick. No upper bound on queue length — the operator can Mark Ready
+  // however many rows they want; each tick drains one.
   const chosen = plan.eligible[0]
+  const queueDepth = plan.eligible.length
+  console.log('[autoposter-once] queue depth', { startedAt, queue_depth: queueDepth, chosen_id: chosen.id })
   const platform = (chosen.platform ?? '').toLowerCase().trim()
 
   if (REFUSED_PLATFORMS.has(platform)) {
@@ -675,6 +680,8 @@ export async function GET(request: NextRequest) {
     platform_post_id: result.platform_post_id,
     before,
     after,
+    queue_depth_before: queueDepth,
+    queue_depth_remaining: queueDepth - 1,
     started_at: startedAt,
   })
 }

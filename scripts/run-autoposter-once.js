@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 /**
  * Phase 14O.1 — Manual autoposter runner. One row, one click, no cron.
+ * Phase 14AJ update — the prior "queue size must be exactly 1" refusal is
+ * removed in favor of FIFO behavior matching the cron route. The script
+ * now posts the OLDEST eligible row (by `queued_for_posting_at`) and
+ * leaves the rest in queue. Same one-row-per-invocation invariant; the
+ * operator can run the script multiple times to drain a batch, or rely
+ * on the 3-tick-per-day cron to do it automatically.
  *
  * Mirrors the deployed `/api/cron/autoposter-dry-run` eligibility logic AND
  * (with --apply) the platform-poster routes
@@ -19,15 +25,15 @@
  *
  * Modes:
  *   default       → DRY-RUN. No platform calls. No DB writes. Selects the
- *                    single eligible row, prints the plan, exits.
- *   --apply       → Posts exactly one eligible row. Refuses if:
- *                    - eligible queue count is not exactly 1
+ *                    OLDEST eligible row, prints the plan, exits.
+ *   --apply       → Posts the OLDEST eligible row. Refuses if:
+ *                    - eligible queue is empty
  *                    - selected row's platform is twitter / x
  *                    - any pre-flight gate check fails
  *                    - any post-flight invariant fails
  *
- * Refusal contract (matches Phase 14O plan §6 failure conditions):
- *   - eligible queue must be exactly 1
+ * Refusal contract (Phase 14AJ — relaxed from "queue must be exactly 1"):
+ *   - eligible queue must have at least 1 row
  *   - manual + autoposter validators must agree
  *   - selected row's platform must be facebook, instagram, OR tiktok
  *   - validateAutoposterCandidate must return null (eligible)
@@ -509,21 +515,21 @@ async function main() {
   console.log(`   eligible queue size: ${eligible.length}`)
 
   if (eligible.length === 0) {
-    console.log(`   ${COLORS.yellow}No eligible row.${COLORS.reset} Mark Ready exactly one approved Facebook, Instagram, or TikTok row in /dashboard/content first.`)
+    console.log(`   ${COLORS.yellow}No eligible row.${COLORS.reset} Mark Ready at least one approved Facebook, Instagram, or TikTok row in /dashboard/content first.`)
     finalize({ postedAtBefore, postedAtAfter: postedAtBefore, statusPostedBefore, statusPostedAfter: statusPostedBefore, applied: false })
     process.exit(0)
   }
-  if (eligible.length > 1) {
-    console.log(`${COLORS.red}Refused: eligible queue size = ${eligible.length}, expected exactly 1.${COLORS.reset}`)
-    console.log(`${COLORS.dim}One-row-per-cron is a hard guardrail. Remove from Queue all but one row, then re-run.${COLORS.reset}`)
-    for (const r of eligible) {
-      console.log(`   ${COLORS.dim}queued: ${r.id} ${r.platform}${COLORS.reset}`)
-    }
-    process.exit(2)
-  }
 
+  // Phase 14AJ — FIFO: pick the oldest queued row. Remaining rows stay in
+  // queue for the next run (or the next cron tick at 14:00 / 18:00 / 22:00 UTC).
   const row = eligible[0]
   const platform = (row.platform ?? '').toLowerCase().trim()
+  if (eligible.length > 1) {
+    console.log(`   ${COLORS.dim}queue depth: ${eligible.length} (oldest selected; others wait for next run / next cron tick)${COLORS.reset}`)
+    for (const r of eligible.slice(1)) {
+      console.log(`   ${COLORS.dim}  queued: ${r.id} ${r.platform}${COLORS.reset}`)
+    }
+  }
 
   console.log(`   ${COLORS.green}selected:${COLORS.reset} ${row.id}`)
   console.log(`   platform:           ${platform}`)

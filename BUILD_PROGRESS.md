@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, a separate route from the cron that wasn't updated in Phase 14AG. Pre-14AI it produced TikTok rows with `video_url=null` (and no Pexels image either — image fetch was IG/FB-only). 14AI brings the manual route into sync: image fetch runs for ALL platforms; TikTok rows synchronously call `fetchAndStoreVideo()` and land at `media_status='ready'` with `video_url` populated and `media_metadata` carrying `on_screen_hook` + Pexels provenance. User prompt teaches AI the TikTok-specific format. `maxDuration=60`. Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. Operator upgraded to Vercel Pro; autoposter cron schedule now `0 14,18,22 * * *` (10 AM / 2 PM / 6 PM EST = 3 posts/day in steady state). The Phase 14S `queue_size_gt_1` refusal is removed: cron picks the OLDEST eligible row by `queued_for_posting_at` FIFO, leaves the rest for the next tick. Eligibility limit raised from 5 to 50 for full queue visibility. Response payload includes `queue_depth_before` / `queue_depth_remaining`. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior. Kill switch + atomic UPDATE invariants unchanged. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, a separate route from the cron that wasn't updated in Phase 14AG. Pre-14AI it produced TikTok rows with `video_url=null` (and no Pexels image either — image fetch was IG/FB-only). 14AI brings the manual route into sync: image fetch runs for ALL platforms; TikTok rows synchronously call `fetchAndStoreVideo()` and land at `media_status='ready'` with `video_url` populated and `media_metadata` carrying `on_screen_hook` + Pexels provenance. User prompt teaches AI the TikTok-specific format. `maxDuration=60`. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes in one revision: (1) `scripts/generate-missing-media.js` now refuses upfront on missing PEXELS_API_KEY before any SELECT, preventing config errors from corrupting DB rows (the very failure mode hit during the earlier 14AH backfill attempt). (2) `fetchAndStoreVideo` swapped from deterministic "page 1 → fallback page 2–6 → first-fit" to **random page 1–5 + random unused index** for visual variety. Cron's DB pre-query removed per operator directive; in-run accumulator preserved. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. The new Pexels Video pipeline from Phase 14AG could pick the same MP4 twice when two posts have similar `image_prompt` values (Pexels search is deterministic). `fetchAndStoreVideo` now accepts `excludePexelsIds` and `excludeUrls` exclude sets; walks page 1 first, retries with a randomized page 2–6 if all page-1 results are excluded, falls back to a tagged duplicate as last resort. Both callers (weekly cron + manual script) pre-query existing `video_url` + `media_metadata.pexels_video_id` and accumulate newly-picked URLs/IDs as the run progresses. Cron's TikTok video fetches serialized (image fetches stay parallel). Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AG shipping in working tree — Video Pipeline Swap. HeyGen excised from the SOCIAL CONTENT PIPELINE (avatar voice was off-brand, async-only flow incompatible with the synchronous weekly cron, and rendering costs added up). Pexels Video Search wired in as the replacement: cinematic vertical HD travel B-roll, free, synchronous, lands on the row immediately. The TikTok "Media missing" state is now eliminated at the source — every TikTok row from the weekly cron lands at `media_status='ready'` with a Pexels MP4 in `video_url`. New `fetchAndStoreVideo()` in `src/lib/media-providers.ts`. Cron updated with `maxDuration=60`, parallel image+video fetch, `on_screen_hook` parsing into `media_metadata`. `ai-prompts.ts` rewritten with TikTok-specific image-prompt-as-search-query + 10-word On-Screen Hook directives. `scripts/generate-missing-media.js` rewritten — HeyGen surface fully removed; `processVideo` calls Pexels Video. `scripts/check-video-generation-status.js` and `scripts/inspect-heygen-pilot-candidates.js` deleted. Dashboard "🎬 Video generating" pill replaced by "⚠ Legacy HeyGen row" pill. Admin SBA welcome-video stack deliberately untouched (separate feature; `/sba` page would break). Lint + typecheck clean. No DB; no platform calls.)
@@ -13,6 +14,34 @@
 ---
 
 ## Current focus
+
+**Phase 14AJ — Vercel Pro Scale Up: 3 Autoposter Ticks Per Day (in working tree, 2026-05-09 — `vercel.json` schedule + autoposter route + manual script; no DB schema change; no platform calls).**
+
+The operator upgraded to Vercel Pro. The autoposter cron now fires 3×/day (10 AM / 2 PM / 6 PM EST), and the Phase 14S "one row at a time eligible" refusal is relaxed to FIFO drain.
+
+**Built in 14AJ:**
+- [x] **`vercel.json`.** `/api/cron/autoposter-once` schedule changed from `0 14 * * *` to `0 14,18,22 * * *` (UTC; equals 10 AM / 2 PM / 6 PM Eastern). Other 3 cron entries unchanged.
+- [x] **`src/app/api/cron/autoposter-once/route.ts`.** Removed the `if (plan.eligible.length > 1)` refusal that returned `{ skipped: true, reason: 'queue_size_gt_1' }`. The cron now picks `plan.eligible[0]` (FIFO by `queued_for_posting_at` ascending) and leaves the rest for the next tick. Eligibility limit raised from 5 to 50. Response payload includes `queue_depth_before` and `queue_depth_remaining`. Per-tick log line added.
+- [x] **`scripts/run-autoposter-once.js`.** Mirrored the same FIFO relaxation. The script's `eligible.length > 1` refusal is gone; queue depth + queued IDs printed informationally; oldest row is selected.
+
+**Behavior contract:**
+- Pre-14AJ: 1 tick/day × refuses if more than 1 eligible → forced operator to Mark Ready exactly 1 row at a time
+- Post-14AJ: 3 ticks/day × posts oldest of any eligible queue → operator can Mark Ready a batch and let cron drain it
+
+**Defenses preserved:**
+- Kill switch still trips on first definitive failure → halts remaining ticks of the day
+- Atomic UPDATE guards (`.eq('status', 'approved').is('posted_at', null)`) unchanged
+- Per-tick row count still 1 — multi-row-per-tick was never supported
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+
+**Operator handoff:** after Vercel finishes deploying this commit (1–2 min), the next 14:00 / 18:00 / 22:00 UTC tick will pick up. Mark Ready a batch in `/dashboard/content` and watch them drain at 3/day.
+
+---
+
+## Earlier focus
 
 **Phase 14AI — Manual Generation Route Fix (in working tree, 2026-05-09 — manual "Generate This Week" route updated to mirror the cron's Pexels Video behavior; no DB schema change; no platform calls).**
 

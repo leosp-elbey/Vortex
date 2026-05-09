@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with six operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix). All planned phases (0 → 14AC) shipped; 14AD–14AI are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with seven operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day). All planned phases (0 → 14AC) shipped; 14AD–14AJ are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. The operator upgraded to Vercel Pro, removing Hobby's "once per cron path per day" limit. The autoposter cron `vercel.json` schedule changes from `0 14 * * *` (10 AM EST once daily) to `0 14,18,22 * * *` (10 AM, 2 PM, 6 PM EST = 14:00, 18:00, 22:00 UTC), giving 3 autoposter ticks per day. The previous Phase 14S "queue_size_gt_1" refusal in `src/app/api/cron/autoposter-once/route.ts` (which forced the operator to Mark Ready exactly one row at a time) is removed: the cron now picks the OLDEST eligible row by `queued_for_posting_at` ascending (FIFO), posts it, and leaves the rest for the next tick. Three ticks × one row per tick = up to 3 posts per day. The kill switch still acts as the per-failure circuit breaker — first auto-disable halts the remaining ticks until the operator re-enables. The eligibility query limit raised from 5 to 50 so the cron sees the full FIFO queue. Response payload now includes `queue_depth_before` and `queue_depth_remaining` for operator visibility. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior — the script's `eligible.length > 1` refusal is gone; it now picks the oldest and announces remaining queue depth. Lint + typecheck clean. No DB schema change; no platform calls.)
+**Last known good commit:** `60957da` — "Phase 14AI: manual Generate This Week route — wire Pexels Video for TikTok"
 **Last updated:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, which was NOT updated in Phase 14AG and was producing TikTok rows with `video_url=null` (and no Pexels image either — the image fetch was gated to `instagram|facebook` only). This phase brings the manual route into sync with the Phase 14AG/AH/AH.1 cron behavior: image fetch now runs for ALL platforms (with `orientation=portrait` for IG/TikTok, `landscape` for FB), TikTok rows synchronously call `fetchAndStoreVideo()` from `src/lib/media-providers.ts` and land at `media_status='ready'`, `media_source='pexels'`, with `video_url` populated and `media_metadata` carrying the on-screen hook + Pexels video provenance. The route's user prompt now teaches the AI a TikTok-specific format (image_prompt as a 3–7 word Pexels Video search query; on_screen_hook of max 10 words). `maxDuration=60` added to match the cron. The route's `ai_actions_log` payload + JSON response now include `videos_generated`. Lint + typecheck clean.)
 **Last known good commit:** `a778b2a` — "Phase 14AH.1: pre-flight hardening + randomized Pexels fetch"
 **Last updated:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes: (1) `scripts/generate-missing-media.js` gains a strict pre-flight refusal in `main()` BEFORE any DB SELECT — when `--generate` is set with `--provider=auto` or `--provider=pexels`, an empty/missing `PEXELS_API_KEY` now exits 1 with a clear message instead of writing `media_status='failed'` to every queued row (prevents a config error from corrupting DB rows, as happened during the Phase 14AH backfill attempt earlier in this session). (2) `fetchAndStoreVideo` in `src/lib/media-providers.ts` (and its JS mirror in the script) replaces the deterministic "page 1 first, fallback page 2–6, first-fit" strategy from 14AH with **random page 1–5 + random unused index from the returned `videos[]` array** for visual variety. Pexels search is deterministic, so two posts with identical `image_prompt` would always collide on the same MP4; randomizing both the page request and the index pick from the result set eliminates that. The existing `excludePexelsIds` / `excludeUrls` options remain optional — they layer extra dedup on top of the random pick (the standalone script still pre-queries the DB; the cron does not). The cron's DB pre-query was removed per the operator's directive — the accumulator-only approach plus randomization is sufficient for weekly cadence. Lint + typecheck clean.)
@@ -26,6 +28,76 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AJ — Vercel Pro Scale Up: 3 Autoposter Ticks Per Day (in working tree, 2026-05-09 — `vercel.json` schedule + autoposter route + manual script; no DB schema change; no platform calls; no new dependencies)
+
+### What this phase ships
+
+The operator upgraded to Vercel Pro. The autoposter cron now fires THREE times per day (10:00, 14:00, 18:00 Eastern → `0 14,18,22 * * *` UTC) instead of once daily, AND the prior "one row eligible at a time" guardrail is relaxed to "post the oldest eligible row, leave the rest." The result is a FIFO queue the operator can fill once and let the cron drain over the day.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `vercel.json` | Single-cron entry update for `/api/cron/autoposter-once`: schedule `0 14 * * *` → `0 14,18,22 * * *`. Other three cron entries (weekly-content, send-sequences, score-and-branch) unchanged. |
+| `src/app/api/cron/autoposter-once/route.ts` | (a) Header comment updated with the Phase 14AJ rationale and the new tick cadence. (b) The `if (plan.eligible.length > 1)` refusal block (Phase 14S Hobby-era guardrail that returned `{ skipped: true, reason: 'queue_size_gt_1' }` and forced the operator to Unqueue all but one row) is REMOVED. The cron now picks `plan.eligible[0]` (already FIFO by `queued_for_posting_at` ascending in the underlying `getAutoposterEligibleRows` query). (c) Eligibility limit raised from 5 to 50 so the cron sees the full queue (a 50-row queue would still drain in one tick × 50 days at 3 ticks/day, or much faster — but the limit no longer artificially caps visibility). (d) Success response payload now includes `queue_depth_before` and `queue_depth_remaining` so the operator can monitor drain progress from logs / Vercel dashboard. (e) Per-tick log line added at the start of post processing so it's easy to grep "queue_depth" across multiple ticks. |
+| `scripts/run-autoposter-once.js` | Same FIFO relaxation. (a) Header docstring updated with the Phase 14AJ note. (b) Modes section reworded: "Selects the OLDEST eligible row" instead of "the single eligible row". (c) The `if (eligible.length > 1)` refusal block (which exited 2 with "Refused: eligible queue size = N, expected exactly 1") is REMOVED. (d) When the queue has more than one row, the script logs the depth and lists the queued IDs as informational dim-text — no refusal. The operator can run the script repeatedly to drain the queue manually, or just let the cron handle it. |
+
+### Behavior contract — before vs after Phase 14AJ
+
+| Aspect | Pre-14AJ (Phase 14S) | Post-14AJ |
+|---|---|---|
+| Cron schedule | `0 14 * * *` (1× / day, 10 AM EST) | `0 14,18,22 * * *` (3× / day, 10 AM / 2 PM / 6 PM EST) |
+| Cron behavior with eligible queue size 0 | Returns `{ posted: 0, reason: 'no_eligible_rows' }` | Same |
+| Cron behavior with eligible queue size 1 | Posts the row | Posts the row |
+| Cron behavior with eligible queue size 2+ | Refuses with `{ skipped: true, reason: 'queue_size_gt_1' }` — operator must Unqueue all but one | Posts the OLDEST row (`queued_for_posting_at` ascending), leaves the rest in queue for the next tick |
+| Max posts per day (in steady state) | 1 (single tick × single row per tick) | 3 (three ticks × single row per tick) |
+| Operator workflow | Mark Ready 1 row → wait for tomorrow's tick → repeat | Mark Ready a batch of rows → cron drains them at 10 / 2 / 6 EST automatically |
+| Kill switch | Trips on first definitive platform failure → halts all subsequent ticks | Same — three ticks/day means a kill-switch trip halts the remaining 1–2 ticks of that day |
+| Atomic UPDATE invariants | `.eq('status', 'approved').is('posted_at', null)` | Same — the per-row safety contract is unchanged |
+
+### Why FIFO via `queued_for_posting_at` is the right ordering
+
+`queued_for_posting_at` is set when the operator clicks "Mark Ready" on the dashboard. The earliest-queued row is the one the operator has been waiting longest to post. The underlying `getAutoposterEligibleRows` already orders by `queued_for_posting_at` ascending then `created_at` descending then `id` ascending — that's a deterministic, stable, user-intuitive order. No code change to the eligibility query is needed; only the post-query selection logic.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No change to the kill switch behavior. A failure on the 14:00 tick still flips `autoposter_cron_enabled='false'` and skips the 18:00 + 22:00 ticks until manually re-enabled. This is correct: three ticks of a broken pipeline would post the same kind of bad post three times.
+- ❌ No change to the per-tick row count. Still ONE row per tick. Posting 2+ rows in a single tick was never supported (atomic UPDATE patterns + 60s function ceiling on Pro make multi-row-per-tick risky and harder to reason about). 3 ticks × 1 row is cleaner than 1 tick × 3 rows.
+- ❌ No change to the manual platform routes (`/api/automations/post-to-{facebook,instagram,tiktok}`). Those are operator-fired one-offs and remain unchanged.
+- ❌ No update to `docs/skills/autoposter-operator-sop.md`. The SOP describes the Phase 14O 5-step manual flow; the cron's behavior change doesn't invalidate the SOP. (A future doc-sync phase can update the SOP to mention 3 ticks/day if the operator wants.)
+- ❌ No backfill of the existing "Mark Ready" queue. Whatever rows the operator already Marked Ready will be picked up by the next tick.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (code paths only — exercised on the next 14:00 / 18:00 / 22:00 UTC tick, or on the next manual `node scripts/run-autoposter-once.js --apply`) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 3 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ FIFO ordering verified via `getAutoposterEligibleRows` source — already orders by `queued_for_posting_at ASC, created_at DESC, id ASC`
+- ✅ Atomic UPDATE guards (`.eq('status', 'approved').is('posted_at', null)`) preserved — concurrent-tick safety is unchanged
+- ✅ Kill switch path preserved — first definitive failure auto-disables and skips the remaining ticks of the day
+- ✅ Cron route maxDuration not explicitly set in the route (still implicit) — Pro default is sufficient for the ~5–8s IG path
+
+### Migration
+
+**No.** No DB schema change.
+
+### Recommended next phase
+
+**14AJ.1 — SOP doc sync (optional):** update `docs/skills/autoposter-operator-sop.md` to reflect the new 3-tick cadence. Cosmetic; no code impact.
+
+**14AJ.2 — Higher cadence (optional):** if 3/day proves insufficient, the same change can scale to e.g. `0 14,16,18,20,22 * * *` (5×/day). Vercel Pro allows up to 1× per minute.
 
 ---
 
