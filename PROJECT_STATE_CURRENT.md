@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with eight operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route). All planned phases (0 → 14AC) shipped; 14AD–14AK are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with nine operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings). All planned phases (0 → 14AC) shipped; 14AD–14AL are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AL shipping in working tree — TikTok Connect Button on Settings. The operator's TikTok app review submission requires a demo video showing the OAuth + posting flow in the actual UI. Phase 14AK exposed the OAuth flow at `/api/auth/tiktok/login`, but invoking it required typing the URL into the browser address bar — workable but visually scrappy for a TikTok reviewer. Phase 14AL adds a clickable "Connect TikTok" button to `/dashboard/settings` so the demo recording shows real UI interactions, satisfying TikTok's "user interface and user interactions clearly visible" requirement. New `/api/auth/tiktok/status` admin-only endpoint returns sanitized state (`{ connected, expires_at, open_id }`) WITHOUT shipping access_token / refresh_token to the browser. The settings page now has a "Connected Accounts" section showing TikTok connection status with a green ✓ Connected pill (or gray Not connected), the connected open_id (first 12 chars), the access-token expiration timestamp, and a black "Connect TikTok" / "Reconnect TikTok" button linking to `/api/auth/tiktok/login`. The OAuth callback's `?platform=tiktok&connected=true|false&error=...` query params are now read with `useSearchParams`, surfaced as a toast, and stripped from the URL via `router.replace` so a refresh doesn't re-fire the toast. The page is wrapped in a Suspense boundary (Next.js 16 requirement for client components using useSearchParams). Lint + typecheck clean. No DB schema change; no platform calls.)
+**Last known good commit:** `eb52f43` — "Phase 14AK: TikTok OAuth login route — completes the Phase 14R handshake"
 **Last updated:** 2026-05-09 (Phase 14AK shipping in working tree — TikTok OAuth Login Route. The operator hit a 404 visiting `https://www.vortextrips.com/api/auth/tiktok/login` while trying to authorize the TikTok Direct Post API. Diagnosis: Phase 14R built only the OAuth callback at `/api/auth/tiktok/callback` (the route that receives TikTok's redirect after the user authorizes); the corresponding LOGIN route — the one that builds the authorize URL and 302-redirects the browser to TikTok — was never created. This phase fills that gap with `src/app/api/auth/tiktok/login/route.ts`. The route reads `TIKTOK_CLIENT_KEY` from env, generates a CSRF state via `crypto.randomUUID()`, computes the same `redirect_uri` the callback uses (`${NEXT_PUBLIC_APP_URL || request.origin}/api/auth/tiktok/callback`), and issues a 302 to `https://www.tiktok.com/v2/auth/authorize/` with `client_key`, `scope=user.info.basic,video.publish`, `response_type=code`, `redirect_uri`, and `state`. Refuses with a clear 500 message if `TIKTOK_CLIENT_KEY` is unset (so the operator knows what to configure). State validation is intentionally still deferred — matches the callback's existing `void state` stance; a future phase can add a session-backed state store and validate at the callback hook point. No DB writes; no platform calls beyond the redirect itself; never logs sensitive values. Lint + typecheck clean.)
 **Last known good commit:** `3f26874` — "Phase 14AJ: Vercel Pro scale up — 3 autoposter ticks/day, FIFO drain"
 **Last updated:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. The operator upgraded to Vercel Pro, removing Hobby's "once per cron path per day" limit. The autoposter cron `vercel.json` schedule changes from `0 14 * * *` (10 AM EST once daily) to `0 14,18,22 * * *` (10 AM, 2 PM, 6 PM EST = 14:00, 18:00, 22:00 UTC), giving 3 autoposter ticks per day. The previous Phase 14S "queue_size_gt_1" refusal in `src/app/api/cron/autoposter-once/route.ts` (which forced the operator to Mark Ready exactly one row at a time) is removed: the cron now picks the OLDEST eligible row by `queued_for_posting_at` ascending (FIFO), posts it, and leaves the rest for the next tick. Three ticks × one row per tick = up to 3 posts per day. The kill switch still acts as the per-failure circuit breaker — first auto-disable halts the remaining ticks until the operator re-enables. The eligibility query limit raised from 5 to 50 so the cron sees the full FIFO queue. Response payload now includes `queue_depth_before` and `queue_depth_remaining` for operator visibility. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior — the script's `eligible.length > 1` refusal is gone; it now picks the oldest and announces remaining queue depth. Lint + typecheck clean. No DB schema change; no platform calls.)
@@ -30,6 +32,87 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AL — TikTok Connect Button on Settings (in working tree, 2026-05-09 — Connected Accounts UI + sanitized status API; no DB schema change; no platform calls; no new dependencies)
+
+### What this phase ships
+
+A clickable "Connect TikTok" button on `/dashboard/settings` so the operator's TikTok app-review demo video can show real UI interactions instead of typing the OAuth URL into the address bar. The end-to-end OAuth handshake (login → TikTok authorize → callback → tokens) was completed in Phase 14AK; this phase adds the operator-facing entry point that makes the demo video reviewer-friendly per TikTok's app review guidelines ("clearly show the user interface and user interactions").
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/app/api/auth/tiktok/status/route.ts` (new) | Admin-only GET endpoint that reads three TikTok keys from `site_settings` (`tiktok_refresh_token`, `tiktok_token_expires_at`, `tiktok_open_id`) and returns `{ connected, expires_at, open_id }`. **Critical security property**: returns boolean `connected` (computed from `refresh_token` presence), the access-token expiration timestamp, and the open_id — but NEVER returns `tiktok_access_token` or `tiktok_refresh_token` themselves. Same admin-auth pattern as the rest of `/api/admin/*` (Supabase user → admin_users join). The four TikTok rows in `site_settings` are admin-only per migration 007 RLS, but reads via the admin client so it can run from the dashboard's client-side fetch. |
+| `src/app/dashboard/settings/page.tsx` | Refactored: `SettingsPage` becomes a Suspense wrapper around new `SettingsPageInner` (Next.js 16 requires client components using `useSearchParams` to be wrapped in Suspense). New "Connected Accounts" section inserted between API Keys and Bland.ai Configuration. Section header "Connected Accounts" + description. Single TikTok row showing: 🎵 TikTok label, Loading…/✓ Connected/Not connected pill, optional metadata line (`open_id <first-12-chars>… · access token expires <timestamp>`), required-scopes hint (`user.info.basic` + `video.publish`), and a black "Connect TikTok" / "Reconnect TikTok" anchor linking to `/api/auth/tiktok/login`. On mount, fetches `/api/auth/tiktok/status` to populate the badge. New useEffect reads URL search params: when the route lands with `?platform=tiktok&connected=true`, fires a success toast + re-fetches status; on `connected=false`, fires an error toast with the truncated reason; in both cases, calls `router.replace('/dashboard/settings', { scroll: false })` to strip the params so a page refresh doesn't re-fire the toast. |
+
+### How the demo video flow works after Phase 14AL
+
+```
+Operator's screen recording:
+  1. Open https://www.vortextrips.com (URL visible in address bar)
+  2. Click into the dashboard → /dashboard/settings
+  3. Scroll to "Connected Accounts" section
+  4. Status pill says "Not connected"  ← reviewer sees current state
+  5. Click "Connect TikTok" button
+  6. Redirects to https://www.tiktok.com/v2/auth/authorize/...
+  7. Operator (logged in as the Sandbox test user) clicks "Allow"
+  8. Redirects back to /dashboard/settings?platform=tiktok&connected=true
+  9. Toast fires "TikTok connected ✓"; URL params get stripped
+  10. Status pill flips to "✓ Connected" with open_id + expiration timestamp
+  11. Navigate to /dashboard/content
+  12. Find an approved + Ready TikTok row, click "Post to TikTok"
+  13. Confirm post lands on the connected TikTok profile
+```
+
+That sequence — visit homepage → click into dashboard → click Connect → authorize → click Post — is exactly what TikTok's review documentation asks for. Domain `vortextrips.com` is visible the whole time. Real UI buttons; no address-bar typing.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No state validation. The login route generates a CSRF state via `crypto.randomUUID()`; the callback still does `void state`. Adding session-backed state validation would require a different storage path (cookie / Supabase session table) — separate phase.
+- ❌ No "Disconnect TikTok" button. To disconnect, the operator would need to manually clear the four `site_settings` rows or revoke the app on TikTok's side. Could be a future polish.
+- ❌ No connection status for OTHER platforms (FB, IG, YouTube). The "Connected Accounts" section is currently TikTok-only because TikTok is the one with an immediate audit deadline. The pattern can be extended later.
+- ❌ No update to the misleading `tiktok-oauth.ts` line 237 / `run-autoposter-once.js` "reconnect via /api/auth/tiktok/callback" string. Still a follow-up nit.
+- ❌ No fix to the generic dashboard-side error string when TikTok rejects scope (the operator hit this earlier — TikTok's "Something went wrong / scope" page is on TikTok's side, not ours; the fix is in their developer portal config). Documented in the Phase 14AK section.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (the new status route is read-only against `site_settings`) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 1 new + 1 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Status route returns sanitized state — verified by reading the source: only `tiktok_refresh_token`, `tiktok_token_expires_at`, `tiktok_open_id` are SELECTed; `tiktok_access_token` is deliberately NOT in the SELECT list
+- ✅ Suspense wrapper added — matches the pattern in `src/app/dashboard/videos/page.tsx`
+- ✅ URL param strip via `router.replace` prevents toast re-fire on page refresh
+- ✅ `tiktokStatus === null` (loading) state separated from `tiktokStatus.connected === false` (not connected) state — UI shows "Loading…" pill while the fetch is in flight, never shows a misleading "Not connected" before the status is known
+
+### Migration
+
+**No.** No DB schema change.
+
+### Operator runbook for the TikTok app review demo
+
+After Vercel deploys this commit (~1–2 min):
+1. **TikTok Developer Portal → Sandbox → Manage Sandbox Users**: add your TikTok account.
+2. **On the live site**: log into `vortextrips.com` as admin → `/dashboard/settings` → click "Connect TikTok" → authorize on TikTok → land back at the settings page with the green ✓ Connected badge.
+3. **Record a 60–90s demo** of steps in the "How the demo video flow works" diagram above. Capture the address bar showing `vortextrips.com` throughout.
+4. **Upload the mp4 (≤50MB) to TikTok's app review portal + click Submit.**
+
+### Recommended next phase
+
+**14AL.1 — Disconnect TikTok button (optional):** add a "Disconnect TikTok" button next to the Reconnect button when connected. Clears the four `site_settings` rows on click. Cosmetic polish.
+
+**14AK.2 — State validation (still optional):** session-backed CSRF store + validation at both TikTok and YouTube callbacks. Not blocking for the audit.
 
 ---
 

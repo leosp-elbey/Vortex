@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { maskKey } from '@/lib/utils'
 import type { AdminUser } from '@/types'
 import { useToast, Toaster } from '@/components/ui/toast'
@@ -13,12 +14,22 @@ const ENV_KEYS = [
   { label: 'Resend API Key', name: 'RESEND_API_KEY' },
 ]
 
-export default function SettingsPage() {
+interface TikTokStatus {
+  connected: boolean
+  expires_at: string | null
+  open_id: string | null
+}
+
+function SettingsPageInner() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
   const [loadingAdmins, setLoadingAdmins] = useState(true)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteName, setInviteName] = useState('')
   const [inviting, setInviting] = useState(false)
+  // Phase 14AL — TikTok connection status driven by /api/auth/tiktok/status.
+  const [tiktokStatus, setTiktokStatus] = useState<TikTokStatus | null>(null)
   const { toasts, show } = useToast()
 
   useEffect(() => {
@@ -27,6 +38,35 @@ export default function SettingsPage() {
       .then(data => { setAdminUsers(Array.isArray(data) ? data : []); setLoadingAdmins(false) })
       .catch(() => setLoadingAdmins(false))
   }, [])
+
+  // Phase 14AL — fetch TikTok connection state on mount.
+  useEffect(() => {
+    fetch('/api/auth/tiktok/status')
+      .then(r => r.ok ? r.json() : null)
+      .then((data: TikTokStatus | null) => { if (data) setTiktokStatus(data) })
+      .catch(() => { /* status fetch is best-effort; UI shows the section anyway */ })
+  }, [])
+
+  // Phase 14AL — when the OAuth callback redirects back here with
+  // ?platform=tiktok&connected=true|false&error=…, surface a toast and
+  // strip the params from the URL so a refresh doesn't re-fire the toast.
+  useEffect(() => {
+    const platform = searchParams.get('platform')
+    if (platform !== 'tiktok') return
+    const connected = searchParams.get('connected')
+    const error = searchParams.get('error')
+    if (connected === 'true') {
+      show('TikTok connected ✓')
+      // Re-fetch status so the badge flips immediately.
+      fetch('/api/auth/tiktok/status')
+        .then(r => r.ok ? r.json() : null)
+        .then((data: TikTokStatus | null) => { if (data) setTiktokStatus(data) })
+        .catch(() => { /* non-fatal */ })
+    } else if (connected === 'false') {
+      show(`TikTok connection failed${error ? `: ${error}` : ''}`, 'error')
+    }
+    router.replace('/dashboard/settings', { scroll: false })
+  }, [searchParams, router, show])
 
   const inviteAdmin = async () => {
     if (!inviteEmail.trim()) return
@@ -80,6 +120,54 @@ export default function SettingsPage() {
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {/* Phase 14AL — Connected Accounts (Login Kit / Direct Post OAuth handshakes) */}
+      <div className="bg-white rounded-xl shadow-sm mb-6">
+        <div className="p-6 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-[#1A1A2E]">Connected Accounts</h2>
+          <p className="text-sm text-gray-500 mt-1">Authorize VortexTrips to publish on your behalf via each platform&apos;s official OAuth flow.</p>
+        </div>
+        <div className="divide-y divide-gray-100">
+          <div className="flex items-center justify-between px-6 py-4 gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-[#1A1A2E] flex items-center gap-2 flex-wrap">
+                <span>🎵 TikTok</span>
+                {tiktokStatus === null ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">Loading…</span>
+                ) : tiktokStatus.connected ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700">✓ Connected</span>
+                ) : (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">Not connected</span>
+                )}
+              </p>
+              {tiktokStatus?.connected && (tiktokStatus.open_id || tiktokStatus.expires_at) && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {tiktokStatus.open_id && (
+                    <>
+                      open_id <code className="font-mono bg-gray-50 px-1 rounded">{tiktokStatus.open_id.slice(0, 12)}…</code>
+                    </>
+                  )}
+                  {tiktokStatus.open_id && tiktokStatus.expires_at && <span className="mx-1">·</span>}
+                  {tiktokStatus.expires_at && (
+                    <>
+                      access token expires {new Date(tiktokStatus.expires_at).toLocaleString()}
+                    </>
+                  )}
+                </p>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                Required scopes: <code className="font-mono">user.info.basic</code> + <code className="font-mono">video.publish</code> (Direct Post API).
+              </p>
+            </div>
+            <a
+              href="/api/auth/tiktok/login"
+              className="bg-[#1A1A2E] text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-black transition-colors whitespace-nowrap"
+            >
+              {tiktokStatus?.connected ? 'Reconnect TikTok' : 'Connect TikTok'}
+            </a>
+          </div>
         </div>
       </div>
 
@@ -194,5 +282,16 @@ export default function SettingsPage() {
 
       <Toaster toasts={toasts} />
     </div>
+  )
+}
+
+// Phase 14AL — wrap in Suspense because SettingsPageInner now uses
+// useSearchParams (Next.js 16 requires this for client components that
+// touch the URL). Mirrors the pattern in src/app/dashboard/videos/page.tsx.
+export default function SettingsPage() {
+  return (
+    <Suspense>
+      <SettingsPageInner />
+    </Suspense>
   )
 }
