@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes in one revision: (1) `scripts/generate-missing-media.js` now refuses upfront on missing PEXELS_API_KEY before any SELECT, preventing config errors from corrupting DB rows (the very failure mode hit during the earlier 14AH backfill attempt). (2) `fetchAndStoreVideo` swapped from deterministic "page 1 → fallback page 2–6 → first-fit" to **random page 1–5 + random unused index** for visual variety. Cron's DB pre-query removed per operator directive; in-run accumulator preserved. Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, a separate route from the cron that wasn't updated in Phase 14AG. Pre-14AI it produced TikTok rows with `video_url=null` (and no Pexels image either — image fetch was IG/FB-only). 14AI brings the manual route into sync: image fetch runs for ALL platforms; TikTok rows synchronously call `fetchAndStoreVideo()` and land at `media_status='ready'` with `video_url` populated and `media_metadata` carrying `on_screen_hook` + Pexels provenance. User prompt teaches AI the TikTok-specific format. `maxDuration=60`. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes in one revision: (1) `scripts/generate-missing-media.js` now refuses upfront on missing PEXELS_API_KEY before any SELECT, preventing config errors from corrupting DB rows (the very failure mode hit during the earlier 14AH backfill attempt). (2) `fetchAndStoreVideo` swapped from deterministic "page 1 → fallback page 2–6 → first-fit" to **random page 1–5 + random unused index** for visual variety. Cron's DB pre-query removed per operator directive; in-run accumulator preserved. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. The new Pexels Video pipeline from Phase 14AG could pick the same MP4 twice when two posts have similar `image_prompt` values (Pexels search is deterministic). `fetchAndStoreVideo` now accepts `excludePexelsIds` and `excludeUrls` exclude sets; walks page 1 first, retries with a randomized page 2–6 if all page-1 results are excluded, falls back to a tagged duplicate as last resort. Both callers (weekly cron + manual script) pre-query existing `video_url` + `media_metadata.pexels_video_id` and accumulate newly-picked URLs/IDs as the run progresses. Cron's TikTok video fetches serialized (image fetches stay parallel). Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AG shipping in working tree — Video Pipeline Swap. HeyGen excised from the SOCIAL CONTENT PIPELINE (avatar voice was off-brand, async-only flow incompatible with the synchronous weekly cron, and rendering costs added up). Pexels Video Search wired in as the replacement: cinematic vertical HD travel B-roll, free, synchronous, lands on the row immediately. The TikTok "Media missing" state is now eliminated at the source — every TikTok row from the weekly cron lands at `media_status='ready'` with a Pexels MP4 in `video_url`. New `fetchAndStoreVideo()` in `src/lib/media-providers.ts`. Cron updated with `maxDuration=60`, parallel image+video fetch, `on_screen_hook` parsing into `media_metadata`. `ai-prompts.ts` rewritten with TikTok-specific image-prompt-as-search-query + 10-word On-Screen Hook directives. `scripts/generate-missing-media.js` rewritten — HeyGen surface fully removed; `processVideo` calls Pexels Video. `scripts/check-video-generation-status.js` and `scripts/inspect-heygen-pilot-candidates.js` deleted. Dashboard "🎬 Video generating" pill replaced by "⚠ Legacy HeyGen row" pill. Admin SBA welcome-video stack deliberately untouched (separate feature; `/sba` page would break). Lint + typecheck clean. No DB; no platform calls.)
 **Earlier this session:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. Audit of `scripts/generate-missing-media.js` confirms the "Media missing" badge on TikTok drafts is a correct, deliberate signal (HeyGen renders are gated to a manual operator command per Phase 14L's API-quota design), not a bug. Single dashboard edit in `src/app/dashboard/content/page.tsx` adds an inline actionable helper under the badge row when a TikTok row is in the missing-or-failed state — surfaces the exact command "node scripts/generate-missing-media.js --provider=heygen" so the state becomes actionable instead of confusing. Lint + typecheck clean. No DB; no platform calls.)
@@ -12,6 +13,25 @@
 ---
 
 ## Current focus
+
+**Phase 14AI — Manual Generation Route Fix (in working tree, 2026-05-09 — manual "Generate This Week" route updated to mirror the cron's Pexels Video behavior; no DB schema change; no platform calls).**
+
+Phase 14AG only updated the WEEKLY CRON. The dashboard's "Generate This Week" button calls a SEPARATE route (`/api/dashboard/generate-content`) — diagnosed during the post-14AH.1 backfill session when the operator's button click added 10 rows including 2 video-less TikTok rows. 14AI brings the manual route into byte-equivalent shape with the cron for TikTok rows.
+
+**Built in 14AI:**
+- [x] **`src/app/api/dashboard/generate-content/route.ts`.** Imported `fetchAndStoreVideo`. Added `maxDuration=60`. Updated user prompt with TikTok-specific format directives (image_prompt as Pexels Video search query; new `on_screen_hook` field, max 10 words). Removed IG/FB-only gate on image fetching — all platforms now get a Pexels image with platform-aware orientation. TikTok rows now synchronously call `fetchAndStoreVideo()` and land at `media_status='ready'`, `media_source='pexels'`, with `video_url` + `media_metadata.{ on_screen_hook, pexels_video_id, ... }`. `videos_generated` added to log + response.
+
+**Behavior parity:** TikTok rows from the manual button now match the row shape of TikTok rows from the weekly cron exactly. No more "Media missing" badges from the dashboard button.
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+
+**Operator handoff:** after this commit deploys, click "Generate This Week" in the dashboard and verify the new TikTok rows land green ("Media ready"). If they still land "Media missing" for any reason, the script `node scripts/generate-missing-media.js --videos-only --content-only --generate --apply` recovers them.
+
+---
+
+## Earlier focus
 
 **Phase 14AH.1 — Pre-Flight Hardening + Randomized Pexels Fetch (in working tree, 2026-05-09 — script refuses upfront on missing API key + lib uses random page + random index; no DB schema change; no platform calls).**
 

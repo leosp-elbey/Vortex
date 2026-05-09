@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with five operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention). All planned phases (0 → 14AC) shipped; 14AD–14AH are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with six operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix). All planned phases (0 → 14AC) shipped; 14AD–14AI are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AI shipping in working tree — Manual Generation Route Fix. The dashboard's "Generate This Week" button calls `/api/dashboard/generate-content`, which was NOT updated in Phase 14AG and was producing TikTok rows with `video_url=null` (and no Pexels image either — the image fetch was gated to `instagram|facebook` only). This phase brings the manual route into sync with the Phase 14AG/AH/AH.1 cron behavior: image fetch now runs for ALL platforms (with `orientation=portrait` for IG/TikTok, `landscape` for FB), TikTok rows synchronously call `fetchAndStoreVideo()` from `src/lib/media-providers.ts` and land at `media_status='ready'`, `media_source='pexels'`, with `video_url` populated and `media_metadata` carrying the on-screen hook + Pexels video provenance. The route's user prompt now teaches the AI a TikTok-specific format (image_prompt as a 3–7 word Pexels Video search query; on_screen_hook of max 10 words). `maxDuration=60` added to match the cron. The route's `ai_actions_log` payload + JSON response now include `videos_generated`. Lint + typecheck clean.)
+**Last known good commit:** `a778b2a` — "Phase 14AH.1: pre-flight hardening + randomized Pexels fetch"
 **Last updated:** 2026-05-09 (Phase 14AH.1 shipping in working tree — Pre-Flight Hardening + Randomized Pexels Fetch. Two changes: (1) `scripts/generate-missing-media.js` gains a strict pre-flight refusal in `main()` BEFORE any DB SELECT — when `--generate` is set with `--provider=auto` or `--provider=pexels`, an empty/missing `PEXELS_API_KEY` now exits 1 with a clear message instead of writing `media_status='failed'` to every queued row (prevents a config error from corrupting DB rows, as happened during the Phase 14AH backfill attempt earlier in this session). (2) `fetchAndStoreVideo` in `src/lib/media-providers.ts` (and its JS mirror in the script) replaces the deterministic "page 1 first, fallback page 2–6, first-fit" strategy from 14AH with **random page 1–5 + random unused index from the returned `videos[]` array** for visual variety. Pexels search is deterministic, so two posts with identical `image_prompt` would always collide on the same MP4; randomizing both the page request and the index pick from the result set eliminates that. The existing `excludePexelsIds` / `excludeUrls` options remain optional — they layer extra dedup on top of the random pick (the standalone script still pre-queries the DB; the cron does not). The cron's DB pre-query was removed per the operator's directive — the accumulator-only approach plus randomization is sufficient for weekly cadence. Lint + typecheck clean.)
 **Last known good commit:** `be860ca` — "Phase 14AH: Pexels duplicate prevention — dedup in fetchAndStoreVideo"
 **Last updated:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. Pexels Video Search is deterministic — the same query returns the same top results — so two posts with similar `image_prompt` values would otherwise collide on the same MP4. `fetchAndStoreVideo` in `src/lib/media-providers.ts` now accepts `excludePexelsIds: ReadonlySet<string>` and `excludeUrls: ReadonlySet<string>` options. The function walks page 1 first skipping any video whose `id` or chosen MP4 URL appears in either set; if every page-1 result is excluded, it retries once with a randomized page (2–6) for variety; if page 2 is also fully excluded (extremely rare for travel queries), it falls back to returning the first usable result with `raw.duplicate_fallback = true` set so callers can flag the row. Both callers (the weekly-content cron and `scripts/generate-missing-media.js`) pre-query existing `content_calendar.video_url` + `media_metadata.pexels_video_id` (and the script also pulls in `campaign_assets.video_url` + `video_source_metadata.pexels_video_id`) into the exclude sets, then accumulate newly-picked URLs/IDs into the same sets as the run progresses — so a single batch can't pick the same MP4 twice. The cron's TikTok video fetches were also serialized (image fetches stay parallel) to keep the accumulator consistent. The lib helper itself never queries the DB — the DB read lives in the callers, preserving the lib's pure-HTTP-wrapper contract. Lint + typecheck clean. No DB schema change; no platform calls.)
@@ -24,6 +26,72 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AI — Manual Generation Route Fix (in working tree, 2026-05-09 — manual "Generate This Week" route updated to mirror the cron's Pexels Video behavior; no DB schema change; no platform calls; no new dependencies)
+
+### Why this phase exists
+
+After Phase 14AG fixed the WEEKLY CRON's video pipeline, the operator clicked the dashboard's "Generate This Week" button and produced 10 new rows — 2 of which were TikTok rows that landed with `video_url=null`. Those rows immediately appeared as "Media missing" on the dashboard, prompting the operator to ask why the freshly-generated rows weren't ready. Diagnosis:
+
+The "Generate This Week" button does NOT call `/api/cron/weekly-content`. It calls `/api/dashboard/generate-content` — a completely separate route that:
+- Uses `generateCompletion` (direct OpenAI) instead of `runAIJob` (OpenRouter via ai-router).
+- Returns JSON instead of markdown (different parser).
+- Hardcodes its own systemPrompt (doesn't import `SOCIAL_SYSTEM` from `src/lib/ai-prompts.ts`).
+- **Was gated to `instagram|facebook` for image fetching only** (TikTok rows had no Pexels image).
+- **Never called any video provider** — TikTok rows always landed with `video_url=null`.
+
+Phase 14AG only updated the cron route. Phase 14AI updates the manual route to match.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/app/api/dashboard/generate-content/route.ts` | (a) Imported `fetchAndStoreVideo` from `@/lib/media-providers`. (b) Added `export const maxDuration = 60` to match the cron's headroom (default API route is 10s on Hobby; 5 image fetches + 1 video fetch + the OpenAI call would have been tight). (c) Updated the user prompt to teach the AI a TikTok-specific format: `image_prompt` for TikTok must be a 3–7 word Pexels Video search query (with example queries baked in); `video_script` stays for backwards compatibility but a new `on_screen_hook` field (max 10 words) is required for TikTok rows. (d) The TypeScript type for parsed posts gains an `on_screen_hook?: string` field. (e) Removed the IG/FB-only gate on image fetching — all platforms now get a Pexels image with platform-aware orientation (`portrait` for IG/TikTok, `landscape` for FB/LinkedIn). (f) Added a TikTok-only synchronous `fetchAndStoreVideo()` call after the image branch; result populates `video_url` + `pexels_video_id` for the row build. (g) The row build now writes `media_status='ready'`, `media_source='pexels'`, `media_generated_at`, and `media_metadata: { source, on_screen_hook, pexels_video_id, fetched_at }` for TikTok rows that landed a video. Non-TikTok rows still skip these columns to keep their pre-14AI shape. (h) The `ai_actions_log` payload + JSON response now include `videos_generated`. |
+
+### Behavior contract — before vs after Phase 14AI
+
+| State at end of "Generate This Week" click | Pre-14AI | Post-14AI |
+|---|---|---|
+| TikTok row | `image_url=null, video_url=null, media_status=null` → "Media missing" badge | `image_url=<pexels portrait image>, video_url=<pexels mp4>, media_status='ready', media_source='pexels', media_metadata={...}` → "Media ready" |
+| Instagram row | `image_url=<pexels portrait>` → "Media ready" (unchanged) | `image_url=<pexels portrait>` → "Media ready" |
+| Facebook row | `image_url=<pexels landscape>` → "Media ready" (unchanged) | `image_url=<pexels landscape>` → "Media ready" |
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No unification of the manual route's systemPrompt with `SOCIAL_SYSTEM` from `ai-prompts.ts`. The cron uses `SOCIAL_SYSTEM` (Phase 14W, 14AG); the manual route uses its own hardcoded systemPrompt. The two voices are similar but not identical. Unifying them would be a larger refactor (changing the LLM provider from OpenAI direct to OpenRouter, swapping JSON for markdown). The directive scoped this phase to the video fetch only — voice unification is a follow-up.
+- ❌ No DB pre-query for cross-history dedup. The cron intentionally doesn't do that either (Phase 14AH.1); the lib helper's randomized page (1–5) + random index gives sufficient variety.
+- ❌ No backfill of the 2 specific rows the operator's earlier click produced (`341473bb`, `4e8d1693`). The script `node scripts/generate-missing-media.js --videos-only --content-only --generate --apply` already filled those during the previous session; they're now `media_status='ready'`.
+- ❌ No multi-platform expansion. The directive mentioned "TikTok / Reels / Shorts" but only `tiktok` exists as a video-required platform in the manual route's prompt. Matches the cron's `p.platform === 'tiktok'` gate.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (code paths only — exercised on the next "Generate This Week" click) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 1 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Image fetch generalized to all platforms — orientation logic mirrors the cron exactly
+- ✅ Video fetch gated to `isTikTok && post.image_prompt` — non-TikTok rows skip the API call entirely (zero quota burn)
+- ✅ Row shape on TikTok side is byte-equivalent to the cron's TikTok row shape
+
+### Migration
+
+**No.** No DB schema change.
+
+### Recommended next phase
+
+**14AI.1 — System prompt unification (optional):** the manual route could import `SOCIAL_SYSTEM` from `ai-prompts.ts` instead of hardcoding its own. Would require switching the LLM call from `generateCompletion` (OpenAI direct) to `runAIJob` (OpenRouter), and swapping the JSON parser for a markdown parser. Not blocking — current voices are similar enough.
+
+**14AG.2 — Text overlay rendering (still optional):** wire Creatomate / Shotstack / ffmpeg to burn `media_metadata.on_screen_hook` onto the Pexels MP4 before the autoposter posts it. Async — needs its own poll/cron.
 
 ---
 
