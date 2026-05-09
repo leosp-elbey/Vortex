@@ -1,17 +1,111 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE.** All planned phases (0 → 14AC) are complete. The system is production-ready, fully autonomous, operator-controlled, hang-resistant, CI-gated, and performance-tracked. No new feature phases are queued. Future work flows through the same `SAVE_PROTOCOL.md` but on an as-needed basis (bug fixes, operator-driven feature requests, infrastructure tuning) rather than against a predetermined roadmap.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with one operator-driven security patch in flight, Phase 14AD). All planned phases (0 → 14AC) shipped; Phase 14AD is a single targeted migration closing two Supabase Security Advisor warnings the operator confirmed in their dashboard. Future work flows through the same `SAVE_PROTOCOL.md` on an as-needed basis.
 
 ---
 
-**Last updated:** 2026-05-08 (Phase 14AC shipping in working tree — Final System Audit + Maintenance Mode declaration. Final `node scripts/audit-site-health.js` run against production: **8/8 public routes healthy** — Homepage 200, `/free` `/book` `/join` 307 redirects with correct destinations, `/thank-you` `/quote` `/quiz` `/sba` 200, all under 1.1s. `/t/<slug>` gracefully WARN-skipped this run because Supabase project is still 522'd (transient infrastructure, unrelated to code). PROJECT_STATE_CURRENT.md restamped to declare the project officially in Maintenance Mode.)
-**Last known good commit:** `5a60f06` — "Phase 14AB: Globalized bounded() helper — webhook hang-resistance" Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
+**Last updated:** 2026-05-08 (Phase 14AD shipping in working tree — Supabase Security Advisor compliance. New migration `supabase/migrations/034_security_advisor_compliance.sql` carries two `ALTER` statements: (A) `ALTER VIEW event_campaign_attribution_summary SET (security_invoker = true)` — closes the `security_definer_view` advisor warning that exposed aggregate campaign performance data to `anon` via PostgREST; (B) `ALTER FUNCTION update_updated_at() SET search_path = pg_catalog, public` — closes the `function_search_path_mutable` advisor warning. Both ALTERs are idempotent and metadata-only; no app code changes; no data migration. Operator runs the migration on Supabase (SQL editor or `supabase db push`) after this commit lands.)
+**Last known good commit:** `03c9ca4` — "Phase 14AC: Final System Audit + Maintenance Mode declaration" Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
 **Last known good commit:** `d3cf3d3` — "Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push" New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `1bfda11` — "Phase 14Z: CI/CD GitHub Actions wiring — typecheck + lint on every push" New `.github/workflows/ci.yml` runs `npx tsc --noEmit` and `npm run lint` automatically on every push and pull_request to main. Pinned to Node 22 LTS. Uses `npm ci --legacy-peer-deps` matching the documented local-dev invocation. Cached npm tarball directory for faster repeat runs. `concurrency: cancel-in-progress` saves CI minutes on rapid push sequences. Build step (`next build`) intentionally NOT in CI — Vercel runs it on every deploy. Both gates have been clean locally since Phase 14T.1; CI now blocks any regression at the PR level. No code changes; no DB writes; no platform calls.)
 **Last known good commit:** `662fdc9` — "Phase 14Y: Tracking redirect fallback fix — bounded waits prevent hang"
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AD — Supabase Security Advisor Compliance (in working tree, 2026-05-08 — single migration; metadata-only ALTERs; no app code changes; no data migration)
+
+### What this phase ships
+
+A single SQL migration (`supabase/migrations/034_security_advisor_compliance.sql`) that closes the two Supabase Security Advisor warnings the operator confirmed in their dashboard. No code changes; no schema-shape changes; no behavior change for admin or service-role callers. The intentional behavior change: `anon` queries against `event_campaign_attribution_summary` now return zero rows instead of leaking aggregate campaign performance data.
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/034_security_advisor_compliance.sql` | Two `ALTER` statements: (A) `ALTER VIEW event_campaign_attribution_summary SET (security_invoker = true)` and (B) `ALTER FUNCTION update_updated_at() SET search_path = pg_catalog, public`. Header comment explains the rationale, the behavior contract (admin/service-role unaffected; anon now respects RLS), idempotency (both ALTERs are safe to re-run), and the verification steps. |
+
+### Why this is the first new migration since 033
+
+Phases 14P → 14AC explicitly preserved the immutability of migrations 001–033. Phase 14AD is the first migration justified by a concrete **external** trigger — Supabase's own Security Advisor flagged both warnings in the operator's dashboard. The audit in the predecessor task confirmed:
+- The view warning is real (anon could read aggregate campaign data via PostgREST).
+- The function warning is real per advisor logic (mutable search_path), even though real exploitability of `update_updated_at()` is essentially zero.
+
+Code-only changes can't fix either warning — both require database-level metadata changes. Hence migration 034.
+
+### What changes for each caller
+
+| Caller | Pre-14AD behavior | Post-14AD behavior |
+|---|---|---|
+| **Admin** (`auth.uid() IN admin_users`) | Reads view normally | Reads view normally (admin RLS on underlying tables still allows) |
+| **Service-role** (cron / runner / admin client) | Bypasses RLS entirely | Bypasses RLS entirely (unchanged) |
+| **Anon** (public anon key in browser bundle) | Reads view's full output (aggregate counts, timestamps, campaign metadata) — bypassing RLS via the view-owner privilege | Returns `[]` — caller's RLS now applied; admin-only policies on every underlying table yield zero rows |
+| **Triggers using `update_updated_at()`** | Resolve `NEW`/`NOW()` via search_path lookup (mutable) | Resolve via pinned `pg_catalog, public` path. Behavior identical for the function body but advisor warning clears. |
+
+### Idempotency
+
+Both ALTER statements are safe to re-run:
+- `ALTER VIEW ... SET (security_invoker = true)` — Postgres accepts the same setting being re-applied.
+- `ALTER FUNCTION ... SET search_path = pg_catalog, public` — same, Postgres just stores the option.
+
+If the operator accidentally runs the migration twice (e.g. via `supabase db push` after a partial apply), no error is raised. The migration file does NOT use `CREATE` for the view or function; it only modifies their existing options.
+
+### Critical safety preserved
+
+- ✅ View shape unchanged. All 27 columns return identical types and identical values for admin/service-role callers.
+- ✅ Function body unchanged. `update_updated_at()` still does `NEW.updated_at = NOW(); RETURN NEW;`. Triggers using it (across at least 4 tables: contacts, opportunities, ai_jobs, ai_command_templates, site_settings) keep firing identically.
+- ✅ No app code touched. The 30+ TypeScript/JS files that read or write to these tables continue to work without changes.
+- ✅ Migrations 001–033 untouched.
+- ✅ No new env vars. No new dependencies.
+
+### Verification after operator applies the migration
+
+1. **Supabase Dashboard → Security Advisor**: both `security_definer_view` and `function_search_path_mutable` warnings clear.
+2. **Admin dashboard PerformancePanel** on `/dashboard/campaigns`: continues to show real campaign numbers. Admin RLS allows the underlying SELECTs.
+3. **Anon API probe** (proves the fix landed):
+   ```bash
+   curl -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+        'https://<project>.supabase.co/rest/v1/event_campaign_attribution_summary'
+   ```
+   Pre-14AD: returns campaign rows.
+   Post-14AD: returns `[]`.
+4. **`node scripts/audit-site-health.js`**: 8/8 public routes still healthy. The audit doesn't depend on the view, so the result is unchanged.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No app code changes. The dashboard PerformancePanel reads the view via the admin-authenticated session, which still has full access.
+- ❌ No new RLS policies. Existing admin-only policies on the underlying tables are sufficient once the view honors invoker privileges.
+- ❌ No GRANT/REVOKE changes. Default Supabase grants stay in place.
+- ❌ No fix for Findings E/F/G from the audit (auth dashboard settings, storage bucket policies, exposed schemas). Those are operator-side Dashboard tasks, separately tracked.
+- ❌ No fix for Findings C/D/H (review-spam, lead-enumeration, email-conflict probe). Those were classified "document only" — no functional vulnerabilities.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB **data** table | 0 |
+| `ALTER VIEW` / `ALTER FUNCTION` (metadata) | 2 (after the operator runs the migration) |
+| posted_at delta | 0 (29 → 29) |
+
+### Migration
+
+**Yes — migration 034.** First new migration since 033. Justified by a concrete external advisor warning, not a feature change. Anti-drift rule honored: 001–033 stay untouched.
+
+### Deploy
+
+Vercel will rebuild on the new commit. **Vercel deploys do NOT apply Supabase migrations** — those have to be run by the operator against the Supabase project. Two ways:
+
+1. **Supabase Dashboard → SQL Editor** → paste the contents of `034_security_advisor_compliance.sql` → Run. Done in under 1 second.
+2. **Supabase CLI** (if the operator has it set up): `supabase db push` from the project root.
+
+After the operator runs the migration, both Security Advisor warnings clear. The verification curl above confirms anon no longer sees aggregate campaign data.
+
+### Recommended next phase
+
+**None mandated.** Operator-side dashboard tasks remain (Findings E/F/G — auth password / OTP settings, storage bucket policies, exposed schemas). Those are configuration tweaks in the Supabase Dashboard UI, not code phases. Project remains in Maintenance Mode.
 
 ---
 

@@ -1,14 +1,76 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14AC complete — Final System Audit + **Maintenance Mode** declared. All planned phases (0 → 14AC) shipped. Final audit: 8/8 public routes healthy. No new feature phases queued.)
-**Last code-shipping commit:** `5a60f06` (Phase 14AB: Globalized bounded() helper — webhook hang-resistance)
-**Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited. 8 live posts since 2026-05-05. No new feature phases queued; future work flows through SAVE_PROTOCOL.md on an ad-hoc basis.
+**Last updated:** 2026-05-08 (Phase 14AD shipping in working tree — Supabase Security Advisor compliance. Single migration 034 carries two ALTER statements: `security_invoker=true` on the attribution view + pinned `search_path` on the updated_at function. Closes both Advisor warnings the operator confirmed in their dashboard. No app code changes. Operator runs the migration after the push lands.)
+**Last code-shipping commit:** `03c9ca4` (Phase 14AC: Final System Audit + Maintenance Mode declaration)
+**Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · **Phase 14AD in working tree (DB security patch)** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, audited, AND now closing the last two Security Advisor warnings.
 
 ---
 
 ## Current focus
 
-**🏁 MAINTENANCE MODE.** No phase in flight. Three operator-side activations remain to take the system live:
+**Phase 14AD — Supabase Security Advisor Compliance (in working tree, 2026-05-08 — single migration 034; metadata-only ALTERs; no app code).**
+
+The operator's Supabase Security Advisor flagged the two warnings the security audit predicted. Phase 14AD is the surgical patch: one new migration with two `ALTER` statements, idempotent and metadata-only.
+
+**Built in 14AD:**
+- [x] **`supabase/migrations/034_security_advisor_compliance.sql` (new)** — two ALTER statements:
+  - **(A)** `ALTER VIEW event_campaign_attribution_summary SET (security_invoker = true)` — closes the `security_definer_view` advisor warning. Anon queries now respect RLS on the view's underlying tables; admin/service-role callers are unaffected.
+  - **(B)** `ALTER FUNCTION update_updated_at() SET search_path = pg_catalog, public` — closes the `function_search_path_mutable` advisor warning. Triggers using the function are unaffected.
+
+**Why this is the first new migration since 033:**
+- Phases 14P → 14AC explicitly preserved the immutability of 001–033.
+- This migration is the first justified by a concrete EXTERNAL trigger (Supabase's own Security Advisor) rather than a feature change.
+- Code-only changes can't fix either warning — both require database-level metadata changes.
+
+**Behavior contract:**
+| Caller | Pre-14AD | Post-14AD |
+|---|---|---|
+| Admin | Reads view normally | Reads view normally (unchanged) |
+| Service-role | Bypasses RLS | Bypasses RLS (unchanged) |
+| Anon | Reads full view (RLS-bypassed via view-owner) | Returns `[]` (caller's RLS now applied) |
+| Triggers via update_updated_at() | Resolve via mutable search_path | Resolve via pinned `pg_catalog, public` (transparent) |
+
+**Idempotency:** Both ALTERs are safe to re-run. No CREATE statements; no DROPs; no data migration. The migration is metadata-only.
+
+**Operator workflow after this commit lands:**
+1. Vercel rebuilds on the new commit (no behavior change since no app code touched).
+2. Operator runs migration 034 on Supabase (SQL Editor or `supabase db push`).
+3. Operator verifies via Supabase Dashboard → Security Advisor: both warnings clear.
+4. Operator verifies via curl that anon now sees `[]` instead of campaign data on the view's REST endpoint.
+
+**Critical safety preserved:**
+- ✅ View shape unchanged (all 27 columns return identical types/values for admin/service-role).
+- ✅ Function body unchanged (still `NEW.updated_at = NOW(); RETURN NEW;`).
+- ✅ No app code touched. 30+ TypeScript files reading these tables continue to work.
+- ✅ Migrations 001–033 untouched.
+- ✅ No new env vars or dependencies.
+
+**Tests:**
+- ✅ Migration syntax verified by inspection (both ALTER statements are stock Postgres 15+).
+- ✅ Header comment documents rationale, behavior contract, and verification steps.
+- ⏸️ Live verification deferred to operator-run.
+
+**Provider / platform / DB activity in this phase:**
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against DB data tables | 0 |
+| `ALTER VIEW` / `ALTER FUNCTION` (metadata) | 2 (after operator applies) |
+| posted_at delta | 0 (29 → 29) |
+
+**Findings NOT addressed in 14AD (out of scope, separate operator-side dashboard work):**
+- Auth Dashboard settings (password strength, OTP expiry, leaked-password protection, MFA)
+- Storage bucket policies (`media` bucket — verify READ open / WRITE service-role only)
+- Exposed Schemas API config (verify only `public, storage, graphql_public`)
+- Reviews public-write design (acceptable — pending-status mitigates)
+- Lead-created webhook public-write (acceptable by design)
+
+---
+
+### Pre-Phase-14AD: 🏁 Maintenance Mode — Operator activations remain
+
+Three operator-side activations remain to take the system live:
 
 1. **Connect TikTok once.** Confirm Developer Portal redirect URI `https://www.vortextrips.com/api/auth/tiktok/callback`; scopes `user.info.basic` + `video.publish`. Click Connect TikTok → callback writes tokens to site_settings.
 2. **Flip the autoposter kill switch.** AI Command Center dashboard → "Enable Cron" button. (Or SQL upsert on `site_settings.autoposter_cron_enabled='true'`.)

@@ -1,0 +1,51 @@
+-- Phase 14AD — Supabase Security Advisor compliance.
+--
+-- Closes two warnings surfaced by the Supabase Security Advisor:
+--
+--   (A) `security_definer_view` on public.event_campaign_attribution_summary
+--       Postgres 15+ views default to running with the view-owner's
+--       privileges (similar to SECURITY DEFINER for functions). When `anon`
+--       queries this view through PostgREST, the underlying SELECTs against
+--       event_campaigns / contacts / contact_events / campaign_assets /
+--       content_calendar run as the view owner, BYPASSING the admin-only
+--       RLS policies on those tables. The view's columns include aggregate
+--       lead/member/click/page_view counts per campaign — competitive-
+--       intelligence data the operator does not want exposed to anon.
+--       Flipping `security_invoker` to true makes the view honor the
+--       caller's RLS, which on anon means the view returns zero rows.
+--
+--   (B) `function_search_path_mutable` on public.update_updated_at()
+--       The trigger function has a mutable search_path. Body is
+--       `NEW.updated_at = NOW(); RETURN NEW;` — no symbol resolution that
+--       a malicious search_path could hijack, so real exploitability is
+--       essentially zero. Pinning the search_path is best practice for
+--       plpgsql functions and clears the advisor warning.
+--
+-- Why this is the first new migration since 033:
+--   Phases 14P → 14AC explicitly preserved the immutability of 001–033.
+--   This migration is the first one justified by a concrete external
+--   advisor warning rather than a feature/schema change. The audit in
+--   Phase 14AD's predecessor (the security review) confirmed both
+--   warnings are real and can't be addressed with code-only changes.
+--
+-- Behavior contract:
+--   - Admin queries continue to read the view normally (admin RLS allows).
+--   - Service-role queries continue to bypass RLS as before.
+--   - Anon queries now return zero rows from the view (intended outcome).
+--   - Triggers using update_updated_at() are unaffected — search_path
+--     pinning is transparent to NEW/NOW() resolution.
+--   - Migration is idempotent: both ALTER statements are safe to re-run.
+--
+-- Verification after apply:
+--   - Supabase Dashboard → Security Advisor: both warnings clear.
+--   - Admin dashboard PerformancePanel on /dashboard/campaigns continues
+--     to show real campaign numbers (admin RLS still allows).
+--   - curl -H "apikey: $ANON_KEY" \
+--       'https://<project>.supabase.co/rest/v1/event_campaign_attribution_summary'
+--     should return `[]` (empty array) instead of campaign data.
+
+-- (A) Make the attribution view run with invoker privileges so it respects RLS.
+ALTER VIEW event_campaign_attribution_summary SET (security_invoker = true);
+
+-- (B) Pin the trigger function's search_path to clear the mutable-path warning.
+ALTER FUNCTION update_updated_at() SET search_path = pg_catalog, public;
