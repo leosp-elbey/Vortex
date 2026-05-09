@@ -15,7 +15,7 @@ export default function Footer() {
           <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
           <Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
         </div>
-        {/* TODO: Add physical mailing address */}
+        <p className="mb-2">1595 Palm Bay Rd #1009, Palm Bay, FL 32905</p>
         <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
         <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
       </div>

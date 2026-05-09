@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six edits across four files plus one new shared `Footer.tsx`. Lint + typecheck clean. No DB; no platform calls.)
+**Last updated:** 2026-05-09 (Phase 14AE.1 shipping in working tree — physical mailing address "1595 Palm Bay Rd #1009, Palm Bay, FL 32905" added to shared `Footer.tsx`, replacing the `<!-- TODO -->` placeholder from 14AE. Surfaces on all three TCR-submitted pages via the shared component. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six edits across four files plus one new shared `Footer.tsx`. Lint + typecheck clean. No DB; no platform calls.)
 **Last code-shipping commit:** `03c9ca4` (Phase 14AC: Final System Audit + Maintenance Mode declaration)
 **Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · **Phase 14AD in working tree (DB security patch)** · **Phase 14AE in working tree (Twilio A2P 10DLC compliance)** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, audited, security-advisor-clean, AND now A2P 10DLC compliant.
 
