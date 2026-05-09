@@ -1,12 +1,36 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-08 (Phase 14AD shipping in working tree — Supabase Security Advisor compliance. Single migration 034 carries two ALTER statements: `security_invoker=true` on the attribution view + pinned `search_path` on the updated_at function. Closes both Advisor warnings the operator confirmed in their dashboard. No app code changes. Operator runs the migration after the push lands.)
+**Last updated:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six edits across four files plus one new shared `Footer.tsx`. Lint + typecheck clean. No DB; no platform calls.)
 **Last code-shipping commit:** `03c9ca4` (Phase 14AC: Final System Audit + Maintenance Mode declaration)
-**Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · **Phase 14AD in working tree (DB security patch)** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, audited, AND now closing the last two Security Advisor warnings.
+**Status:** 🏁 **MAINTENANCE MODE** on vortextrips.com · **All Phases 0 → 14AC shipped** · **Phase 14AD in working tree (DB security patch)** · **Phase 14AE in working tree (Twilio A2P 10DLC compliance)** · System is functionally complete, locally clean, lint-clean, operationally observable, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, audited, security-advisor-clean, AND now A2P 10DLC compliant.
 
 ---
 
 ## Current focus
+
+**Phase 14AE — Twilio A2P 10DLC Compliance (in working tree, 2026-05-08 — homepage form + legal pages + shared footer; no DB; no platform calls; no new dependencies).**
+
+The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR). The rejection feedback maps onto a well-documented compliance pattern: explicit consent disclosure on the opt-in surface, a privacy-policy clause that excludes SMS data from any third-party sharing, full SMS Program Terms in the Terms of Service, and defensible marketing claims. This phase makes those four edits plus a shared Footer for the three TCR-submitted URLs.
+
+**Built in 14AE:**
+- [x] **`src/components/Footer.tsx` (new)** — shared footer with business name, Privacy Policy link, Terms of Service link, Contact/Support mailto, quick-nav, savings disclaimer, and a `<!-- TODO: Add physical mailing address -->` placeholder for the operator to fill in.
+- [x] **`src/app/page.tsx`** — LeadForm phone placeholder updated, phone input made `required={form.smsConsent}` (browser enforces phone presence iff the consent box is checked), `required` removed from the consent checkbox HTML attribute (checkbox starts unchecked already), checkbox label rewritten to the exact TCR-mandated wording with explicit Msg/HELP/STOP disclosure inline, Privacy and Terms links open in a new tab. Hero headline reframed from "Save 40-60% on Every Trip." to "Save Up to 40-60% on Member Travel Rates." Inline footer replaced by `<Footer />`.
+- [x] **`src/app/privacy/page.tsx`** — new "SMS / Mobile Information Sharing" section inserted at the top of the policy body (verbatim TCR-required wording), `<Footer />` rendered after the back-to-home link.
+- [x] **`src/app/terms/page.tsx`** — section 2 body REPLACED with the full TCR-required SMS Program Terms (Program Name "VortexTrips SMS Notifications", how to opt in / opt out, HELP keyword, message frequency, message-and-data-rate disclosure, supported carriers including the explicit T-Mobile non-liability statement, privacy reference). `<Footer />` rendered after the back-to-home link.
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Footer rendered in all three TCR-submitted pages
+
+**Operator workflow after this commit lands:**
+1. Vercel rebuilds on the new commit (homepage hero, lead form, /privacy, /terms updated).
+2. Operator re-submits the A2P 10DLC campaign in the Twilio Console with three URLs: `https://www.vortextrips.com`, `https://www.vortextrips.com/privacy`, `https://www.vortextrips.com/terms`.
+3. If a physical mailing address is available, operator edits `src/components/Footer.tsx` to fill in the TODO placeholder.
+
+---
+
+## Earlier focus
 
 **Phase 14AD — Supabase Security Advisor Compliance (in working tree, 2026-05-08 — single migration 034; metadata-only ALTERs; no app code).**
 

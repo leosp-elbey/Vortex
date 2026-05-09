@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with one operator-driven security patch in flight, Phase 14AD). All planned phases (0 → 14AC) shipped; Phase 14AD is a single targeted migration closing two Supabase Security Advisor warnings the operator confirmed in their dashboard. Future work flows through the same `SAVE_PROTOCOL.md` on an as-needed basis.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with two operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance). All planned phases (0 → 14AC) shipped; 14AD/14AE are external-trigger patches (Supabase advisor warnings + Twilio TCR rejection) following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-08 (Phase 14AE shipping in working tree — Twilio A2P 10DLC compliance. The Twilio A2P 10DLC SMS campaign was rejected by The Campaign Registry (TCR); this phase brings the homepage lead form, Privacy Policy, and Terms of Service into compliance for the next carrier review. Six changes: (1) `src/app/page.tsx` LeadForm — phone placeholder updated to "Phone Number (required for SMS updates)", phone input now `required={form.smsConsent}` (browser enforces phone presence iff consent is checked), `required` removed from the consent checkbox HTML attribute (checkbox starts unchecked already), checkbox label rewritten to the exact TCR-mandated wording with explicit Msg/HELP/STOP disclosure inline, Privacy and Terms links open in a new tab via `target="_blank" rel="noopener noreferrer"`. (2) `src/app/page.tsx` hero — headline changed from "Save 40-60% on Every Trip" to "Save Up to 40-60% on Member Travel Rates" for defensible marketing claims. (3) `src/app/privacy/page.tsx` — new "SMS / Mobile Information Sharing" section inserted at the top of the policy body, explicitly excluding SMS opt-in data from any third-party sharing. (4) `src/app/terms/page.tsx` — section 2 body replaced with the full TCR-required SMS Program Terms (Program Name "VortexTrips SMS Notifications", how to opt in / opt out, HELP keyword, message frequency, message-and-data-rate disclosure, supported carriers including T-Mobile non-liability, privacy reference). (5) New `src/components/Footer.tsx` shared component (Privacy Policy, Terms of Service, Contact/Support mailto, business name, and a `<!-- TODO: Add physical mailing address -->` placeholder) wired into all three TCR-submitted pages: `/`, `/privacy`, `/terms`. The previous inline footer in `src/app/page.tsx` was removed in favor of the shared component. (6) Lint and typecheck pass. No DB writes; no platform calls; no migrations; no new dependencies.)
+**Last known good commit:** `6e2f27a` — "Phase 14O.1: add manual autoposter runner, no scheduled cron" (most recent commit on main; Phase 14AD migration committed earlier in working tree, awaiting operator-side application)
 **Last updated:** 2026-05-08 (Phase 14AD shipping in working tree — Supabase Security Advisor compliance. New migration `supabase/migrations/034_security_advisor_compliance.sql` carries two `ALTER` statements: (A) `ALTER VIEW event_campaign_attribution_summary SET (security_invoker = true)` — closes the `security_definer_view` advisor warning that exposed aggregate campaign performance data to `anon` via PostgREST; (B) `ALTER FUNCTION update_updated_at() SET search_path = pg_catalog, public` — closes the `function_search_path_mutable` advisor warning. Both ALTERs are idempotent and metadata-only; no app code changes; no data migration. Operator runs the migration on Supabase (SQL editor or `supabase db push`) after this commit lands.)
 **Last known good commit:** `03c9ca4` — "Phase 14AC: Final System Audit + Maintenance Mode declaration" Phase 14Y's `bounded()` extracted from `src/app/t/[slug]/route.ts` into shared `src/lib/bounded-wait.ts` (with optional `logPrefix` parameter for clean per-route log streams). The tracking redirect route now imports from the lib instead of defining locally — behavior byte-identical. Both webhook routes (`/api/webhooks/lead-created`, `/api/webhooks/bland`) now wrap every Supabase call with `bounded(work, 2500ms, label, '[lead-created]' or '[bland-webhook]')`. lead-created treats the contacts insert as **critical path** — returns 503 fast on timeout so the webhook caller (GoHighLevel) can retry rather than wait on a hung connection. All other Supabase calls in both webhook routes are **bookkeeping** — degrade silently if they time out. New `WEBHOOK_BOUND_MS = 2500` constant exported from the lib. Typecheck + lint clean.)
 **Last known good commit:** `d3cf3d3` — "Phase 14AA: Lighthouse CI Action — perf/a11y/SEO audit on every push" New `.github/workflows/lighthouse.yml` + `lighthouserc.json` config run `treosh/lighthouse-ci-action@v12` against 4 real production content pages (`/`, `/quote`, `/sba`, `/thank-you`) on every push to main and on manual dispatch. **Deliberately does NOT audit `/free` and `/join`** — both are 307 redirects to external portals (myvortex365.com, surge365.com) we don't control, so auditing them would score someone else's site. Modest budgets per the operator directive: performance > 70, accessibility > 90, SEO > 90, best-practices > 85. Uses `warn`-level assertions so score drops are surfaced without blocking the workflow. Reports uploaded to LHCI temporary public storage (7-day retention) AND saved as GitHub Actions artifacts for long-term lookup. Separate workflow file from `ci.yml` so the slower Lighthouse run doesn't block the fast typecheck/lint feedback loop. No code changes; no DB writes; no platform calls.)
@@ -12,6 +14,79 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AE — Twilio A2P 10DLC Compliance (in working tree, 2026-05-08 — homepage form + legal pages + shared footer; no DB; no platform calls; no new dependencies)
+
+### What this phase ships
+
+Six surgical edits across four files plus one new shared component, all driven by the Twilio A2P 10DLC rejection feedback from The Campaign Registry (TCR). The 10DLC review process requires that the public-facing opt-in surface (homepage form), Privacy Policy, and Terms of Service all match a specific compliance pattern: explicit consent, third-party non-sharing for SMS data, full SMS Program Terms (Program Name + Description + HELP/STOP + frequency + carrier disclosure), and defensible marketing claims. Vendor-recommended language is reproduced verbatim where TCR examiners look for exact wording.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/components/Footer.tsx` (NEW) | Shared footer component. Renders the business name "VortexTrips", quick-nav links, Privacy Policy and Terms of Service (the two TCR submission targets), Contact/Support mailto, and a `<!-- TODO: Add physical mailing address -->` placeholder. Used by all three TCR-submitted pages so the compliance surface stays consistent if any link copy changes. |
+| `src/app/page.tsx` | LeadForm: phone placeholder → "Phone Number (required for SMS updates)"; phone input → `required={form.smsConsent}` (the consent checkbox conditionally turns phone into a required field, so a checked-with-no-phone submission is rejected by the browser); `required` removed from the consent checkbox markup (TCR requires it start unchecked, which the existing initial state already satisfies — `useState({ smsConsent: false })` was already correct); consent label rewritten to the exact TCR-required wording with inline Msg/HELP/STOP disclosure ("By checking this box, I consent to receive recurring marketing and informational SMS messages from VortexTrips at the phone number provided. Consent is not a condition of purchase. Msg & data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies."); Privacy/Terms links use `<a target="_blank" rel="noopener noreferrer">` so opening them does not lose form state. Hero headline changed from "Save 40-60% on Every Trip." to "Save Up to 40-60% on Member Travel Rates." for defensible marketing claims (no absolute promise; reframed as member-only rate). Inline footer removed; `<Footer />` rendered in its place. |
+| `src/app/privacy/page.tsx` | New section "SMS / Mobile Information Sharing" inserted at the top of the policy body (above the existing numbered sections). Explicit, verbatim TCR-required language: "VortexTrips will not share, sell, rent, or transfer mobile phone numbers, SMS opt-in data, or text messaging consent information to any third parties, affiliates, or partners for marketing or promotional purposes under any circumstances." Followed by opt-out instructions (STOP / email) and rate-and-frequency disclosure. The pre-existing Section 4 ("Data Sharing") already had a compatible non-sharing clause and is unchanged. `<Footer />` rendered after the back-to-home link. |
+| `src/app/terms/page.tsx` | Section 2 body REPLACED. Previous body had Program Name "VortexTrips Travel Savings Alerts" — that conflicts with the new TCR-required Program Name "VortexTrips SMS Notifications", so leaving both versions in place would have failed the next review. New body covers the full required compliance surface: Program Name, Program Description, How to Opt In (with the homepage URL), How to Opt Out (STOP keyword + confirmation message behavior), Help/Support (HELP keyword + email), Message Frequency, Message and Data Rates, Supported Carriers (AT&T, T-Mobile, Verizon, Sprint, U.S. Cellular, MetroPCS, Boost, Cricket, "and other major U.S. carriers", with the explicit "T-Mobile is not liable for delayed or undelivered messages" non-liability statement TCR examiners look for), and Privacy reference. Section heading changed to "2. SMS / Text Messaging Program Terms" to match TCR vocabulary. `<Footer />` rendered after the back-to-home link. |
+
+### Why a shared `Footer.tsx` instead of inline footers
+
+The three URLs being submitted to TCR for the next review (`https://www.vortextrips.com`, `https://www.vortextrips.com/privacy`, `https://www.vortextrips.com/terms`) need to expose the same compliance surface: business name, Contact/Support, Privacy Policy, Terms of Service. Centralizing those into one component:
+- Makes the compliance copy editable in exactly one file when the operator adds a physical mailing address.
+- Guarantees the three TCR-reviewed pages cannot drift in their footer disclosure (a real risk if all three had inline footers).
+- Keeps Privacy Policy and Terms of Service one click away from any TCR examiner who lands on the homepage.
+
+### Conditional `required` on the phone input — UX rationale
+
+TCR's rule is: if the consent checkbox is checked, the phone number MUST be populated; if the checkbox is unchecked, phone is optional. Two implementation paths:
+1. **Form-level JS validation** — intercept `onSubmit`, inspect `form.smsConsent` + `form.phone`, set an inline error.
+2. **HTML5 conditional `required`** — `<input type="tel" required={form.smsConsent} ... />`.
+
+Path 2 chosen. It is one prop, zero extra state, zero extra error UI, and the browser produces a perfectly localized "Please fill out this field" tooltip when the user tries to submit consent-checked-no-phone. This satisfies the TCR rule with the smallest possible code surface.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No backend / API changes. `src/app/api/webhooks/lead-created/route.ts` is unchanged. The 14AB `bounded()` hardening still applies to every Supabase call from that route.
+- ❌ No DB migrations. SMS consent is already stored in `contacts.custom_fields.sms_consent` per the Phase 14L work; no schema change needed for compliance.
+- ❌ No physical-address content. The operator has not provided one; the Footer carries a `<!-- TODO -->` placeholder so it can be filled in without another phase.
+- ❌ No changes to `/quote`, `/sba`, `/quiz`, dashboard pages, or any other page. Only the three TCR-submitted URLs (homepage + privacy + terms) need the new Footer; remaining pages keep their existing layout footers (or none) until/unless TCR feedback widens the surface.
+- ❌ No marketing-claims sweep beyond the hero. Other "Save 40-60%" mentions on `/destinations/*` and `/quote` were not modified because TCR's review is keyed on the homepage hero (the form's headline). If a follow-up review flags other pages, those become a future micro-phase.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (29 → 29) |
+| Twilio API calls | 0 (compliance is TCR-side; the operator re-submits via the Twilio Console) |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Footer component is referenced and rendered in all three target pages (the only stale-diagnostic `'Footer' is declared but its value is never read'` warnings observed during the edit sequence were the IDE's pre-edit cache — Grep confirms `<Footer />` is wired in each file)
+- ✅ Hero headline change is a literal text swap; no template/expression changes
+- ✅ All TCR-required language is verbatim from the operator directive
+
+### Migration
+
+**No.** No DB changes. Migration 034 (Phase 14AD) remains the most recent migration; this phase does not touch the database.
+
+### Deploy
+
+Vercel rebuilds on the new commit. After deploy, the operator re-submits the A2P 10DLC campaign in the Twilio Console with the same three URLs:
+- `https://www.vortextrips.com`
+- `https://www.vortextrips.com/privacy`
+- `https://www.vortextrips.com/terms`
+
+### Recommended next phase
+
+**None mandated.** If TCR rejects again with new feedback, that becomes Phase 14AE.1. If the operator provides a physical mailing address, that becomes a one-line edit to `src/components/Footer.tsx` (no new phase needed; the placeholder comment marks the spot).
 
 ---
 

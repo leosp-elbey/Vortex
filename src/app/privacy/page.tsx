@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Footer from '@/components/Footer'
 
 export default function PrivacyPage() {
   return (
@@ -12,6 +13,13 @@ export default function PrivacyPage() {
         <p className="text-gray-500 mb-10">Last updated: April 20, 2026</p>
 
         <div className="bg-white rounded-2xl shadow-sm p-8 space-y-8 text-gray-700 leading-relaxed">
+          <section>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">SMS / Mobile Information Sharing</h2>
+            <p className="mb-3">VortexTrips will not share, sell, rent, or transfer mobile phone numbers, SMS opt-in data, or text messaging consent information to any third parties, affiliates, or partners for marketing or promotional purposes under any circumstances. All categories of personal information disclosed in this Privacy Policy explicitly EXCLUDE text messaging originator opt-in data and consent. This information is used solely for the SMS communications you have opted into with VortexTrips.</p>
+            <p className="mb-3">You may opt out of SMS communications at any time by replying STOP to any message, or by emailing <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>. Standard message and data rates may apply. Message frequency varies based on account activity and promotions.</p>
+            <p>For questions about our SMS program, contact <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>.</p>
+          </section>
+
           <section>
             <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">1. Information We Collect</h2>
             <p>When you sign up or request a quote on VortexTrips, we collect:</p>
@@ -63,6 +71,8 @@ export default function PrivacyPage() {
           <Link href="/" className="text-gray-500 hover:text-gray-700 transition-colors">← Back to VortexTrips</Link>
         </p>
       </div>
+
+      <Footer />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Footer from '@/components/Footer'
 
 export default function TermsPage() {
   return (
@@ -19,16 +20,16 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">2. SMS Messaging Program</h2>
-            <p className="mb-3"><strong>Program Name:</strong> VortexTrips Travel Savings Alerts</p>
-            <p className="mb-3"><strong>Program Description:</strong> When you opt in to receive SMS messages from VortexTrips, you will receive text messages related to your travel savings inquiry, membership updates, exclusive deal alerts, and follow-up communications from our team.</p>
-            <ul className="list-disc list-inside space-y-2 text-gray-600 mb-3">
-              <li>Message frequency varies based on your activity and preferences.</li>
-              <li>Msg &amp; data rates may apply.</li>
-              <li>To get help, reply <strong>HELP</strong> to any message or contact us at support@vortextrips.com.</li>
-              <li>To stop receiving messages, reply <strong>STOP</strong> to any message at any time. You will receive one final confirmation message and no further texts.</li>
-            </ul>
-            <p>By providing your phone number and checking the SMS consent box on our forms, you expressly consent to receive text messages from VortexTrips at the number you provided. Consent is not a condition of purchase.</p>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">2. SMS / Text Messaging Program Terms</h2>
+            <p className="mb-3"><strong>Program Name:</strong> VortexTrips SMS Notifications</p>
+            <p className="mb-3"><strong>Program Description:</strong> By providing your mobile phone number and opting in to receive SMS messages from VortexTrips, you agree to receive recurring marketing, transactional, and account-related text messages, including but not limited to: account confirmation, scheduled travel consultation reminders, booking updates, support responses, and occasional travel deal notifications.</p>
+            <p className="mb-3"><strong>How to Opt In:</strong> Opt in by entering your phone number on <a href="https://www.vortextrips.com" className="text-[#FF6B35] hover:underline">https://www.vortextrips.com</a> and checking the SMS consent box. Consent is not a condition of any purchase.</p>
+            <p className="mb-3"><strong>How to Opt Out:</strong> Reply <strong>STOP</strong> to any message at any time to cancel. After replying STOP, you will receive a confirmation message and no further SMS messages will be sent unless you re-subscribe.</p>
+            <p className="mb-3"><strong>Help / Support:</strong> Reply <strong>HELP</strong> to any message for support, or contact <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>.</p>
+            <p className="mb-3"><strong>Message Frequency:</strong> Message frequency varies. You may receive up to several messages per week depending on your account activity.</p>
+            <p className="mb-3"><strong>Message and Data Rates:</strong> Msg &amp; data rates may apply. Carriers are not liable for delayed or undelivered messages.</p>
+            <p className="mb-3"><strong>Supported Carriers:</strong> AT&amp;T, T-Mobile, Verizon Wireless, Sprint, U.S. Cellular, MetroPCS, Boost, Cricket, and other major U.S. carriers. T-Mobile is not liable for delayed or undelivered messages.</p>
+            <p><strong>Privacy:</strong> Your information is governed by our <a href="/privacy" className="text-[#FF6B35] hover:underline">Privacy Policy</a>, which explicitly states that no mobile information will be shared with third parties or affiliates for marketing or promotional purposes.</p>
           </section>
 
           <section>
@@ -83,6 +84,8 @@ export default function TermsPage() {
           <Link href="/" className="text-gray-500 hover:text-gray-700 transition-colors">← Back to VortexTrips</Link>
         </p>
       </div>
+
+      <Footer />
     </div>
   )
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import ExitIntent from '@/components/ExitIntent'
+import Footer from '@/components/Footer'
 
 interface LeadFormProps {
   id: string
@@ -36,8 +37,9 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
       />
       <input
         type="tel"
-        placeholder="Phone Number (optional — for 60-sec savings call)"
+        placeholder="Phone Number (required for SMS updates)"
         autoComplete="tel"
+        required={form.smsConsent}
         value={form.phone}
         onChange={e => onChange('phone', e.target.value)}
         className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
@@ -46,15 +48,14 @@ function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProp
       <label className="flex items-start gap-2 cursor-pointer">
         <input
           type="checkbox"
-          required
           checked={form.smsConsent}
           onChange={e => onChange('smsConsent', e.target.checked)}
           className="mt-0.5 flex-shrink-0 accent-[#FF6B35]"
         />
         <span className="text-xs text-gray-500">
-          By checking this box, I consent to receive SMS messages from VortexTrips about my travel savings inquiry. View our{' '}
-          <a href="/privacy" className="text-[#FF6B35] underline">Privacy Policy</a> and{' '}
-          <a href="/terms" className="text-[#FF6B35] underline">Terms</a>.
+          By checking this box, I consent to receive recurring marketing and informational SMS messages from VortexTrips at the phone number provided. Consent is not a condition of purchase. Msg &amp; data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies. View our{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] underline">Privacy Policy</a> and{' '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] underline">Terms</a>.
         </span>
       </label>
       {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -142,8 +143,8 @@ export default function LandingPage() {
             </div>
             <h1 className="text-5xl md:text-6xl font-black leading-tight mb-6">
               Stop Overpaying.<br />
-              <span className="gradient-text">Save 40-60%</span><br />
-              on Every Trip.
+              <span className="gradient-text">Save Up to 40-60%</span><br />
+              on Member Travel Rates.
             </h1>
             <p className="text-xl text-gray-300 mb-8 leading-relaxed">
               VortexTrips gives you exclusive member-only rates on hotels, flights, and vacation packages — the same deals travel insiders have been using for years.
@@ -365,24 +366,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-[#0d0d1a] text-gray-500 py-10 px-6 text-center text-sm">
-        <div className="max-w-5xl mx-auto">
-          <p className="text-white font-bold text-lg mb-2">VortexTrips</p>
-          <div className="flex justify-center gap-6 mb-4 flex-wrap">
-            <Link href="/quiz" className="hover:text-white transition-colors">Travel Quiz</Link>
-            <Link href="/destinations/cancun" className="hover:text-white transition-colors">Destinations</Link>
-            <Link href="/reviews" className="hover:text-white transition-colors">Member Reviews</Link>
-            <Link href="/quote" className="hover:text-white transition-colors">Get a Quote</Link>
-            <Link href="/join" className="hover:text-white transition-colors">Join Now</Link>
-            <a href="mailto:support@vortextrips.com" className="hover:text-white transition-colors">Contact</a>
-            <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
-          </div>
-          <p>© {new Date().getFullYear()} VortexTrips. All rights reserved.</p>
-          <p className="mt-2 text-xs text-gray-600">Savings vary based on destination, travel dates, and availability. Member savings are estimates based on comparison to standard retail rates.</p>
-        </div>
-      </footer>
+      <Footer />
 
       <ExitIntent />
     </div>
