@@ -61,12 +61,26 @@ export interface PexelsVideoOptions {
   orientation?: 'landscape' | 'portrait' | 'square'
   /** Pexels size hint: 'large' | 'medium' | 'small'. Defaults to 'large'. */
   size?: 'large' | 'medium' | 'small'
-  /** Per-page count Pexels returns. Defaults to 5 so we can pick the best portrait MP4. */
+  /** Per-page count Pexels returns. Defaults to 15 so the dedup walker has options. */
   perPage?: number
   /** Min seconds — Pexels returns clips of various lengths. Defaults to 5. */
   minDurationSeconds?: number
   /** Max seconds — caps clip length so we don't ship a 60s loop. Defaults to 30. */
   maxDurationSeconds?: number
+  /**
+   * Phase 14AH — duplicate prevention. Pexels returns the same top results
+   * for the same query, so two posts with similar prompts can collide on
+   * the same MP4. Caller passes the set of already-used Pexels video ids
+   * (preferred — catches "same video, different quality" duplicates) and
+   * MP4 URLs. The function walks page 1, then if every result is excluded,
+   * retries once with a randomized page (2–6) for variety, and only as a
+   * last-resort returns a duplicate (better to ship a duplicate than fail
+   * the row entirely). This is enforced at the lib level, but the actual
+   * DB read that builds these sets lives in the callers (cron + script)
+   * — the lib never touches the DB itself.
+   */
+  excludePexelsIds?: ReadonlySet<string>
+  excludeUrls?: ReadonlySet<string>
 }
 
 const PROVIDER_ENV_KEY: Record<MediaProviderName, string> = {
@@ -301,17 +315,71 @@ function pickBestPortraitMp4(entry: PexelsVideoEntry): PexelsVideoFile | null {
 }
 
 /**
- * Fetch a single Pexels video URL for `query`. Synchronous: a successful
+ * Walk a Pexels videos[] array (one page of search results) and pick the
+ * first entry that:
+ *   1. has a usable portrait MP4 file, AND
+ *   2. has duration in [minDuration, maxDuration] (relaxed if no match), AND
+ *   3. is not already used (per `excludePexelsIds` / `excludeUrls`).
+ *
+ * Returns null if every result was excluded — caller then falls back to a
+ * different page or accepts a duplicate. Pure logic, no I/O.
+ */
+function pickFirstUnusedVideo(
+  videos: PexelsVideoEntry[],
+  minDuration: number,
+  maxDuration: number,
+  excludePexelsIds: ReadonlySet<string>,
+  excludeUrls: ReadonlySet<string>,
+  allowExcluded = false,
+): { entry: PexelsVideoEntry; file: PexelsVideoFile } | null {
+  const isExcluded = (entry: PexelsVideoEntry, file: PexelsVideoFile): boolean => {
+    if (allowExcluded) return false
+    const idStr = entry.id != null ? String(entry.id) : ''
+    if (idStr && excludePexelsIds.has(idStr)) return true
+    if (file.link && excludeUrls.has(file.link)) return true
+    return false
+  }
+  // First pass: respect duration filter.
+  for (const entry of videos) {
+    const dur = entry.duration ?? 0
+    if (dur < minDuration || dur > maxDuration) continue
+    const file = pickBestPortraitMp4(entry)
+    if (!file?.link) continue
+    if (isExcluded(entry, file)) continue
+    return { entry, file }
+  }
+  // Second pass: relax duration filter (any usable MP4).
+  for (const entry of videos) {
+    const file = pickBestPortraitMp4(entry)
+    if (!file?.link) continue
+    if (isExcluded(entry, file)) continue
+    return { entry, file }
+  }
+  return null
+}
+
+/**
+ * Phase 14AG — fetch a Pexels Video for `query`. Synchronous: a successful
  * return has `url` set immediately, ready to drop into
  * content_calendar.video_url with media_status='ready'.
  *
+ * Phase 14AH — duplicate prevention. The function walks Pexels results
+ * skipping any video whose `id` is in `excludePexelsIds` or whose chosen
+ * MP4 URL is in `excludeUrls`. If every page-1 result is excluded, retries
+ * once with a randomized page (2–6) for variety. If page 2 is also fully
+ * excluded (extremely rare for travel queries), falls back to returning
+ * the first usable result regardless — better to ship a duplicate than
+ * fail the row entirely. The exclude sets are built by the caller from
+ * the existing `content_calendar.video_url` and
+ * `media_metadata->>'pexels_video_id'` columns.
+ *
  * The function is named `fetchAndStoreVideo` (per Phase 14AG directive) but
- * the "store" portion is a no-op in this phase — we return the Pexels CDN
- * URL directly. Pexels URLs are durable (months+ stability), and re-hosting
- * 5–30 MB MP4s inside the weekly cron would risk Vercel's 60s ceiling on
- * weeks with multiple TikTok rows. If durability becomes a concern, a
- * future phase can add an async re-upload pass without changing this
- * function's signature — callers persist whatever `url` is returned.
+ * the "store" portion is a no-op — we return the Pexels CDN URL directly.
+ * Pexels URLs are durable (months+ stability); re-hosting 5–30 MB MP4s
+ * inside the weekly cron would risk Vercel's 60s ceiling on weeks with
+ * multiple TikTok rows. If durability becomes a concern, a future phase
+ * can add an async re-upload pass without changing this function's
+ * signature — callers persist whatever `url` is returned.
  *
  * Filters:
  *   - orientation defaults to 'portrait' (TikTok / IG Reels are 9:16).
@@ -326,87 +394,87 @@ export async function fetchAndStoreVideo(opts: PexelsVideoOptions): Promise<Medi
   if (!opts.query || !opts.query.trim()) {
     return { success: false, provider, error: 'query is required' }
   }
-  const perPage = Math.max(1, Math.min(opts.perPage ?? 5, 80))
+  const perPage = Math.max(1, Math.min(opts.perPage ?? 15, 80))
   const orientation = opts.orientation ?? 'portrait'
   const size = opts.size ?? 'large'
   const minDuration = Math.max(1, opts.minDurationSeconds ?? 5)
   const maxDuration = Math.max(minDuration, opts.maxDurationSeconds ?? 30)
+  const excludePexelsIds = opts.excludePexelsIds ?? new Set<string>()
+  const excludeUrls = opts.excludeUrls ?? new Set<string>()
 
-  const params = new URLSearchParams({
-    query: opts.query.slice(0, 200),
-    per_page: String(perPage),
-    orientation,
-    size,
-  })
-  const url = `https://api.pexels.com/videos/search?${params.toString()}`
-
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: process.env.PEXELS_API_KEY as string },
+  const fetchPage = async (page: number): Promise<{ ok: true; data: PexelsVideoResponse } | { ok: false; error: string; raw?: unknown; status?: number }> => {
+    const params = new URLSearchParams({
+      query: opts.query.slice(0, 200),
+      per_page: String(perPage),
+      orientation,
+      size,
+      page: String(page),
     })
-    const data = (await res.json().catch(() => ({}))) as PexelsVideoResponse
-    if (!res.ok) {
-      return {
-        success: false,
-        provider,
-        error: normalizeProviderError(data) || `pexels-video http ${res.status}`,
-        raw: data,
-      }
-    }
-    const videos = data.videos ?? []
-    if (videos.length === 0) {
-      return {
-        success: false,
-        provider,
-        error: 'pexels-video returned no videos for query',
-        raw: data,
-      }
-    }
-    // Pick the first video matching the duration filter that yields a usable
-    // portrait MP4. Fall through to ANY usable file if no duration match.
-    let chosen: { entry: PexelsVideoEntry; file: PexelsVideoFile } | null = null
-    for (const entry of videos) {
-      const dur = entry.duration ?? 0
-      if (dur < minDuration || dur > maxDuration) continue
-      const file = pickBestPortraitMp4(entry)
-      if (file && file.link) {
-        chosen = { entry, file }
-        break
-      }
-    }
-    if (!chosen) {
-      for (const entry of videos) {
-        const file = pickBestPortraitMp4(entry)
-        if (file && file.link) {
-          chosen = { entry, file }
-          break
+    const url = `https://api.pexels.com/videos/search?${params.toString()}`
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: process.env.PEXELS_API_KEY as string },
+      })
+      const data = (await res.json().catch(() => ({}))) as PexelsVideoResponse
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: normalizeProviderError(data) || `pexels-video http ${res.status}`,
+          raw: data,
+          status: res.status,
         }
       }
+      return { ok: true, data }
+    } catch (err) {
+      return { ok: false, error: normalizeProviderError(err) }
     }
-    if (!chosen || !chosen.file.link) {
-      return {
-        success: false,
-        provider,
-        error: 'pexels-video returned no usable mp4 file',
-        raw: data,
-      }
-    }
-    return {
-      success: true,
-      provider,
-      url: chosen.file.link,
-      external_id: chosen.entry.id != null ? String(chosen.entry.id) : undefined,
-      raw: {
-        video_id: chosen.entry.id,
-        duration: chosen.entry.duration,
-        width: chosen.file.width,
-        height: chosen.file.height,
-        quality: chosen.file.quality,
-        file_type: chosen.file.file_type,
-        page_url: chosen.entry.url,
-      },
-    }
-  } catch (err) {
-    return { success: false, provider, error: normalizeProviderError(err) }
+  }
+
+  const buildResult = (entry: PexelsVideoEntry, file: PexelsVideoFile, duplicate: boolean): MediaProviderResult => ({
+    success: true,
+    provider,
+    url: file.link as string,
+    external_id: entry.id != null ? String(entry.id) : undefined,
+    raw: {
+      video_id: entry.id,
+      duration: entry.duration,
+      width: file.width,
+      height: file.height,
+      quality: file.quality,
+      file_type: file.file_type,
+      page_url: entry.url,
+      ...(duplicate ? { duplicate_fallback: true } : {}),
+    },
+  })
+
+  // Page 1 — strict exclusion.
+  const page1 = await fetchPage(1)
+  if (!page1.ok) {
+    return { success: false, provider, error: page1.error, raw: page1.raw }
+  }
+  const videos1 = page1.data.videos ?? []
+  if (videos1.length === 0) {
+    return { success: false, provider, error: 'pexels-video returned no videos for query', raw: page1.data }
+  }
+  const pick1 = pickFirstUnusedVideo(videos1, minDuration, maxDuration, excludePexelsIds, excludeUrls, false)
+  if (pick1) return buildResult(pick1.entry, pick1.file, false)
+
+  // Page 1 was fully excluded. Try a randomized page 2–6 for variety.
+  const fallbackPage = 2 + Math.floor(Math.random() * 5)
+  const pageN = await fetchPage(fallbackPage)
+  if (pageN.ok) {
+    const videosN = pageN.data.videos ?? []
+    const pickN = pickFirstUnusedVideo(videosN, minDuration, maxDuration, excludePexelsIds, excludeUrls, false)
+    if (pickN) return buildResult(pickN.entry, pickN.file, false)
+  }
+  // Both pages fully excluded. Last resort: return the first usable video
+  // from page 1 even if it duplicates — better than failing the row.
+  const fallback = pickFirstUnusedVideo(videos1, minDuration, maxDuration, excludePexelsIds, excludeUrls, true)
+  if (fallback) return buildResult(fallback.entry, fallback.file, true)
+  return {
+    success: false,
+    provider,
+    error: 'pexels-video returned no usable mp4 file',
+    raw: page1.data,
   }
 }

@@ -251,60 +251,103 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       }, { status: 500 })
     }
 
-    // Phase 14AG — fetch images for every platform AND a Pexels Video for
-    // each TikTok row in parallel. Pexels Video API is synchronous (returns
-    // an MP4 URL immediately, no async polling), so this stays inside the
-    // cron's 60s budget. Failures on either fetch are non-fatal — the row
-    // still inserts with whatever URLs landed (image_url / video_url may be
-    // null), and an empty video_url means the row will appear as
-    // "Media missing" on the dashboard, which is the correct fallback.
-    const rowsWithMedia = await Promise.all(
-      posts.map(async p => {
-        const [image_url, videoResult] = await Promise.all([
-          fetchAndStoreImage(p.imagePrompt, p.platform, supabase),
-          p.platform === 'tiktok' && p.imagePrompt
-            ? fetchAndStoreVideo({ query: p.imagePrompt, orientation: 'portrait', size: 'large' })
-            : Promise.resolve(null),
-        ])
-        const video_url = videoResult?.success ? videoResult.url ?? null : null
-        const isTikTok = p.platform === 'tiktok'
-        // Build media_metadata for TikTok rows so the on_screen_hook + the
-        // Pexels video provenance survive into the dashboard / autoposter.
-        // Non-TikTok rows don't carry media_metadata — keep the row shape
-        // compatible with the pre-14AG insert path for FB/IG.
-        const media_metadata = isTikTok
-          ? {
-              source: 'pexels-video',
-              on_screen_hook: p.onScreenHook || null,
-              pexels_video_id: videoResult?.success ? videoResult.external_id ?? null : null,
-              fetched_at: new Date().toISOString(),
-            }
-          : null
-        return {
-          week_of: startDate,
-          platform: p.platform,
-          caption: p.caption,
-          hashtags: p.hashtags,
-          image_prompt: p.imagePrompt,
-          image_url,
-          video_url,
-          // Phase 14AG — TikTok rows that landed a Pexels MP4 are
-          // immediately media-ready; non-TikTok rows skip these columns.
-          ...(video_url
-            ? {
-                media_status: 'ready' as const,
-                media_source: 'pexels' as const,
-                media_generated_at: new Date().toISOString(),
-              }
-            : {}),
-          ...(media_metadata ? { media_metadata } : {}),
-          status: 'draft' as const,
-        }
-      }),
+    // Phase 14AH — duplicate prevention. Pexels search is deterministic
+    // (the same query returns the same top results), so two TikTok rows
+    // with similar `image_prompt` values would otherwise collide on the
+    // same MP4. Pre-query every existing `video_url` and stored
+    // `pexels_video_id` from `content_calendar`, then pass the resulting
+    // exclude sets to each `fetchAndStoreVideo` call. The lib helper walks
+    // page 1 first, falls back to a randomized page 2–6 if every page-1
+    // result is excluded, and only ships a duplicate as a last-resort
+    // fallback (extremely rare for travel queries).
+    const { data: existingVideoRows } = await supabase
+      .from('content_calendar')
+      .select('video_url, media_metadata')
+      .not('video_url', 'is', null)
+      .limit(2000)
+    const existingUrls = new Set<string>()
+    const existingPexelsIds = new Set<string>()
+    for (const r of existingVideoRows ?? []) {
+      if (typeof r.video_url === 'string' && r.video_url.length > 0) existingUrls.add(r.video_url)
+      const meta = (r.media_metadata && typeof r.media_metadata === 'object')
+        ? r.media_metadata as Record<string, unknown>
+        : null
+      const pid = meta?.pexels_video_id
+      if (typeof pid === 'string' && pid.length > 0) existingPexelsIds.add(pid)
+      else if (typeof pid === 'number') existingPexelsIds.add(String(pid))
+    }
+
+    // Phase 14AG/14AH — fetch images for every platform in PARALLEL (image
+    // dedup is not a concern — Pexels image variety is broad and FB/IG don't
+    // collide visually the way two identical TikTok B-roll clips would).
+    // Then fetch TikTok videos SEQUENTIALLY so the dedup accumulator stays
+    // consistent — two parallel video fetches with the same exclude set
+    // could both pick the same MP4 before either write lands. Sequential
+    // video fetches are ~200–500ms each, so 7 TikTok rows = ~3.5s extra,
+    // well inside the cron's 60s budget.
+    const imageUrls = await Promise.all(
+      posts.map(p => fetchAndStoreImage(p.imagePrompt, p.platform, supabase)),
     )
+
+    const rowsWithMedia: Array<Record<string, unknown>> = []
+    for (let i = 0; i < posts.length; i++) {
+      const p = posts[i]
+      const image_url = imageUrls[i]
+      const isTikTok = p.platform === 'tiktok'
+      let video_url: string | null = null
+      let pexelsVideoId: string | null = null
+      if (isTikTok && p.imagePrompt) {
+        const videoResult = await fetchAndStoreVideo({
+          query: p.imagePrompt,
+          orientation: 'portrait',
+          size: 'large',
+          excludePexelsIds: existingPexelsIds,
+          excludeUrls: existingUrls,
+        })
+        if (videoResult.success && videoResult.url) {
+          video_url = videoResult.url
+          pexelsVideoId = videoResult.external_id ?? null
+          // Accumulate so subsequent rows in this run can't re-pick.
+          existingUrls.add(videoResult.url)
+          if (pexelsVideoId) existingPexelsIds.add(pexelsVideoId)
+        }
+      }
+      // Build media_metadata for TikTok rows so the on_screen_hook + the
+      // Pexels video provenance survive into the dashboard / autoposter.
+      // Non-TikTok rows don't carry media_metadata — keep the row shape
+      // compatible with the pre-14AG insert path for FB/IG.
+      const media_metadata = isTikTok
+        ? {
+            source: 'pexels-video',
+            on_screen_hook: p.onScreenHook || null,
+            pexels_video_id: pexelsVideoId,
+            fetched_at: new Date().toISOString(),
+          }
+        : null
+      rowsWithMedia.push({
+        week_of: startDate,
+        platform: p.platform,
+        caption: p.caption,
+        hashtags: p.hashtags,
+        image_prompt: p.imagePrompt,
+        image_url,
+        video_url,
+        // Phase 14AG — TikTok rows that landed a Pexels MP4 are
+        // immediately media-ready; non-TikTok rows skip these columns.
+        ...(video_url
+          ? {
+              media_status: 'ready',
+              media_source: 'pexels',
+              media_generated_at: new Date().toISOString(),
+            }
+          : {}),
+        ...(media_metadata ? { media_metadata } : {}),
+        status: 'draft',
+      })
+    }
     const rows = rowsWithMedia
     const imagesGenerated = rows.filter(r => r.image_url).length
-    const videosGenerated = rows.filter(r => 'video_url' in r && r.video_url).length
+    const videosGenerated = rows.filter(r => r.video_url).length
 
     const { error: insertError } = await supabase.from('content_calendar').insert(rows)
     if (insertError) {

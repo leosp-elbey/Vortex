@@ -290,58 +290,99 @@ function pickBestPortraitMp4(entry) {
   })[0] ?? null
 }
 
-async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDuration, maxDuration }) {
+/**
+ * Phase 14AH — dedup-aware Pexels Video fetcher. JS mirror of
+ * `fetchAndStoreVideo` in src/lib/media-providers.ts. Walks page 1 first
+ * skipping any video whose `id` is in `excludePexelsIds` or whose chosen
+ * MP4 URL is in `excludeUrls`. If page 1 is fully excluded, retries once
+ * with a randomized page (2–6). Last resort returns a duplicate (better
+ * than failing the row entirely).
+ */
+function pickFirstUnusedVideo(videos, minDur, maxDur, excludePexelsIds, excludeUrls, allowExcluded) {
+  const isExcluded = (entry, file) => {
+    if (allowExcluded) return false
+    const idStr = entry.id != null ? String(entry.id) : ''
+    if (idStr && excludePexelsIds.has(idStr)) return true
+    if (file.link && excludeUrls.has(file.link)) return true
+    return false
+  }
+  for (const entry of videos) {
+    const dur = entry.duration ?? 0
+    if (dur < minDur || dur > maxDur) continue
+    const file = pickBestPortraitMp4(entry)
+    if (!file?.link) continue
+    if (isExcluded(entry, file)) continue
+    return { entry, file }
+  }
+  for (const entry of videos) {
+    const file = pickBestPortraitMp4(entry)
+    if (!file?.link) continue
+    if (isExcluded(entry, file)) continue
+    return { entry, file }
+  }
+  return null
+}
+
+async function fetchPexelsVideo(env, { query, orientation, size, perPage, minDuration, maxDuration, excludePexelsIds, excludeUrls }) {
   const key = env.PEXELS_API_KEY
   if (!key) return { success: false, provider: 'pexels-video', error: 'PEXELS_API_KEY not set' }
   if (!nonEmpty(query)) return { success: false, provider: 'pexels-video', error: 'query is required' }
-  const params = new URLSearchParams({
-    query: query.slice(0, 200),
-    per_page: String(Math.max(1, Math.min(perPage ?? 5, 80))),
-    orientation: orientation ?? 'portrait',
-    size: size ?? 'large',
-  })
+  const pp = String(Math.max(1, Math.min(perPage ?? 15, 80)))
+  const ori = orientation ?? 'portrait'
+  const sz = size ?? 'large'
   const minDur = Math.max(1, minDuration ?? 5)
   const maxDur = Math.max(minDur, maxDuration ?? 30)
-  try {
-    const res = await fetch(`https://api.pexels.com/videos/search?${params.toString()}`, {
-      headers: { Authorization: key },
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return { success: false, provider: 'pexels-video', error: normalizeError(data) || `pexels-video http ${res.status}` }
-    const videos = data?.videos ?? []
-    if (videos.length === 0) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no videos' }
-    let chosen = null
-    for (const entry of videos) {
-      const dur = entry.duration ?? 0
-      if (dur < minDur || dur > maxDur) continue
-      const file = pickBestPortraitMp4(entry)
-      if (file?.link) { chosen = { entry, file }; break }
+  const exIds = excludePexelsIds ?? new Set()
+  const exUrls = excludeUrls ?? new Set()
+
+  const fetchPage = async page => {
+    const params = new URLSearchParams({ query: query.slice(0, 200), per_page: pp, orientation: ori, size: sz, page: String(page) })
+    try {
+      const res = await fetch(`https://api.pexels.com/videos/search?${params.toString()}`, {
+        headers: { Authorization: key },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, error: normalizeError(data) || `pexels-video http ${res.status}` }
+      return { ok: true, data }
+    } catch (err) {
+      return { ok: false, error: normalizeError(err) }
     }
-    if (!chosen) {
-      for (const entry of videos) {
-        const file = pickBestPortraitMp4(entry)
-        if (file?.link) { chosen = { entry, file }; break }
-      }
-    }
-    if (!chosen?.file?.link) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no usable mp4' }
-    return {
-      success: true,
-      provider: 'pexels-video',
-      url: chosen.file.link,
-      external_id: chosen.entry.id != null ? String(chosen.entry.id) : undefined,
-      raw: {
-        video_id: chosen.entry.id,
-        duration: chosen.entry.duration,
-        width: chosen.file.width,
-        height: chosen.file.height,
-        quality: chosen.file.quality,
-        file_type: chosen.file.file_type,
-        page_url: chosen.entry.url,
-      },
-    }
-  } catch (err) {
-    return { success: false, provider: 'pexels-video', error: normalizeError(err) }
   }
+
+  const buildResult = (entry, file, duplicate) => ({
+    success: true,
+    provider: 'pexels-video',
+    url: file.link,
+    external_id: entry.id != null ? String(entry.id) : undefined,
+    raw: {
+      video_id: entry.id,
+      duration: entry.duration,
+      width: file.width,
+      height: file.height,
+      quality: file.quality,
+      file_type: file.file_type,
+      page_url: entry.url,
+      ...(duplicate ? { duplicate_fallback: true } : {}),
+    },
+  })
+
+  const p1 = await fetchPage(1)
+  if (!p1.ok) return { success: false, provider: 'pexels-video', error: p1.error }
+  const videos1 = p1.data?.videos ?? []
+  if (videos1.length === 0) return { success: false, provider: 'pexels-video', error: 'pexels-video returned no videos' }
+  const pick1 = pickFirstUnusedVideo(videos1, minDur, maxDur, exIds, exUrls, false)
+  if (pick1) return buildResult(pick1.entry, pick1.file, false)
+
+  const fallbackPage = 2 + Math.floor(Math.random() * 5)
+  const pN = await fetchPage(fallbackPage)
+  if (pN.ok) {
+    const videosN = pN.data?.videos ?? []
+    const pickN = pickFirstUnusedVideo(videosN, minDur, maxDur, exIds, exUrls, false)
+    if (pickN) return buildResult(pickN.entry, pickN.file, false)
+  }
+  const fallback = pickFirstUnusedVideo(videos1, minDur, maxDur, exIds, exUrls, true)
+  if (fallback) return buildResult(fallback.entry, fallback.file, true)
+  return { success: false, provider: 'pexels-video', error: 'pexels-video returned no usable mp4' }
 }
 
 // ============================================================
@@ -402,15 +443,21 @@ async function processImage(supabase, env, row, flags) {
 }
 
 /**
- * Phase 14AG — fetch a Pexels Video for the row. Synchronous — Pexels
- * returns the MP4 URL immediately, so the row can land at
+ * Phase 14AG/14AH — fetch a Pexels Video for the row. Synchronous —
+ * Pexels returns the MP4 URL immediately, so the row can land at
  * media_status='ready' in a single pass. Search query priority:
  *   1. row.image_prompt   (preferred — already curated by the AI for this row)
  *   2. row.video_prompt
  *   3. row.caption        (truncated; last-resort)
- * Returns { ok, url, external_id, raw } on success.
+ *
+ * The caller passes `excludePexelsIds` and `excludeUrls` (built once at
+ * script start from existing content_calendar rows + accumulated within
+ * the work loop) so we never pick a duplicate Pexels video. The dedup
+ * walker also retries with a randomized page 2–6 if page 1 is exhausted.
+ * Returns { ok, url, external_id, raw } on success; raw.duplicate_fallback
+ * is true when we shipped a duplicate as a last resort.
  */
-async function processVideo(supabase, env, row, flags) {
+async function processVideo(supabase, env, row, flags, excludePexelsIds, excludeUrls) {
   void supabase
   if (flags.provider !== 'pexels' && flags.provider !== 'auto') {
     return { ok: false, error: `provider '${flags.provider}' is not configured for video — only 'auto' or 'pexels' fetches Pexels Video` }
@@ -423,9 +470,11 @@ async function processVideo(supabase, env, row, flags) {
     query,
     orientation: 'portrait',
     size: 'large',
-    perPage: 5,
+    perPage: 15,
     minDuration: 5,
     maxDuration: 30,
+    excludePexelsIds,
+    excludeUrls,
   })
   if (!result.success) return { ok: false, provider: 'pexels-video', error: result.error }
   return {
@@ -628,6 +677,39 @@ async function main() {
     process.exit(0)
   }
 
+  // Phase 14AH — pre-query existing video URLs and Pexels video ids so the
+  // Pexels-video walker can skip duplicates. Also seeded with linked
+  // campaign_assets video metadata. The accumulator grows as rows pick a
+  // video — that prevents a multi-row run from picking the same MP4 twice.
+  const existingUrls = new Set()
+  const existingPexelsIds = new Set()
+  for (const r of allRowsRaw) {
+    if (typeof r.video_url === 'string' && r.video_url.length > 0) existingUrls.add(r.video_url)
+    const meta = (r.media_metadata && typeof r.media_metadata === 'object') ? r.media_metadata : null
+    const pid = meta?.pexels_video_id
+    if (typeof pid === 'string' && pid.length > 0) existingPexelsIds.add(pid)
+    else if (typeof pid === 'number') existingPexelsIds.add(String(pid))
+  }
+  // Also pull in campaign_assets video provenance to avoid cross-table dupes.
+  {
+    const { data: caRows } = await supabase
+      .from('campaign_assets')
+      .select('video_url, video_source_metadata')
+      .not('video_url', 'is', null)
+      .limit(2000)
+    for (const r of caRows ?? []) {
+      if (typeof r.video_url === 'string' && r.video_url.length > 0) existingUrls.add(r.video_url)
+      const meta = (r.video_source_metadata && typeof r.video_source_metadata === 'object') ? r.video_source_metadata : null
+      const pid = meta?.pexels_video_id
+      if (typeof pid === 'string' && pid.length > 0) existingPexelsIds.add(pid)
+      else if (typeof pid === 'number') existingPexelsIds.add(String(pid))
+    }
+  }
+  console.log(`${COLORS.bold}Dedup state${COLORS.reset}`)
+  console.log(`   existing video_url count:   ${existingUrls.size}`)
+  console.log(`   existing pexels_video_id:   ${existingPexelsIds.size}`)
+  console.log()
+
   // 4. Process each row.
   let succeeded = 0
   let failed = 0
@@ -688,7 +770,7 @@ async function main() {
 
     // Video path — Pexels Video, synchronous, lands at media_status='ready'.
     if (rec.needs === 'video' || (rec.needs === 'both' && flags.videosOnly)) {
-      const r = await processVideo(supabase, env, row, flags)
+      const r = await processVideo(supabase, env, row, flags, existingPexelsIds, existingUrls)
       if (!r.ok) {
         if (r.skipped) {
           skipped++
@@ -706,7 +788,12 @@ async function main() {
         }
       } else {
         succeeded++
-        samples.push({ ...item, action: 'video', success: true, provider: 'pexels-video', url: r.url, external_id: r.external_id })
+        // Phase 14AH — accumulate the just-picked video into the dedup
+        // sets so the next row in this run can't pick the same MP4.
+        if (typeof r.url === 'string' && r.url.length > 0) existingUrls.add(r.url)
+        if (typeof r.external_id === 'string' && r.external_id.length > 0) existingPexelsIds.add(r.external_id)
+        const dupTag = r.raw && r.raw.duplicate_fallback ? ' (DUP)' : ''
+        samples.push({ ...item, action: 'video' + dupTag, success: true, provider: 'pexels-video', url: r.url, external_id: r.external_id })
         if (flags.apply) {
           if (rec.target_table === 'campaign_assets') {
             await writeMediaToCampaignAsset(supabase, rec.target_id, {

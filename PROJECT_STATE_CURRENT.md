@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with four operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video)). All planned phases (0 → 14AC) shipped; 14AD–14AG are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with five operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention). All planned phases (0 → 14AC) shipped; 14AD–14AH are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AH shipping in working tree — Pexels Duplicate Prevention. Pexels Video Search is deterministic — the same query returns the same top results — so two posts with similar `image_prompt` values would otherwise collide on the same MP4. `fetchAndStoreVideo` in `src/lib/media-providers.ts` now accepts `excludePexelsIds: ReadonlySet<string>` and `excludeUrls: ReadonlySet<string>` options. The function walks page 1 first skipping any video whose `id` or chosen MP4 URL appears in either set; if every page-1 result is excluded, it retries once with a randomized page (2–6) for variety; if page 2 is also fully excluded (extremely rare for travel queries), it falls back to returning the first usable result with `raw.duplicate_fallback = true` set so callers can flag the row. Both callers (the weekly-content cron and `scripts/generate-missing-media.js`) pre-query existing `content_calendar.video_url` + `media_metadata.pexels_video_id` (and the script also pulls in `campaign_assets.video_url` + `video_source_metadata.pexels_video_id`) into the exclude sets, then accumulate newly-picked URLs/IDs into the same sets as the run progresses — so a single batch can't pick the same MP4 twice. The cron's TikTok video fetches were also serialized (image fetches stay parallel) to keep the accumulator consistent. The lib helper itself never queries the DB — the DB read lives in the callers, preserving the lib's pure-HTTP-wrapper contract. Lint + typecheck clean. No DB schema change; no platform calls.)
+**Last known good commit:** `b9e06c4` — "Phase 14AG: video pipeline swap — HeyGen excised, Pexels Video wired"
 **Last updated:** 2026-05-09 (Phase 14AG shipping in working tree — Video Pipeline Swap. HeyGen excised from the SOCIAL CONTENT PIPELINE; Pexels Video Search wired in. The TikTok "Media missing" problem resolved by automation: the weekly-content cron now fetches a cinematic vertical HD MP4 from Pexels for every TikTok row synchronously and lands the row at `media_status='ready'` with `media_source='pexels'` and `video_url` populated. New `fetchAndStoreVideo()` helper in `src/lib/media-providers.ts` calls `https://api.pexels.com/videos/search` with `orientation=portrait`, `size=large`, `per_page=5`, picks the highest-quality vertical MP4 with duration in [5, 30] seconds. Returns the Pexels CDN URL directly (no re-hosting — Pexels CDN URLs are stable and re-uploading 5–30 MB MP4s would risk Vercel's 60s cron ceiling). The cron's `maxDuration` is now explicitly 60s. `ai-prompts.ts` SOCIAL_SYSTEM updated with a TikTok-specific block instructing the AI to (1) write `image_prompt` as a Pexels Video search query (3–7 words, cinematic travel B-roll), and (2) author an `On-Screen Hook` (max 10 words) that gets stored in `content_calendar.media_metadata.on_screen_hook` for future text-overlay rendering (Creatomate / Shotstack / ffmpeg are all viable downstream — flagged as a separate future phase). The `scripts/generate-missing-media.js` script's HeyGen surface is fully removed (batch caps, `--allow-large-heygen-batch`, `--allow-when-pending`, the pending-jobs gate, the per-row sanity check, the DRY-RUN preview, the `cleanScriptForHeyGen` helper, the `createHeyGenVideo` call); `processVideo()` now calls Pexels Video. `scripts/check-video-generation-status.js` and `scripts/inspect-heygen-pilot-candidates.js` deleted. Dashboard's "🎬 Video generating" pill replaced by a "⚠ Legacy HeyGen row" amber pill (helps the operator see leftover rows from the old async flow); the Phase 14AF helper text now points at the new command shape (no `--provider=heygen`). HeyGen env vars stay in `.env.example` because the admin SBA welcome-video feature still uses them — that's a SEPARATE feature stack from the social content pipeline and was deliberately left untouched in this phase. Lint + typecheck clean.)
 **Last known good commit:** `cd5eb93` — "Phase 14AF: media pipeline audit + dashboard TikTok helper"
 **Last updated:** 2026-05-09 (Phase 14AF shipping in working tree — Media Pipeline Audit & UI Polish. The operator noticed TikTok drafts in the dashboard show "Media missing", which reads like an error. The actual state is the deliberate Phase 14L design: HeyGen video renders are gated to a manual `node scripts/generate-missing-media.js --provider=heygen` invocation so the operator controls API quota burn. This phase audits the script (no silent failures; pre-flight contract is enforced before any provider call) and adds an inline actionable helper to `src/app/dashboard/content/page.tsx` directly under the badge row: when `platform === 'tiktok'` and `media.outcome` is `missing` or `failed` (and the row is NOT already in the existing pending-HeyGen pill state), a small gray `<p>` renders "Run `node scripts/generate-missing-media.js --provider=heygen` to render video". Confusing state → actionable instruction. No DB writes; no platform calls; no migrations; no new dependencies. Lint + typecheck clean.)
@@ -20,6 +22,79 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AH — Pexels Duplicate Prevention (in working tree, 2026-05-09 — dedup in `fetchAndStoreVideo` + DB pre-query in cron and script + accumulating exclude set; no DB schema change; no platform calls; no new dependencies)
+
+### What this phase ships
+
+The Phase 14AG pipeline shipped a clean, automated TikTok B-roll flow — but Pexels Video Search is deterministic. Two posts with similar `image_prompt` values ("luxury beach resort" vs "tropical beach resort") would land on the same top result. Multiple TikToks with identical footage would look like a content bug. Phase 14AH fixes this at the fetch layer: `fetchAndStoreVideo` now skips already-used videos using exclude sets the caller builds from the DB.
+
+### How the dedup works
+
+```
+caller (cron or script)
+  ├─ SELECT video_url, media_metadata FROM content_calendar WHERE video_url IS NOT NULL
+  ├─ build excludeUrls: Set<string>  (every existing video_url)
+  ├─ build excludePexelsIds: Set<string>  (every media_metadata.pexels_video_id)
+  └─ for each row needing a video (sequential, accumulating):
+        result = fetchAndStoreVideo({ query, excludeUrls, excludePexelsIds })
+        excludeUrls.add(result.url); excludePexelsIds.add(result.external_id)
+        write row
+```
+
+`fetchAndStoreVideo` algorithm:
+1. Fetch page 1, walk results, return the first entry whose `id` AND chosen MP4 URL are both unused. Done.
+2. If every page-1 result was excluded, fetch a randomized page (2 + Math.floor(Math.random() * 5) → 2–6) for variety. Walk those results. Done if any unused.
+3. If page 2 was also fully excluded (extremely rare for travel queries — Pexels has 1k+ results per common search), fall back to returning the first usable page-1 result with `raw.duplicate_fallback = true` set so callers can log/flag it. Better to ship a duplicate than to fail the row entirely.
+
+The dedup catches **two distinct collision modes**:
+- **Exact-URL collision** — two rows would pick the same `video_files[].link`. Caught by `excludeUrls`.
+- **Same-video-different-quality collision** — two rows pick different files (HD vs UHD) of the same Pexels video. Caught by `excludePexelsIds` matching `entry.id`.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/lib/media-providers.ts` | `PexelsVideoOptions` gains optional `excludePexelsIds: ReadonlySet<string>` and `excludeUrls: ReadonlySet<string>`. `fetchAndStoreVideo` rewritten around a new internal `fetchPage(page)` helper and `pickFirstUnusedVideo()` walker (extracted, named, reusable). Page 1 → randomized page 2–6 → last-resort duplicate. `perPage` default raised from 5 to 15 (more candidates for the dedup walker to choose from). On duplicate fallback, `raw.duplicate_fallback = true` is set. The lib helper still does NOT query the DB — pure HTTP wrapper, exclude sets are passed by the caller. |
+| `src/app/api/cron/weekly-content/route.ts` | Added a pre-query step before the row loop: `SELECT video_url, media_metadata FROM content_calendar WHERE video_url IS NOT NULL LIMIT 2000` builds `existingUrls` and `existingPexelsIds`. **Switched from fully-parallel `Promise.all(posts.map(...))` to parallel-image / sequential-video.** Image fetches still run in parallel (no dedup needed for FB/IG images — Pexels image variety is broad and visual collisions are unlikely). TikTok video fetches now run sequentially, with the accumulator updated after each successful pick so the next row in the run can't re-pick the same MP4. Total cron time impact: ~3.5s for 7 sequential video fetches vs ~500ms for parallel — well inside the 60s ceiling. |
+| `scripts/generate-missing-media.js` | JS mirror of the lib changes. New `pickFirstUnusedVideo()` walker; `fetchPexelsVideo()` rewritten with the same page-1 → page-2 → duplicate-fallback flow. `processVideo()` signature gains `excludePexelsIds`, `excludeUrls` parameters and threads them through. Main loop pre-queries existing `content_calendar.video_url` + `media_metadata.pexels_video_id` AND `campaign_assets.video_url` + `video_source_metadata.pexels_video_id` (catches cross-table dupes the cron doesn't have to worry about). Prints a "Dedup state" block showing existing counts. Accumulates newly-picked URLs/IDs into the same sets across iterations. Per-row `samples` action label now appends `(DUP)` when `raw.duplicate_fallback` is set. |
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No DB query inside the lib helper. Per-call DB reads from a hot path are an anti-pattern; the cron/script each run **one** SELECT and pass the result by reference. Lib stays pure.
+- ❌ No SBA video stack changes. HeyGen still powers the admin SBA welcome-video flow per Phase 14AG's deliberate carve-out.
+- ❌ No image dedup. Pexels images are diverse enough across queries; FB/IG visual collisions are not a real-world problem. If they become one, the same pattern can be applied to `fetchPexelsImage`.
+- ❌ No campaign_assets dedup in the cron. Only the standalone script considers `campaign_assets` — the cron writes only to `content_calendar`. If the operator starts using campaign_assets for video, this can be extended.
+- ❌ No DB constraint enforcement. We don't add a `UNIQUE(video_url)` constraint — a duplicate fallback is rare but allowed by design (last-resort to avoid failing the row), and the operator may legitimately want to reuse an MP4 manually for a specific row.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (code paths only — Pexels is exercised when the cron or script runs) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (29 → 29) |
+| Net file change | 3 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ `pickFirstUnusedVideo` is pure (no I/O, no closure over mutable state)
+- ✅ `fetchPage(page)` / `buildResult` factored cleanly inside `fetchAndStoreVideo` for the two-page retry without duplicating the URL build / response-shaping logic
+- ✅ The cron's accumulator updates BEFORE the next iteration begins (sequential order guarantees consistency)
+- ✅ The script's accumulator handles both content_calendar and campaign_assets seed data + accumulates new picks
+
+### Migration
+
+**No.** No DB schema change.
+
+### Recommended next phase
+
+**14AG.2 — Text overlay rendering (still optional):** wire Creatomate / Shotstack / ffmpeg to burn `media_metadata.on_screen_hook` onto the Pexels MP4 before the autoposter posts it. Async — needs its own poll/cron.
 
 ---
 
