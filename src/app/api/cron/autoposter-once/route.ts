@@ -64,7 +64,7 @@ import {
   type PostingGateRow,
 } from '@/lib/posting-gate'
 import { getAutoposterEligibleRows } from '@/lib/autoposter-gate'
-import { getValidTikTokAccessToken } from '@/lib/tiktok-oauth'
+import { getValidTikTokAccessToken, proxyVideoUrlForTikTok } from '@/lib/tiktok-oauth'
 import { sendEmail } from '@/lib/resend'
 
 export const dynamic = 'force-dynamic'
@@ -211,6 +211,13 @@ async function postToTikTok(post: PostingGateRow, hashtags: string[] | null, sup
   const rawPrivacy = envTrim('TIKTOK_PRIVACY_LEVEL').toUpperCase()
   const privacy_level = allowedPrivacy.has(rawPrivacy) ? rawPrivacy : 'SELF_ONLY'
 
+  // Phase 14AO — translate Pexels CDN URLs into the verified-domain proxy
+  // (`/v/p/...` on www.vortextrips.com) so TikTok's URL-ownership check
+  // passes. Non-Pexels URLs pass through unchanged. The DB still stores
+  // the canonical Pexels URL in content_calendar.video_url for clean
+  // record-keeping; only the URL sent to TikTok is rewritten.
+  const proxiedVideoUrl = proxyVideoUrlForTikTok(post.video_url!)
+
   const initBody = {
     post_info: {
       title,
@@ -222,7 +229,7 @@ async function postToTikTok(post: PostingGateRow, hashtags: string[] | null, sup
     },
     source_info: {
       source: 'PULL_FROM_URL',
-      video_url: post.video_url!,
+      video_url: proxiedVideoUrl,
     },
   }
 

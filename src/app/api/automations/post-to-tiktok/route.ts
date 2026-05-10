@@ -57,7 +57,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
-import { getValidTikTokAccessToken } from '@/lib/tiktok-oauth'
+import { getValidTikTokAccessToken, proxyVideoUrlForTikTok } from '@/lib/tiktok-oauth'
 import { checkRateLimit } from '@/lib/rate-limit'
 
 const TIKTOK_INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/'
@@ -155,13 +155,18 @@ export async function POST(request: NextRequest) {
   // Defense-in-depth: even though the gate already required video_url,
   // double-check before the token round-trip so an empty URL never reaches
   // TikTok's API.
-  const videoUrl = post.video_url
-  if (!videoUrl || !videoUrl.trim()) {
+  const rawVideoUrl = post.video_url
+  if (!rawVideoUrl || !rawVideoUrl.trim()) {
     return NextResponse.json(
       { error: 'TikTok post is missing video_url after gate — investigate' },
       { status: 500 },
     )
   }
+  // Phase 14AO — translate Pexels CDN URLs into the verified-domain proxy
+  // so TikTok's URL-ownership check passes. Non-Pexels URLs pass through
+  // unchanged (Supabase Storage URLs that worked pre-14AG, locally-hosted
+  // demo files, etc).
+  const videoUrl = proxyVideoUrlForTikTok(rawVideoUrl)
 
   // Resolve a usable access_token. Throws when TikTok is not connected
   // (no refresh_token in site_settings) or refresh fails — surface as 503

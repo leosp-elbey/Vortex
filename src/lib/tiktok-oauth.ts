@@ -114,6 +114,71 @@ export function getTikTokClientSecret(): string {
     : envTrim('TIKTOK_CLIENT_SECRET')
 }
 
+// ============================================================
+// Phase 14AO — PULL_FROM_URL ownership proxy.
+//
+// TikTok's `pull_from_url` source requires the URL's host domain to be
+// verified in the TikTok Developer Portal. We verified
+// `www.vortextrips.com`. Pexels CDN URLs (`videos.pexels.com`) are not
+// — and we can't put a verification file on Pexels' infrastructure.
+//
+// The fix: a Next.js rewrite at `/v/p/*` proxies to Pexels' video CDN
+// (see `next.config.js`). This helper translates a Pexels URL into the
+// equivalent vortextrips.com proxy URL so TikTok sees a verified host.
+// All other URLs pass through unchanged (already on a verified domain
+// or the TikTok call will fail at the same verification step we're
+// solving — let TikTok's error speak for itself).
+//
+// Stable input: https://videos.pexels.com/video-files/<id>/<file>.mp4
+// Stable output: https://<APP_HOST>/v/p/<id>/<file>.mp4
+//
+// `APP_HOST` is read from NEXT_PUBLIC_APP_URL (canonical production
+// host) with a fallback that callers can override per-request. The
+// fallback exists so cron / script paths that don't carry a request
+// context still produce a working absolute URL.
+// ============================================================
+
+const PEXELS_VIDEO_HOST = 'videos.pexels.com'
+const PEXELS_VIDEO_PATH_PREFIX = '/video-files/'
+const PROXY_PATH_PREFIX = '/v/p/'
+
+/**
+ * Translate a video URL into a TikTok-compatible URL whose host is on
+ * a domain we've registered with the TikTok Developer Portal.
+ *
+ * - If `videoUrl` is on `videos.pexels.com/video-files/...`, returns
+ *   the equivalent `<APP_HOST>/v/p/...` URL that proxies through Vercel
+ *   Edge.
+ * - For any other URL (already on `vortextrips.com`, on
+ *   Supabase Storage, etc.), returns the URL unchanged. TikTok will
+ *   accept or reject based on whether that host is also registered;
+ *   this helper doesn't second-guess.
+ *
+ * `appHostOverride` lets a caller pass an explicit host when
+ * NEXT_PUBLIC_APP_URL isn't set (e.g., a CLI script). When omitted,
+ * falls back to NEXT_PUBLIC_APP_URL, then `https://www.vortextrips.com`.
+ */
+export function proxyVideoUrlForTikTok(videoUrl: string, appHostOverride?: string): string {
+  if (!videoUrl || typeof videoUrl !== 'string') return videoUrl
+  let parsed: URL
+  try {
+    parsed = new URL(videoUrl)
+  } catch {
+    return videoUrl
+  }
+  if (parsed.hostname !== PEXELS_VIDEO_HOST) return videoUrl
+  if (!parsed.pathname.startsWith(PEXELS_VIDEO_PATH_PREFIX)) return videoUrl
+
+  const appHost = (
+    appHostOverride
+    ?? envTrim('NEXT_PUBLIC_APP_URL')
+    ?? 'https://www.vortextrips.com'
+  ).replace(/\/+$/, '')
+
+  const tail = parsed.pathname.slice(PEXELS_VIDEO_PATH_PREFIX.length)
+  return `${appHost}${PROXY_PATH_PREFIX}${tail}${parsed.search}`
+}
+
 /**
  * Trade a TikTok authorization `code` for an access + refresh token pair.
  *

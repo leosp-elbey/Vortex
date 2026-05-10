@@ -24,6 +24,38 @@ const nextConfig = {
       },
     ]
   },
+  // Phase 14AO — TikTok PULL_FROM_URL ownership proxy.
+  //
+  // TikTok's Content Posting API requires that any URL passed to its
+  // /v2/post/publish/video/init/ endpoint with `source: 'PULL_FROM_URL'`
+  // come from a domain registered + verified in the TikTok Developer
+  // Portal (we verified `www.vortextrips.com` via the file at
+  // `/.well-known/tiktok-developers-site-verification.txt`).
+  //
+  // Pre-14AO, the TikTok routes sent video URLs straight from Pexels'
+  // CDN (`videos.pexels.com`) — TikTok rejected these with the
+  // `URL ownership verification` error from their docs. We can't put a
+  // verification file on Pexels' servers (we don't control them).
+  //
+  // The fix: a Next.js rewrite that proxies `/v/p/:path*` to Pexels'
+  // video CDN. Vercel's Edge handles the rewrite (no serverless function
+  // invocation, no timeout), so TikTok sees `www.vortextrips.com/v/p/...`
+  // (verified host), follows the rewrite, and downloads from Pexels
+  // transparently. The video URL stored in `content_calendar.video_url`
+  // stays canonical (Pexels URL) for clean record-keeping; the TikTok
+  // routes translate to the proxy URL only at publish time.
+  //
+  // Path shape: `https://videos.pexels.com/video-files/<id>/<file>` →
+  // `https://www.vortextrips.com/v/p/<id>/<file>`. The 1:1 mapping makes
+  // the URL transformation deterministic and reversible.
+  async rewrites() {
+    return [
+      {
+        source: '/v/p/:path*',
+        destination: 'https://videos.pexels.com/video-files/:path*',
+      },
+    ]
+  },
   images: {
     remotePatterns: [
       {

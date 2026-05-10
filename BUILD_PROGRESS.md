@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-10 (Phase 14AN shipping in working tree — Wire Dashboard "Post to TikTok" Button. Discovered while diagnosing why "Upload to TikTok" clicks weren't producing posts: the dashboard button at `src/app/dashboard/content/page.tsx:417-426` was a hardcoded `<a href="https://www.tiktok.com/creator-center/upload">` that bypassed the integration entirely and dumped operators in TikTok Studio. The backend (Phases 14R / 14V / 14AM / 14AM.1) was always wired correctly; only this one dashboard button was broken. Fix: new `postToTikTok(item)` handler mirroring the existing `postToInstagram` / `postToFacebook` patterns; `<a>` element replaced with `<button onClick={postToTikTok}>`. Without this, the TikTok app review demo could not be recorded. Lint + typecheck clean.)
+**Last updated:** 2026-05-10 (Phase 14AO shipping in working tree — TikTok PULL_FROM_URL Verified-Domain Proxy. Once Phase 14AN wired the dashboard button to the actual API, the operator finally saw TikTok's real rejection: URL ownership verification failed because today's `video_url` is on `videos.pexels.com` (Pexels CDN — Phase 14AG removed re-hosting) and we can't put a `.well-known` verification file on Pexels' infrastructure. Fix: a Next.js Edge rewrite at `/v/p/:path*` proxies to Pexels' video CDN; new `proxyVideoUrlForTikTok()` helper translates the canonical Pexels URL into the proxy URL at publish time; called from manual post route + autoposter cron + runner script JS mirror. The DB still stores the canonical Pexels URL; only the URL sent to TikTok is rewritten so TikTok sees `vortextrips.com` (verified). Lint + typecheck clean.)
+**Earlier this session:** 2026-05-10 (Phase 14AN shipping in working tree — Wire Dashboard "Post to TikTok" Button. Discovered while diagnosing why "Upload to TikTok" clicks weren't producing posts: the dashboard button at `src/app/dashboard/content/page.tsx:417-426` was a hardcoded `<a href="https://www.tiktok.com/creator-center/upload">` that bypassed the integration entirely and dumped operators in TikTok Studio. The backend (Phases 14R / 14V / 14AM / 14AM.1) was always wired correctly; only this one dashboard button was broken. Fix: new `postToTikTok(item)` handler mirroring the existing `postToInstagram` / `postToFacebook` patterns; `<a>` element replaced with `<button onClick={postToTikTok}>`. Without this, the TikTok app review demo could not be recorded. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AM.1 shipping in working tree — TikTok Sandbox Credential Toggle. New `TIKTOK_USE_SANDBOX` env var (default `false` = production). When `true`/`1`, every TikTok touch point reads `TIKTOK_CLIENT_KEY_SANDBOX` / `TIKTOK_CLIENT_SECRET_SANDBOX` instead of the production keys. Single decision point in `src/lib/tiktok-oauth.ts` (`tikTokIsSandboxMode`, `getTikTokClientKey`, `getTikTokClientSecret` exports); login route + status route + JS mirror in script + settings UI all route through it. Status route now returns `sandbox: boolean`; settings page shows amber "🧪 Sandbox mode" pill when active. Both credential pairs coexist in Vercel env; flip the toggle to switch between them. `.env.example` documents all three new vars. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AM shipping in working tree — TikTok App Review Hardening. Five surgical changes: (1) `public/.well-known/tiktok-developers-site-verification.txt` placeholder for TikTok's domain ownership verification — operator pastes the real token before submission; (2) "TikTok Connection" subsection in `/privacy/page.tsx`; (3) "TikTok Integration" subsection in `/terms/page.tsx`; (4) per-user rate limit (10/hour) on `/api/automations/post-to-tiktok` with `Retry-After` header; (5) CSRF state cookie validation between `/api/auth/tiktok/login` (sets `tt_oauth_state`, httpOnly Secure SameSite=Lax, 10-min TTL) and `/api/auth/tiktok/callback` (validates against query param, rejects mismatch / missing, clears cookie in success and failure paths to prevent replay). The Phase 14R `void state` no-op is removed. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AL shipping in working tree — TikTok Connect Button on Settings. Adds a clickable "Connect TikTok" button to `/dashboard/settings` so the operator's TikTok app-review demo video can show real UI interactions instead of typing the OAuth URL into the address bar. New `/api/auth/tiktok/status` admin-only endpoint returns sanitized state (`{ connected, expires_at, open_id }`) WITHOUT shipping access_token / refresh_token to the browser. Settings page gains a "Connected Accounts" section with a green ✓ Connected badge / metadata line / scope hint / black Connect-or-Reconnect button, and reads OAuth callback query params (`?platform=tiktok&connected=...`) to surface a toast then strip the params via `router.replace`. Suspense wrapper added per Next.js 16 client-component-with-useSearchParams requirement. Lint + typecheck clean.)
@@ -19,6 +20,31 @@
 ---
 
 ## Current focus
+
+**Phase 14AO — TikTok PULL_FROM_URL Verified-Domain Proxy (in working tree, 2026-05-10 — Next.js Edge rewrite + URL helper + 3 call-site updates; no DB schema change; no platform calls).**
+
+Once Phase 14AN unblocked the dashboard button, the operator saw TikTok's actual rejection: URL ownership verification failed because today's `video_url` is on `videos.pexels.com` (out of our control) and we verified `www.vortextrips.com`. Fix: proxy Pexels through our verified domain via Vercel Edge rewrite + URL translation at publish time.
+
+**Built in 14AO:**
+- [x] **`next.config.js`.** New `rewrites()` block: `{ source: '/v/p/:path*', destination: 'https://videos.pexels.com/video-files/:path*' }`. Vercel Edge handles the proxy — no serverless function involvement, no timeout risk for long video downloads.
+- [x] **`src/lib/tiktok-oauth.ts`.** New exported `proxyVideoUrlForTikTok(videoUrl, appHostOverride?)` helper. Parses URL, checks for Pexels host + `/video-files/` path, rewrites to `<APP_HOST>/v/p/<tail>` if matched, passes through unchanged otherwise. `APP_HOST` resolves via `appHostOverride` → `NEXT_PUBLIC_APP_URL` → `https://www.vortextrips.com` fallback.
+- [x] **`src/app/api/automations/post-to-tiktok/route.ts`.** Imports + calls the helper before `initBody`. The DB row's `video_url` stays canonical; only the URL sent to TikTok is rewritten.
+- [x] **`src/app/api/cron/autoposter-once/route.ts`.** Same pattern as the manual route.
+- [x] **`scripts/run-autoposter-once.js`.** New `proxyVideoUrlForTikTokJs(videoUrl, env)` JS-mirror function used in the runner's `postToTikTok`.
+
+**URL transformation:** `https://videos.pexels.com/video-files/12879953/.../uhd.mp4` → `https://www.vortextrips.com/v/p/12879953/.../uhd.mp4` (TikTok sees verified host) → Vercel Edge proxies to Pexels transparently → TikTok downloads → publishes.
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Helper handles edge cases (empty, non-string, parse failure, non-matching host) defensively
+- ✅ TS lib helper + JS mirror produce identical output for the same inputs
+
+**Operator runbook:** after deploy, click "Post to TikTok" on a Ready row. Expected: green toast "Posted to TikTok!" — no more URL verification error. Wait ~60s, refresh `tiktok.com/@vortextrips`, post should appear.
+
+---
+
+## Earlier focus
 
 **Phase 14AN — Wire Dashboard "Post to TikTok" Button (in working tree, 2026-05-10 — single dashboard component edit; no DB schema change; no platform calls).**
 

@@ -395,6 +395,23 @@ function resolveTikTokPrivacyLevel(env) {
  * Note this poster uniquely needs the supabase client (for site_settings
  * token rotation) AND env (for TIKTOK_CLIENT_KEY / SECRET / PRIVACY_LEVEL).
  */
+/**
+ * Phase 14AO — JS mirror of `proxyVideoUrlForTikTok` from
+ * src/lib/tiktok-oauth.ts. Translates Pexels CDN URLs into the
+ * verified-domain proxy at `/v/p/*` so TikTok's URL-ownership check
+ * passes. Non-Pexels URLs pass through unchanged.
+ */
+function proxyVideoUrlForTikTokJs(videoUrl, env) {
+  if (typeof videoUrl !== 'string' || videoUrl.length === 0) return videoUrl
+  let parsed
+  try { parsed = new URL(videoUrl) } catch { return videoUrl }
+  if (parsed.hostname !== 'videos.pexels.com') return videoUrl
+  if (!parsed.pathname.startsWith('/video-files/')) return videoUrl
+  const appHost = ((env.NEXT_PUBLIC_APP_URL || 'https://www.vortextrips.com').replace(/\/+$/, ''))
+  const tail = parsed.pathname.slice('/video-files/'.length)
+  return `${appHost}/v/p/${tail}${parsed.search}`
+}
+
 async function postToTikTok(row, env, supabase) {
   if (!nonEmpty(row.video_url)) {
     return { ok: false, error: 'TikTok requires a video — no video_url found on this post' }
@@ -417,7 +434,7 @@ async function postToTikTok(row, env, supabase) {
     },
     source_info: {
       source: 'PULL_FROM_URL',
-      video_url: row.video_url,
+      video_url: proxyVideoUrlForTikTokJs(row.video_url, env),
     },
   }
 
