@@ -57,7 +57,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
-import { getValidTikTokAccessToken, proxyVideoUrlForTikTok } from '@/lib/tiktok-oauth'
+import { getValidTikTokAccessToken, proxyVideoUrlForTikTok, queryTikTokCreatorInfo } from '@/lib/tiktok-oauth'
 import { checkRateLimit } from '@/lib/rate-limit'
 
 const TIKTOK_INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/'
@@ -179,6 +179,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 503 })
   }
 
+  // Phase 14AP — query creator_info BEFORE init. TikTok rejects init
+  // requests whose post_info values don't match what creator_info reports
+  // as allowed for the user (this is the "Please review our integration
+  // guidelines" rejection that blocked publishing pre-14AP). Use the
+  // returned booleans/options directly in the init body.
+  let creatorInfo
+  try {
+    creatorInfo = await queryTikTokCreatorInfo(admin)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'TikTok creator_info query failed'
+    console.error('[tiktok] creator_info failed', { content_id, error: message })
+    return NextResponse.json({ error: message }, { status: 502 })
+  }
+
+  // Pick a privacy level: prefer the env-configured value if TikTok allows
+  // it for this creator; otherwise fall back to the first allowed option
+  // (typically SELF_ONLY for unaudited apps).
+  const envPrivacy = resolvePrivacyLevel()
+  const privacyLevel = creatorInfo.privacy_level_options.includes(envPrivacy)
+    ? envPrivacy
+    : (creatorInfo.privacy_level_options[0] ?? 'SELF_ONLY')
+
   // Build the Direct Post init payload.
   const rawHashtags = (rawPost as unknown as { hashtags?: string[] | null }).hashtags
   const title = buildTitle(post.caption ?? '', rawHashtags ?? null)
@@ -186,10 +208,11 @@ export async function POST(request: NextRequest) {
   const initBody = {
     post_info: {
       title,
-      privacy_level: resolvePrivacyLevel(),
-      disable_duet: false,
-      disable_comment: false,
-      disable_stitch: false,
+      privacy_level: privacyLevel,
+      // Phase 14AP — these MUST match creator_info, not be hardcoded.
+      disable_duet: creatorInfo.duet_disabled,
+      disable_comment: creatorInfo.comment_disabled,
+      disable_stitch: creatorInfo.stitch_disabled,
       video_cover_timestamp_ms: 1000,
     },
     source_info: {

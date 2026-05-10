@@ -44,6 +44,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const TIKTOK_OAUTH_URL = 'https://open.tiktokapis.com/v2/oauth/token/'
 const TIKTOK_STATUS_URL = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/'
+const TIKTOK_CREATOR_INFO_URL = 'https://open.tiktokapis.com/v2/post/publish/creator_info/query/'
 
 /** Buffer (ms) before access_token expiry at which we proactively refresh. */
 const REFRESH_BUFFER_MS = 60_000
@@ -359,6 +360,116 @@ export async function getValidTikTokAccessToken(supabase: SupabaseAdmin): Promis
   const fresh = await refreshAccessToken(stored.refresh_token)
   await saveTikTokTokens(supabase, fresh)
   return fresh.access_token
+}
+
+// ============================================================
+// Phase 14AP — TikTok creator_info pre-flight query.
+//
+// TikTok's Content Posting API requires the publish init request to
+// MATCH what the user's account allows. Specifically:
+//   - `privacy_level` must be in `privacy_level_options`
+//   - `disable_comment` must equal `comment_disabled`
+//   - `disable_duet` must equal `duet_disabled`
+//   - `disable_stitch` must equal `stitch_disabled`
+//
+// If we hardcode values that don't match the user's account settings,
+// TikTok rejects the publish init with the generic "Please review our
+// integration guidelines" error. The fix is to call
+// /v2/post/publish/creator_info/query/ FIRST and use the returned
+// values when building the init body.
+//
+// This function is called by:
+//   - src/app/api/automations/post-to-tiktok/route.ts (manual button)
+//   - src/app/api/cron/autoposter-once/route.ts (cron tick)
+//   - scripts/run-autoposter-once.js (manual runner — has JS mirror)
+//
+// Returns the creator's allowed values + display metadata. Throws on
+// network errors or TikTok-side errors (caller decides how to surface).
+// ============================================================
+
+export interface TikTokCreatorInfo {
+  /** Display username (e.g. "vortextrips"). Useful for log lines. */
+  creator_username: string | null
+  /** Display name (e.g. "Vortex Trips"). */
+  creator_nickname: string | null
+  /** Avatar URL. */
+  creator_avatar_url: string | null
+  /** Privacy levels TikTok allows for THIS creator. e.g. ['SELF_ONLY']
+   *  for unaudited apps; ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS',
+   *  'SELF_ONLY'] for audited apps with public accounts. */
+  privacy_level_options: string[]
+  /** Whether comments are disabled at the account level. The init body's
+   *  `disable_comment` must equal this. */
+  comment_disabled: boolean
+  /** Whether duets are disabled at the account level. */
+  duet_disabled: boolean
+  /** Whether stitches are disabled at the account level. */
+  stitch_disabled: boolean
+  /** Max video duration (seconds) for posts via this app for this creator. */
+  max_video_post_duration_sec: number
+  /** Raw payload, useful for log lines / debugging. Never logged automatically. */
+  raw: unknown
+}
+
+/**
+ * Query TikTok for the creator's allowed post settings.
+ *
+ * Resolves a fresh access_token via `getValidTikTokAccessToken` (so
+ * callers never need to handle expiry themselves) and POSTs to
+ * /v2/post/publish/creator_info/query/. Returns the creator's allowed
+ * privacy levels, comment/duet/stitch disabled flags, and max video
+ * duration. Throws when TikTok rejects (e.g. token revoked, scope
+ * missing, network error).
+ *
+ * Callers MUST use the returned values when building the init body —
+ * hardcoding values that don't match the creator's settings is what
+ * caused TikTok to reject our publish init with "Please review our
+ * integration guidelines" (Phase 14AP root cause).
+ */
+export async function queryTikTokCreatorInfo(supabase: SupabaseAdmin): Promise<TikTokCreatorInfo> {
+  const accessToken = await getValidTikTokAccessToken(supabase)
+
+  const res = await fetch(TIKTOK_CREATOR_INFO_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({}),
+  })
+
+  const data = (await res.json().catch(() => ({}))) as {
+    data?: {
+      creator_username?: string
+      creator_nickname?: string
+      creator_avatar_url?: string
+      privacy_level_options?: string[]
+      comment_disabled?: boolean
+      duet_disabled?: boolean
+      stitch_disabled?: boolean
+      max_video_post_duration_sec?: number
+    }
+    error?: { code?: string; message?: string; log_id?: string }
+  }
+
+  const errPayload = data.error
+  const hasError = !!errPayload && errPayload.code && errPayload.code !== 'ok'
+  if (!res.ok || hasError) {
+    const reason = errPayload?.message ?? `HTTP ${res.status}`
+    throw new Error(`TikTok creator_info query failed: ${reason}`)
+  }
+
+  return {
+    creator_username: data.data?.creator_username ?? null,
+    creator_nickname: data.data?.creator_nickname ?? null,
+    creator_avatar_url: data.data?.creator_avatar_url ?? null,
+    privacy_level_options: data.data?.privacy_level_options ?? [],
+    comment_disabled: data.data?.comment_disabled ?? false,
+    duet_disabled: data.data?.duet_disabled ?? true,
+    stitch_disabled: data.data?.stitch_disabled ?? true,
+    max_video_post_duration_sec: data.data?.max_video_post_duration_sec ?? 0,
+    raw: data,
+  }
 }
 
 // ============================================================

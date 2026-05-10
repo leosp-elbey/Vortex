@@ -412,6 +412,39 @@ function proxyVideoUrlForTikTokJs(videoUrl, env) {
   return `${appHost}/v/p/${tail}${parsed.search}`
 }
 
+/**
+ * Phase 14AP — JS mirror of `queryTikTokCreatorInfo` from
+ * src/lib/tiktok-oauth.ts. Pre-flight call required by TikTok: the init
+ * body's privacy_level + disable_* values must MATCH what creator_info
+ * reports for the user, or TikTok rejects with the generic "Please
+ * review our integration guidelines" error.
+ */
+async function queryTikTokCreatorInfoJs(supabase, env) {
+  const accessToken = await getValidTikTokAccessTokenJs(supabase, env)
+  const res = await fetch('https://open.tiktokapis.com/v2/post/publish/creator_info/query/', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({}),
+  })
+  const data = await res.json().catch(() => ({}))
+  const errPayload = data?.error
+  const hasError = !!errPayload && errPayload.code && errPayload.code !== 'ok'
+  if (!res.ok || hasError) {
+    const reason = errPayload?.message ?? `HTTP ${res.status}`
+    throw new Error(`TikTok creator_info query failed: ${reason}`)
+  }
+  return {
+    privacy_level_options: data?.data?.privacy_level_options ?? [],
+    comment_disabled: data?.data?.comment_disabled ?? false,
+    duet_disabled: data?.data?.duet_disabled ?? true,
+    stitch_disabled: data?.data?.stitch_disabled ?? true,
+    max_video_post_duration_sec: data?.data?.max_video_post_duration_sec ?? 0,
+  }
+}
+
 async function postToTikTok(row, env, supabase) {
   if (!nonEmpty(row.video_url)) {
     return { ok: false, error: 'TikTok requires a video — no video_url found on this post' }
@@ -423,13 +456,28 @@ async function postToTikTok(row, env, supabase) {
     return { ok: false, error: err instanceof Error ? err.message : 'TikTok token resolution failed' }
   }
 
+  // Phase 14AP — query creator_info BEFORE init. Same rationale as the
+  // TS routes: TikTok rejects init when post_info values don't match.
+  let creatorInfo
+  try {
+    creatorInfo = await queryTikTokCreatorInfoJs(supabase, env)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'TikTok creator_info query failed' }
+  }
+
+  const envPrivacy = resolveTikTokPrivacyLevel(env)
+  const privacy_level = creatorInfo.privacy_level_options.includes(envPrivacy)
+    ? envPrivacy
+    : (creatorInfo.privacy_level_options[0] ?? 'SELF_ONLY')
+
   const initBody = {
     post_info: {
       title: buildTikTokTitle(row),
-      privacy_level: resolveTikTokPrivacyLevel(env),
-      disable_duet: false,
-      disable_comment: false,
-      disable_stitch: false,
+      privacy_level,
+      // Phase 14AP — these MUST match creator_info, not be hardcoded.
+      disable_duet: creatorInfo.duet_disabled,
+      disable_comment: creatorInfo.comment_disabled,
+      disable_stitch: creatorInfo.stitch_disabled,
       video_cover_timestamp_ms: 1000,
     },
     source_info: {

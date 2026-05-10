@@ -64,7 +64,7 @@ import {
   type PostingGateRow,
 } from '@/lib/posting-gate'
 import { getAutoposterEligibleRows } from '@/lib/autoposter-gate'
-import { getValidTikTokAccessToken, proxyVideoUrlForTikTok } from '@/lib/tiktok-oauth'
+import { getValidTikTokAccessToken, proxyVideoUrlForTikTok, queryTikTokCreatorInfo } from '@/lib/tiktok-oauth'
 import { sendEmail } from '@/lib/resend'
 
 export const dynamic = 'force-dynamic'
@@ -202,14 +202,33 @@ async function postToTikTok(post: PostingGateRow, hashtags: string[] | null, sup
     return { ok: false, error: err instanceof Error ? err.message : 'TikTok token resolution failed' }
   }
 
+  // Phase 14AP — query creator_info BEFORE init. TikTok rejects init
+  // requests whose post_info values don't match what creator_info reports
+  // as allowed for the user. Use the returned booleans/options directly
+  // in the init body. See src/lib/tiktok-oauth.ts:queryTikTokCreatorInfo.
+  let creatorInfo
+  try {
+    creatorInfo = await queryTikTokCreatorInfo(supabase)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'TikTok creator_info query failed' }
+  }
+
   const tagStr = (hashtags ?? []).map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')
   const baseCaption = (post.caption ?? '').trim()
   const fullTitle = tagStr ? `${baseCaption}\n\n${tagStr}` : baseCaption
   const title = fullTitle.length <= TIKTOK_CAPTION_MAX ? fullTitle : fullTitle.slice(0, TIKTOK_CAPTION_MAX - 1) + '…'
 
+  // Phase 14AP — pick a privacy level from what TikTok says is allowed
+  // for this creator. Prefer the env-configured value if present; fall
+  // back to the first allowed option (typically SELF_ONLY for unaudited
+  // apps). The hardcoded allowlist below is now only used as a sanity
+  // filter on the env input.
   const allowedPrivacy = new Set(['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'])
   const rawPrivacy = envTrim('TIKTOK_PRIVACY_LEVEL').toUpperCase()
-  const privacy_level = allowedPrivacy.has(rawPrivacy) ? rawPrivacy : 'SELF_ONLY'
+  const envPrivacy = allowedPrivacy.has(rawPrivacy) ? rawPrivacy : 'SELF_ONLY'
+  const privacy_level = creatorInfo.privacy_level_options.includes(envPrivacy)
+    ? envPrivacy
+    : (creatorInfo.privacy_level_options[0] ?? 'SELF_ONLY')
 
   // Phase 14AO — translate Pexels CDN URLs into the verified-domain proxy
   // (`/v/p/...` on www.vortextrips.com) so TikTok's URL-ownership check
@@ -222,9 +241,10 @@ async function postToTikTok(post: PostingGateRow, hashtags: string[] | null, sup
     post_info: {
       title,
       privacy_level,
-      disable_duet: false,
-      disable_comment: false,
-      disable_stitch: false,
+      // Phase 14AP — these MUST match creator_info, not be hardcoded.
+      disable_duet: creatorInfo.duet_disabled,
+      disable_comment: creatorInfo.comment_disabled,
+      disable_stitch: creatorInfo.stitch_disabled,
       video_cover_timestamp_ms: 1000,
     },
     source_info: {
