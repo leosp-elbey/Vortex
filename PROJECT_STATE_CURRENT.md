@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with eleven operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings; Phase 14AM — TikTok App Review Hardening; Phase 14AM.1 — TikTok Sandbox Credential Toggle). All planned phases (0 → 14AC) shipped; 14AD–14AM.1 are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with twelve operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings; Phase 14AM — TikTok App Review Hardening; Phase 14AM.1 — TikTok Sandbox Credential Toggle; Phase 14AN — Wire Dashboard "Post to TikTok" Button). All planned phases (0 → 14AC) shipped; 14AD–14AN are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-10 (Phase 14AN shipping in working tree — Wire Dashboard "Post to TikTok" Button. Discovered while diagnosing why the operator's "Upload to TikTok" clicks weren't producing posts: the dashboard's TikTok button at `src/app/dashboard/content/page.tsx:417-426` was a hardcoded `<a href="https://www.tiktok.com/creator-center/upload">` — a link to TikTok's Creator Center, NOT a call to `/api/automations/post-to-tiktok`. Phases 14R / 14V / 14AM / 14AM.1 built the entire backend (Direct Post API + gate validation + atomic UPDATE + rate limit + sandbox toggle) but the dashboard never wired the button to it. Every "Upload to TikTok" click since 14R bypassed the integration and dumped operators in TikTok Studio's manual upload UI. Fix: new `postToTikTok(item)` handler mirroring the existing `postToInstagram` / `postToFacebook` patterns exactly — same fetch shape, same success/error toast, same optimistic state flip on success. The `<a>` element is replaced with a `<button onClick={postToTikTok}>` and the label changes from "Upload to TikTok" to "Post to TikTok" to match the FB/IG verb. Without this fix, the TikTok app review demo could not be recorded — the reviewer needs to see a button in the operator's dashboard fire the integration's API call, not a link to TikTok's product. Lint + typecheck clean. No DB schema change; no platform calls until the operator clicks the button.)
+**Last known good commit:** `388efea` — "Phase 14AM.1: TikTok sandbox credential toggle"
 **Last updated:** 2026-05-09 (Phase 14AM.1 shipping in working tree — TikTok Sandbox Credential Toggle. The operator received a separate TikTok Sandbox credential pair (`TIKTOK_CLIENT_KEY_SANDBOX` / `TIKTOK_CLIENT_SECRET_SANDBOX`) for testing pre-audit, including the demo video for the app review submission. New `TIKTOK_USE_SANDBOX` env toggle (default `false` = production) flips four touch points — `src/lib/tiktok-oauth.ts` (exchange + refresh), `src/app/api/auth/tiktok/login/route.ts` (login redirect), `src/app/api/auth/tiktok/status/route.ts` (now also returns `sandbox: boolean`), and `scripts/run-autoposter-once.js` (manual runner refresh) — to read the `_SANDBOX` variants when set. Three new exports in `tiktok-oauth.ts`: `tikTokIsSandboxMode()`, `getTikTokClientKey()`, `getTikTokClientSecret()` — single decision point so the toggle decision lives in one place. The settings page UI gains an amber "🧪 Sandbox mode" pill with a tooltip explaining how to disable it once the production app passes audit. Both credential pairs can coexist in Vercel env; flipping the toggle switches modes without code change after the first push. `.env.example` documents the new vars. Lint + typecheck clean.)
 **Last known good commit:** `0162107` — "Phase 14AM: TikTok app review hardening"
 **Last updated:** 2026-05-09 (Phase 14AM shipping in working tree — TikTok App Review Hardening. Five surgical changes the TikTok app review submission needs: (1) `/public/.well-known/tiktok-developers-site-verification.txt` placeholder file at the path TikTok requires for `pull_from_url` domain ownership verification — operator pastes the real token from the TikTok Developer Portal before recording the demo. (2) New "TikTok Connection" subsection in `/privacy/page.tsx` describing what data we receive (open_id, profile, followers, videos), the explicit-click-only posting commitment, and the disconnect path. (3) New "TikTok Integration" subsection in `/terms/page.tsx` referencing TikTok's Terms of Service and the never-auto-post commitment. (4) Per-user rate limit (10/hour) on `/api/automations/post-to-tiktok` using the existing `checkRateLimit` from `src/lib/rate-limit.ts` — defends against accidental button-mash, returns 429 with `Retry-After` header. (5) CSRF state validation between `/api/auth/tiktok/login` and `/api/auth/tiktok/callback` — login sets `tt_oauth_state` httpOnly Secure SameSite=Lax cookie (10-min TTL), callback compares query.state to cookie value, rejects mismatch with `state_mismatch` redirect, rejects missing cookie with `state_missing`, clears the cookie in both success and failure paths to prevent replay. The previous Phase 14R `void state` no-op is removed. Lint + typecheck clean.)
@@ -36,6 +38,90 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AN — Wire Dashboard "Post to TikTok" Button (in working tree, 2026-05-10 — single dashboard component edit; no DB schema change; no platform calls; no new dependencies)
+
+### What this phase ships
+
+A real `postToTikTok(item)` handler in `src/app/dashboard/content/page.tsx`, replacing the placeholder `<a href="https://www.tiktok.com/creator-center/upload">` link that bypassed the integration entirely. Now clicking "Post to TikTok" on a Ready row actually calls `/api/automations/post-to-tiktok` — the same backend already wired up by Phases 14R / 14V / 14AM / 14AM.1.
+
+### How this bug went undetected
+
+A timeline of why this slipped through previous TikTok-related phases:
+
+- **Phase 14R** built the backend posting route + OAuth callback. UI gap: assumed an existing button connected to it, but no one verified.
+- **Phases 14M / 14J** built the posting gate workflow (Mark Ready → Post). The dashboard rendered "Mark Ready" / "Mark Posted" / "Remove from Queue" as the gate controls; the platform-specific post buttons (Post to IG / Post to FB / Upload to TikTok) were treated as already-existing.
+- **Phase 14V** added TikTok publish-status polling. Assumed posts were happening; never verified by clicking the dashboard button.
+- **Phases 14AK / 14AL / 14AM / 14AM.1** focused on OAuth handshake + status endpoint + sandbox toggle. The Connect TikTok button on `/dashboard/settings` was wired correctly; the Post button on `/dashboard/content` was assumed to be wired correctly.
+- **Today's diagnostic session** — operator clicked "Upload to TikTok" repeatedly, got navigated to TikTok Studio every time, dashboard never showed any error toast, DB never received any `tiktok_publish_id`. Investigation into the dashboard source found the `<a>` placeholder.
+
+The autoposter cron (`/api/cron/autoposter-once`) and the manual runner script (`scripts/run-autoposter-once.js`) DID call the backend correctly, so the integration appeared to "work" via those paths. The dashboard manual button was the only broken path.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `src/app/dashboard/content/page.tsx` | (a) New `postToTikTok(item: ExtendedContentItem)` handler at line 174 (immediately after `postToFacebook`), mirroring the FB/IG handlers exactly: POST to `/api/automations/post-to-tiktok` with `{ content_id }`, optimistic state flip on success, success toast `"Posted to TikTok!"`, error toast with the API's reason on failure. (b) The `<a href="https://www.tiktok.com/creator-center/upload" target="_blank">` element on line 418-426 is replaced with `<button onClick={() => postToTikTok(item)}>` and the label changes from "Upload to TikTok" to "Post to TikTok" to match the verb pattern of the FB/IG buttons (`Post to IG` / `Post to FB`). |
+
+### Behavior contract — before vs after Phase 14AN
+
+| Operator click | Pre-14AN | Post-14AN |
+|---|---|---|
+| 🎵 "Upload to TikTok" on a Ready row | New tab opens to `tiktok.com/creator-center/upload` (TikTok's Studio). Operator manually uploads. No API call to VortexTrips. No DB update. No `ai_actions_log` entry. | Calls `POST /api/automations/post-to-tiktok` with `{ content_id }`. Backend resolves access token via `getValidTikTokAccessToken`, runs gate validation, calls TikTok's `/v2/post/publish/video/init/` with PULL_FROM_URL, atomically UPDATEs row to `status='posted'` + `posted_at=now()` + `media_metadata.tiktok_publish_id`. Success → green toast + optimistic UI flip. Failure → red toast with TikTok's error message. |
+| 📸 Post to IG / 👥 Post to FB | Worked correctly | Unchanged |
+
+### What this phase enables
+
+- **Manual TikTok posting from the dashboard** — operators can now click a button to post any approved+Ready TikTok row via the Direct Post API, with the same UX as the FB and IG buttons.
+- **TikTok app review demo recording** — TikTok's reviewer can now watch the operator click a button in the dashboard and see the integration fire the API call. Pre-14AN, the demo would have shown the operator being redirected to TikTok Studio, which the reviewer would correctly identify as NOT a Direct Post integration.
+- **Post-by-post verification** — operator can post individual rows on demand without waiting for the autoposter cron tick or running the manual terminal script.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No confirmation modal. The directive's earlier spec called for a "Post this video to your TikTok account @{displayname}?" modal before firing. The FB and IG buttons don't have one either; adding modals only to TikTok would be inconsistent. A future polish phase could add modals to all three.
+- ❌ No optimistic UI for the `tiktok_publish_id` write. The dashboard's `setContent` only flips status; it doesn't show the publish_id (which is in `media_metadata`, not surfaced in the current UI). The diagnostic script + DB query show it for debugging.
+- ❌ No success-side polling. The button fires, gets a `200 OK`, and reports success. TikTok's actual download + publish is async (~30-90s); the UI doesn't poll `/v2/post/publish/status/fetch/` to confirm. The Phase 14V `scripts/diagnose-tiktok-uploads.js` does this when needed.
+- ❌ No change to the autoposter cron (`/api/cron/autoposter-once`) or manual runner (`scripts/run-autoposter-once.js`). Both already call the backend correctly.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (the wired button only fires when the operator clicks it post-deploy) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 1 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Handler signature + call shape byte-equivalent to `postToInstagram` / `postToFacebook` — verified by source diff
+- ✅ Button no longer has `target="_blank"` or `rel="noopener noreferrer"` (those were `<a>` attributes; `<button>` doesn't need them)
+
+### Migration
+
+**No.** No DB schema change.
+
+### Operator runbook for the demo recording
+
+Now that the button actually works:
+1. Visit `vortextrips.com/dashboard/settings` → ✓ Connected + 🌱 Sandbox mode
+2. Visit `/dashboard/content`
+3. Find a TikTok row showing `approved` + `Media ready`
+4. Click "Mark Ready" (sets gate_approved=true)
+5. Click "🎵 Post to TikTok" (NEW — actually fires the API now)
+6. Wait for green "Posted to TikTok!" toast
+7. After ~60s, refresh `tiktok.com/@<your-handle>` — post should appear (visible only to you under SELF_ONLY privacy in sandbox mode)
+
+If step 6 fires but step 7 doesn't show the post within 2 minutes, run `node scripts/diagnose-tiktok-uploads.js` — it'll poll TikTok's status endpoint with the `media_metadata.tiktok_publish_id` and tell you what TikTok says (PROCESSING_DOWNLOAD / PUBLISH_COMPLETE / FAILED).
+
+### Recommended next phase
+
+**14AN.1 — Confirmation modals (optional polish):** add "Post this video to your TikTok account?" / "...Facebook page?" / "...Instagram?" modals to all three platform buttons for symmetry with TikTok's app review guidelines.
 
 ---
 

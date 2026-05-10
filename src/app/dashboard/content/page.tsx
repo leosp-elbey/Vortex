@@ -171,6 +171,30 @@ export default function ContentPage() {
     }
   }
 
+  // Phase 14AN — wire the dashboard's "Upload to TikTok" button to the
+  // existing /api/automations/post-to-tiktok backend. Pre-14AN this button
+  // was a placeholder <a href="https://www.tiktok.com/creator-center/upload">
+  // that bypassed the integration entirely and dumped operators in TikTok
+  // Studio's manual upload UI — no API call, no Direct Post, no DB update.
+  // The handler mirrors postToInstagram / postToFacebook exactly: same
+  // fetch shape, same success/error toast pattern, same optimistic state
+  // flip on success. The backend (Phases 14R / 14V / 14AM / 14AM.1) handles
+  // gate validation + rate limiting + atomic UPDATE + sandbox toggle.
+  const postToTikTok = async (item: ExtendedContentItem) => {
+    const res = await fetch('/api/automations/post-to-tiktok', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_id: item.id }),
+    })
+    if (res.ok) {
+      setContent(prev => prev.map(c => c.id === item.id ? { ...c, status: 'posted' as ContentCalendarItem['status'] } : c))
+      show('Posted to TikTok!')
+    } else {
+      const d = await res.json().catch(() => ({}))
+      show(d.error ?? 'TikTok post failed', 'error')
+    }
+  }
+
   // Phase 14J — Toggle a row's posting-gate state. Pure POST to the new admin
   // route; never touches platform APIs. The toast surfaces the API's reason
   // string when the row is ineligible.
@@ -415,14 +439,12 @@ export default function ContentPage() {
                               </button>
                             )}
                             {!media.blocked && item.platform === 'tiktok' && (
-                              <a
-                                href="https://www.tiktok.com/creator-center/upload"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors font-medium text-center"
+                              <button
+                                onClick={() => postToTikTok(item)}
+                                className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors font-medium"
                               >
-                                🎵 Upload to TikTok
-                              </a>
+                                🎵 Post to TikTok
+                              </button>
                             )}
                             {media.blocked && (
                               <span
