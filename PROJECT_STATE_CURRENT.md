@@ -1,9 +1,11 @@
 # VortexTrips — Current Project State
 
-**🚀 PROJECT STATUS: MAINTENANCE MODE** (with nine operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings). All planned phases (0 → 14AC) shipped; 14AD–14AL are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
+**🚀 PROJECT STATUS: MAINTENANCE MODE** (with ten operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings; Phase 14AM — TikTok App Review Hardening). All planned phases (0 → 14AC) shipped; 14AD–14AM are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---
 
+**Last updated:** 2026-05-09 (Phase 14AM shipping in working tree — TikTok App Review Hardening. Five surgical changes the TikTok app review submission needs: (1) `/public/.well-known/tiktok-developers-site-verification.txt` placeholder file at the path TikTok requires for `pull_from_url` domain ownership verification — operator pastes the real token from the TikTok Developer Portal before recording the demo. (2) New "TikTok Connection" subsection in `/privacy/page.tsx` describing what data we receive (open_id, profile, followers, videos), the explicit-click-only posting commitment, and the disconnect path. (3) New "TikTok Integration" subsection in `/terms/page.tsx` referencing TikTok's Terms of Service and the never-auto-post commitment. (4) Per-user rate limit (10/hour) on `/api/automations/post-to-tiktok` using the existing `checkRateLimit` from `src/lib/rate-limit.ts` — defends against accidental button-mash, returns 429 with `Retry-After` header. (5) CSRF state validation between `/api/auth/tiktok/login` and `/api/auth/tiktok/callback` — login sets `tt_oauth_state` httpOnly Secure SameSite=Lax cookie (10-min TTL), callback compares query.state to cookie value, rejects mismatch with `state_mismatch` redirect, rejects missing cookie with `state_missing`, clears the cookie in both success and failure paths to prevent replay. The previous Phase 14R `void state` no-op is removed. Lint + typecheck clean.)
+**Last known good commit:** `b3ad037` — "Phase 14AL: TikTok Connect button on settings — for app-review demo"
 **Last updated:** 2026-05-09 (Phase 14AL shipping in working tree — TikTok Connect Button on Settings. The operator's TikTok app review submission requires a demo video showing the OAuth + posting flow in the actual UI. Phase 14AK exposed the OAuth flow at `/api/auth/tiktok/login`, but invoking it required typing the URL into the browser address bar — workable but visually scrappy for a TikTok reviewer. Phase 14AL adds a clickable "Connect TikTok" button to `/dashboard/settings` so the demo recording shows real UI interactions, satisfying TikTok's "user interface and user interactions clearly visible" requirement. New `/api/auth/tiktok/status` admin-only endpoint returns sanitized state (`{ connected, expires_at, open_id }`) WITHOUT shipping access_token / refresh_token to the browser. The settings page now has a "Connected Accounts" section showing TikTok connection status with a green ✓ Connected pill (or gray Not connected), the connected open_id (first 12 chars), the access-token expiration timestamp, and a black "Connect TikTok" / "Reconnect TikTok" button linking to `/api/auth/tiktok/login`. The OAuth callback's `?platform=tiktok&connected=true|false&error=...` query params are now read with `useSearchParams`, surfaced as a toast, and stripped from the URL via `router.replace` so a refresh doesn't re-fire the toast. The page is wrapped in a Suspense boundary (Next.js 16 requirement for client components using useSearchParams). Lint + typecheck clean. No DB schema change; no platform calls.)
 **Last known good commit:** `eb52f43` — "Phase 14AK: TikTok OAuth login route — completes the Phase 14R handshake"
 **Last updated:** 2026-05-09 (Phase 14AK shipping in working tree — TikTok OAuth Login Route. The operator hit a 404 visiting `https://www.vortextrips.com/api/auth/tiktok/login` while trying to authorize the TikTok Direct Post API. Diagnosis: Phase 14R built only the OAuth callback at `/api/auth/tiktok/callback` (the route that receives TikTok's redirect after the user authorizes); the corresponding LOGIN route — the one that builds the authorize URL and 302-redirects the browser to TikTok — was never created. This phase fills that gap with `src/app/api/auth/tiktok/login/route.ts`. The route reads `TIKTOK_CLIENT_KEY` from env, generates a CSRF state via `crypto.randomUUID()`, computes the same `redirect_uri` the callback uses (`${NEXT_PUBLIC_APP_URL || request.origin}/api/auth/tiktok/callback`), and issues a 302 to `https://www.tiktok.com/v2/auth/authorize/` with `client_key`, `scope=user.info.basic,video.publish`, `response_type=code`, `redirect_uri`, and `state`. Refuses with a clear 500 message if `TIKTOK_CLIENT_KEY` is unset (so the operator knows what to configure). State validation is intentionally still deferred — matches the callback's existing `void state` stance; a future phase can add a session-backed state store and validate at the callback hook point. No DB writes; no platform calls beyond the redirect itself; never logs sensitive values. Lint + typecheck clean.)
@@ -32,6 +34,105 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 14AM — TikTok App Review Hardening (in working tree, 2026-05-09 — domain verification + privacy/terms + state CSRF + post-route rate limit; no DB schema change; no platform calls; no new dependencies)
+
+### What this phase ships
+
+Path B from the operator's TikTok app review prep — the **minimum required for review submission plus the security hardening that's worth doing before TikTok looks at the integration**. Everything in this phase is small, surgical, and contained — no new tables, no migrations, no UI restructuring. Five files touched.
+
+### Why these five and not the rest of the spec
+
+The spec the operator received from another tool described 9 tasks totaling ~2–3 hours of work. ~70% of it was already built across Phases 14R / 14AK / 14AL / 14M.1, just in different file paths (`/dashboard/settings` instead of `/dashboard/tiktok`, `site_settings` instead of `tiktok_connections`, etc.). 14AM ships the deltas TikTok actually needs to see for the review without rebuilding what already works:
+- ✅ Domain verification file (TikTok requires for `pull_from_url`)
+- ✅ Privacy + Terms TikTok sections (TikTok review explicitly asks for these)
+- ✅ State cookie CSRF validation (security hardening)
+- ✅ Rate limit on the publish route (defense-in-depth)
+
+What was NOT built (intentionally):
+- ❌ A separate `/dashboard/tiktok` page (duplicates `/dashboard/settings` + `/dashboard/content`)
+- ❌ A `tiktok_connections` table (`site_settings` already works)
+- ❌ A file-picker post UI (the production AI-queue flow is a stronger demo)
+- ❌ `getUserInfo` / `listVideos` lib helpers (no caller needs them)
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `public/.well-known/tiktok-developers-site-verification.txt` (new) | Single-line placeholder `TODO_PASTE_TIKTOK_VERIFICATION_TOKEN_HERE`. The operator replaces the entire file content with TikTok's verification token from the Developer Portal → Content Posting API → Verify domains. The placeholder is intentionally not a valid token so if the operator forgets to swap it, TikTok's verification fails loudly instead of silently. |
+| `src/app/privacy/page.tsx` | New "TikTok Connection" `<section>` inserted at the top of the policy body (above the existing "SMS / Mobile Information Sharing" section). Three paragraphs: (a) what data we receive when you connect (open_id, basic profile, follower stats, the videos you publish), explicit "tokens stored securely on our servers, never shared with third parties", (b) the explicit-click-only commitment + disconnect-via-support path, (c) reference to TikTok's Privacy Policy with `target="_blank" rel="noopener noreferrer"`. |
+| `src/app/terms/page.tsx` | New "TikTok Integration" `<section>` inserted between section 2 (SMS Program Terms) and section 3 (Membership & Services). Two paragraphs: (a) "VortexTrips uses TikTok's Login Kit and Content Posting API … you agree to TikTok's Terms of Service" with link to TikTok's ToS; (b) "VortexTrips will only post to TikTok at your explicit request — every post requires you to click a clearly labeled 'Post to TikTok' button … We do not auto-post or schedule posts without your action." Plus disconnect-via-support note. |
+| `src/app/api/automations/post-to-tiktok/route.ts` | Imported `checkRateLimit` from `@/lib/rate-limit`. After the auth check, calls `checkRateLimit('post-to-tiktok:${user.id}', 10, 60 * 60 * 1000)` — 10 publish attempts per hour per authenticated user. On 429 returns a JSON error with `retry_after_seconds` field AND a standard `Retry-After: <n>` HTTP header so well-behaved retry logic respects it. Per-user not per-IP because the route is admin-gated upstream and shared NAT (e.g., office Wi-Fi) would too-aggressively throttle a real operator. |
+| `src/app/api/auth/tiktok/login/route.ts` | Added two constants: `STATE_COOKIE = 'tt_oauth_state'` and `STATE_COOKIE_MAX_AGE_SECONDS = 60 * 10` (10 minutes — long enough for a thoughtful click-through, short enough that a stolen cookie has limited replay value). After building the redirect URL, calls `response.cookies.set(STATE_COOKIE, state, { httpOnly: true, secure: NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge })`. Header comment + main jsdoc updated to reflect Phase 14AM additions. |
+| `src/app/api/auth/tiktok/callback/route.ts` | New `redirectAndClearStateCookie(target)` helper that builds a `NextResponse.redirect` and immediately calls `response.cookies.set(STATE_COOKIE, '', { maxAge: 0, ... })` to clear the cookie — used in BOTH success and failure paths so a given `state` value can never replay a second authorization flow. New CSRF validation block runs BEFORE the `code` check: if `request.cookies.get('tt_oauth_state')` is missing, redirect with `connected=false&error=state_missing`; if the cookie value doesn't match `query.state`, redirect with `connected=false&error=state_mismatch`. Every existing `NextResponse.redirect(buildRedirectUrl(...))` call (4 of them) is renamed to `redirectAndClearStateCookie(...)` so the cookie is always cleared on exit. The Phase 14R `void state` no-op is removed. |
+
+### CSRF flow — before vs after Phase 14AM
+
+| Step | Pre-14AM | Post-14AM |
+|---|---|---|
+| Operator visits `/api/auth/tiktok/login` | Generates `state`, redirects to TikTok with it | Generates `state`, **sets `tt_oauth_state` cookie**, redirects to TikTok with it |
+| TikTok redirects back to `/api/auth/tiktok/callback?code=...&state=...` | Reads `state`, runs `void state` (no-op), exchanges code | Reads `state` AND cookie, **compares them**, rejects on mismatch / missing |
+| Cookie cleanup | N/A (no cookie was set) | Cookie is cleared in BOTH success and failure paths (`maxAge: 0`) — prevents replay |
+| Threat covered | Nothing — a third-party site embedding our authorize URL with their own `state` could trick the operator's browser into completing OAuth on attacker's behalf | The cookie is httpOnly Secure SameSite=Lax — the attacker cannot set it from their site, so the cookie value never matches their fake `state` |
+
+### Rate limit semantics
+
+- **Key:** `post-to-tiktok:${user.id}` (per authenticated user)
+- **Cap:** 10 requests / 60 minutes
+- **Storage:** `src/lib/rate-limit.ts` in-memory bucket Map; resets on Vercel function cold-start (a known limitation — see the lib's header)
+- **Response on hit:** HTTP 429 with `{ error, retry_after_seconds }` body and `Retry-After: <n>` header
+- **Why per-user not per-open_id:** the route receives `content_id` not `open_id` — the open_id is resolved server-side via `getValidTikTokAccessToken`. Per-user is the right granularity for a route that has one connected TikTok account.
+- **What this DOESN'T cover:** the autoposter cron (`/api/cron/autoposter-once`) has its own kill-switch + per-tick FIFO ordering, which is a stronger guarantee than rate limiting. The cron isn't subject to this 10/hour limit.
+
+### What this phase does NOT do (deliberate scope cuts)
+
+- ❌ No `/dashboard/tiktok` page. Existing `/dashboard/settings` (Connect) + `/dashboard/content` (Post) cover the same ground without duplication.
+- ❌ No `tiktok_connections` table. `site_settings` (4 rows: tiktok_access_token, tiktok_refresh_token, tiktok_token_expires_at, tiktok_open_id) is the production-stable storage shape from Phase 14R.
+- ❌ No file-picker UI for posting. The AI-queue → Mark Ready → Post flow is what TikTok will see in the demo.
+- ❌ No symmetric state validation on the YouTube callback (`/api/auth/youtube/callback`). YouTube isn't on TikTok's review path, so deferred.
+- ❌ No "Disconnect TikTok" button. The privacy + terms pages route disconnect requests through `support@vortextrips.com` for now. A future small phase can add a one-click disconnect on `/dashboard/settings`.
+- ❌ No fix to the misleading `tiktok-oauth.ts` line 237 / `run-autoposter-once.js` "reconnect via /api/auth/tiktok/callback" string. Cosmetic; can be batch-fixed.
+
+### Provider / platform / DB activity (this phase)
+
+| Action | Count |
+|---|---|
+| HeyGen / Pexels / OpenAI / Facebook / Instagram / TikTok / X / email API calls | 0 (rate limit + state cookie are infrastructure; the actual TikTok call only fires when the operator clicks Post) |
+| `UPDATE` / `INSERT` / `DELETE` against any DB table | 0 |
+| `ALTER` / `CREATE` against any DB object | 0 |
+| posted_at delta | 0 (30 → 30) |
+| Net file change | 1 new (verification file) + 5 modified |
+
+### Verification before commit
+
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ State cookie path matches between login.set and callback.read (`'/'`, `STATE_COOKIE = 'tt_oauth_state'`)
+- ✅ All 4 redirect paths in callback go through `redirectAndClearStateCookie` (clear-on-exit invariant)
+- ✅ Rate limit is per-user (`user.id`), not per-IP — verified
+- ✅ `Retry-After` HTTP header set alongside the JSON body so retry logic gets canonical signal
+
+### Operator runbook for the TikTok app review submission
+
+1. **TikTok Developer Portal → Content Posting API → Verify domains** — copy the verification token. Replace the entire content of `public/.well-known/tiktok-developers-site-verification.txt` with the token (one line, no trailing whitespace). Commit + push.
+2. **TikTok Developer Portal → Sandbox → Manage Sandbox Users** — add your TikTok account.
+3. **Verify domain is verified** in the Developer Portal — the dashboard shows green ✓ once it can fetch the file.
+4. **Live site:** log in to `vortextrips.com` as admin → `/dashboard/settings` → click "Connect TikTok" → authorize on TikTok's UI → land back at `/dashboard/settings` showing ✓ Connected. (CSRF validation now runs in the background; operator sees no UX difference.)
+5. **Live site:** `/dashboard/content` → find approved + Ready TikTok row → click "Post to TikTok" → confirm post on TikTok profile.
+6. **Record 60–90s demo** of steps 4–5. Domain `vortextrips.com` visible the whole time.
+7. **Upload demo to TikTok app review portal + click Submit.**
+
+### Migration
+
+**No.** No DB schema change.
+
+### Recommended next phase
+
+**14AM.1 — Disconnect button (optional polish):** small UI affordance on `/dashboard/settings` next to "Reconnect TikTok" that POSTs to a new `/api/auth/tiktok/disconnect` route which clears the four `site_settings` rows. Removes the support@ email path from the privacy/terms text.
+
+**14AM.2 — YouTube callback state validation (optional):** mirror the new TikTok CSRF pattern on the YouTube OAuth callback for symmetry.
 
 ---
 

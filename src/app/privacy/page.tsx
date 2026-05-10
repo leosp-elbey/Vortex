@@ -14,6 +14,13 @@ export default function PrivacyPage() {
 
         <div className="bg-white rounded-2xl shadow-sm p-8 space-y-8 text-gray-700 leading-relaxed">
           <section>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">TikTok Connection</h2>
+            <p className="mb-3">When you connect your TikTok account to VortexTrips through TikTok&apos;s official Login Kit, we receive your TikTok <code className="bg-gray-100 px-1 rounded text-sm">open_id</code>, basic profile information, follower stats, and the videos you choose to publish through VortexTrips. These tokens are stored securely on our servers and are never shared with third parties.</p>
+            <p className="mb-3">We never post to your TikTok account without your explicit click. Every post is initiated from a button you press in your VortexTrips dashboard. To disconnect your TikTok account at any time, contact <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>.</p>
+            <p>Your use of the TikTok integration is also governed by <a href="https://www.tiktok.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] hover:underline">TikTok&apos;s Privacy Policy</a>.</p>
+          </section>
+
+          <section>
             <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">SMS / Mobile Information Sharing</h2>
             <p className="mb-3">VortexTrips will not share, sell, rent, or transfer mobile phone numbers, SMS opt-in data, or text messaging consent information to any third parties, affiliates, or partners for marketing or promotional purposes under any circumstances. All categories of personal information disclosed in this Privacy Policy explicitly EXCLUDE text messaging originator opt-in data and consent. This information is used solely for the SMS communications you have opted into with VortexTrips.</p>
             <p className="mb-3">You may opt out of SMS communications at any time by replying STOP to any message, or by emailing <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>. Standard message and data rates may apply. Message frequency varies based on account activity and promotions.</p>

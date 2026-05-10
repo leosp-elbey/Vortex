@@ -58,6 +58,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
 import { getValidTikTokAccessToken } from '@/lib/tiktok-oauth'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 const TIKTOK_INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/'
 
@@ -102,6 +103,23 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Phase 14AM — rate limit: 10 publish attempts / hour / authenticated user.
+  // The route is admin-gated upstream, so per-user is the right granularity
+  // (per-IP would be too narrow if the operator is on a shared NAT). Users
+  // can still re-trigger via the autoposter cron, which has its own kill
+  // switch + per-tick FIFO ordering — this guard only catches manual
+  // button-mash from the dashboard.
+  const rl = checkRateLimit(`post-to-tiktok:${user.id}`, 10, 60 * 60 * 1000)
+  if (!rl.ok) {
+    const retryAfterSec = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))
+    return NextResponse.json(
+      {
+        error: `Too many TikTok publish attempts in the last hour. Retry in ${retryAfterSec}s.`,
+        retry_after_seconds: retryAfterSec,
+      },
+      { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+    )
+  }
   const { content_id } = await request.json().catch(() => ({}))
   if (!content_id) return NextResponse.json({ error: 'content_id required' }, { status: 400 })
 

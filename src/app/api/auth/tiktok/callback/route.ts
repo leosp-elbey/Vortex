@@ -1,4 +1,9 @@
 // Phase 14R — TikTok OAuth callback with token exchange.
+// Phase 14AM — adds CSRF state cookie validation. The login route at
+// /api/auth/tiktok/login sets `tt_oauth_state` (httpOnly, 10-min TTL);
+// this callback compares the cookie value to the `state` query param
+// returned by TikTok and rejects mismatches. The cookie is cleared after
+// validation regardless of outcome to prevent replay.
 //
 // Receives the redirect from TikTok's authorization step, exchanges the
 // `code` for an access + refresh token pair via tiktok-oauth.ts, and
@@ -18,9 +23,19 @@
 //     {tiktok_access_token, tiktok_refresh_token, tiktok_token_expires_at, tiktok_open_id}
 //   - on success → connected=true; on token-exchange failure → connected=false&error=<truncated>
 //
-// State CSRF validation is intentionally still deferred (matches the
-// existing YouTube callback behavior). A future phase can introduce a
-// session-backed state store and apply it uniformly to both flows.
+// Phase 14AM CSRF flow:
+//   1. Login route generates `state = crypto.randomUUID()`, sends it to
+//      TikTok in the authorize URL AND sets `tt_oauth_state` cookie.
+//   2. TikTok echoes the `state` back in this callback's query string.
+//   3. Callback compares query.state to cookie.tt_oauth_state. If they
+//      don't match, redirect with `connected=false&error=state_mismatch`.
+//   4. Cookie is cleared in BOTH success and failure paths so a replay of
+//      the same `state` value can't succeed twice.
+//   5. If the cookie is missing entirely (e.g., direct callback hit, expired
+//      cookie, browser cleared cookies between login and callback), reject
+//      with `connected=false&error=state_missing`.
+// The YouTube callback still defers state validation; that's a separate
+// follow-up phase if/when we want symmetric protection there.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -28,6 +43,7 @@ import { exchangeCodeForTokens, saveTikTokTokens } from '@/lib/tiktok-oauth'
 
 const SETTINGS_PATH = '/dashboard/settings'
 const CALLBACK_PATH = '/api/auth/tiktok/callback'
+const STATE_COOKIE = 'tt_oauth_state'
 
 /**
  * Build an absolute URL pointing at /dashboard/settings with a query
@@ -42,6 +58,23 @@ function buildRedirectUrl(request: NextRequest, params: Record<string, string>):
     url.searchParams.set(k, v)
   }
   return url.toString()
+}
+
+/**
+ * Phase 14AM — produce a redirect response that ALSO clears the
+ * `tt_oauth_state` cookie. Used in both success and failure paths so a
+ * given `state` value can never replay a second authorization flow.
+ */
+function redirectAndClearStateCookie(target: string): NextResponse {
+  const response = NextResponse.redirect(target)
+  response.cookies.set(STATE_COOKIE, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  })
+  return response
 }
 
 /** The TikTok-registered redirect URI. MUST match what was used to start the flow. */
@@ -67,7 +100,7 @@ export async function GET(request: NextRequest) {
   //    invalid app, etc). Surface a short message in the redirect.
   if (error) {
     const message = truncate(errorDescription ?? error)
-    return NextResponse.redirect(
+    return redirectAndClearStateCookie(
       buildRedirectUrl(request, {
         platform: 'tiktok',
         connected: 'false',
@@ -76,10 +109,39 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // 2. No code in the query string. Usually means someone hit the callback
+  // 2. Phase 14AM — CSRF state validation. The login route stored a
+  //    `tt_oauth_state` cookie at flow start; TikTok echoed the same
+  //    `state` value back in the query string. The two MUST match. A
+  //    missing cookie means either (a) the callback was hit directly
+  //    without going through /api/auth/tiktok/login first, (b) the cookie
+  //    expired (10-min TTL), or (c) the browser cleared cookies between
+  //    login and callback. A mismatched cookie means a CSRF attempt — a
+  //    third-party site embedded an authorize URL with their own state.
+  //    Either way, abort before exchanging the code for tokens.
+  const cookieState = request.cookies.get(STATE_COOKIE)?.value ?? null
+  if (!cookieState) {
+    return redirectAndClearStateCookie(
+      buildRedirectUrl(request, {
+        platform: 'tiktok',
+        connected: 'false',
+        error: 'state_missing',
+      }),
+    )
+  }
+  if (!state || state !== cookieState) {
+    return redirectAndClearStateCookie(
+      buildRedirectUrl(request, {
+        platform: 'tiktok',
+        connected: 'false',
+        error: 'state_mismatch',
+      }),
+    )
+  }
+
+  // 3. No code in the query string. Usually means someone hit the callback
   //    URL directly, not via TikTok's redirect — e.g. browser refresh.
   if (!code) {
-    return NextResponse.redirect(
+    return redirectAndClearStateCookie(
       buildRedirectUrl(request, {
         platform: 'tiktok',
         connected: 'false',
@@ -88,12 +150,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // `state` is intentionally not validated yet (matches YouTube callback).
-  // We still acknowledge it exists so a future state-validation phase has
-  // a clear hook point.
-  void state
-
-  // 3. Exchange the code for tokens. Network or TikTok-side errors land
+  // 4. Exchange the code for tokens. Network or TikTok-side errors land
   //    in connected=false with a truncated explanation. The `code` itself
   //    is never logged.
   try {
@@ -102,7 +159,7 @@ export async function GET(request: NextRequest) {
     await saveTikTokTokens(admin, tokens)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'token exchange failed'
-    return NextResponse.redirect(
+    return redirectAndClearStateCookie(
       buildRedirectUrl(request, {
         platform: 'tiktok',
         connected: 'false',
@@ -111,7 +168,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  return NextResponse.redirect(
+  return redirectAndClearStateCookie(
     buildRedirectUrl(request, {
       platform: 'tiktok',
       connected: 'true',

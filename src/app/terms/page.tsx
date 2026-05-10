@@ -33,6 +33,12 @@ export default function TermsPage() {
           </section>
 
           <section>
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">TikTok Integration</h2>
+            <p className="mb-3">VortexTrips uses TikTok&apos;s Login Kit and Content Posting API to let you publish travel content from your VortexTrips dashboard directly to your TikTok account. By connecting your TikTok account, you agree to <a href="https://www.tiktok.com/legal/terms-of-service" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] hover:underline">TikTok&apos;s Terms of Service</a>.</p>
+            <p>VortexTrips will only post to TikTok at your explicit request — every post requires you to click a clearly labeled &quot;Post to TikTok&quot; button in your dashboard. We do not auto-post or schedule posts without your action. To disconnect your TikTok account, contact <a href="mailto:support@vortextrips.com" className="text-[#FF6B35] hover:underline">support@vortextrips.com</a>.</p>
+          </section>
+
+          <section>
             <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">3. Membership &amp; Services</h2>
             <p className="mb-3">VortexTrips provides access to exclusive member rates on hotels, flights, vacation packages, and travel services through our Travel Team Perks membership program. Actual savings vary based on destination, travel dates, and availability.</p>
             <p>Membership benefits are for personal use only and may not be transferred or resold.</p>
