@@ -28,6 +28,17 @@ export const metadata: Metadata = {
     description: 'Exclusive travel savings membership. Join 2,000+ members saving thousands.',
     images: ['https://www.vortextrips.com/og'],
   },
+  // Phase 14AO.1 — TikTok URL Properties verification via HTML meta tag.
+  // The Sandbox app's domain ownership check (Developer Portal → URL
+  // Properties → Verify) fetches the HOMEPAGE and looks for this meta
+  // tag — NOT the /.well-known/tiktok-developers-site-verification.txt
+  // file. The .well-known file is kept for any future TikTok verification
+  // path that uses the file method, but the Sandbox app uses the meta tag.
+  // Token rotates per app context (Sandbox vs Production); after audit
+  // approval the operator may need to swap this content value.
+  other: {
+    'tiktok-developers-site-verification': '67nU5MQ9tImfxRNclDxmeXpeDBinpjoM',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
