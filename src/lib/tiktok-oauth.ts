@@ -75,6 +75,45 @@ function envTrim(key: string): string {
   return (process.env[key] ?? '').trim()
 }
 
+// ============================================================
+// Phase 14AM.1 — Sandbox credential toggle.
+//
+// TikTok issues two separate credential pairs: one for the audited
+// production app and one for the Sandbox app (used for testing
+// pre-audit, including the demo video for the app review submission).
+// `TIKTOK_USE_SANDBOX=true` (or `=1`) flips every TikTok-touching code
+// path to read the `_SANDBOX` variants. Default false → production
+// behavior unchanged. Both modes can coexist in Vercel env vars; the
+// operator flips one toggle to switch between them.
+//
+// All four files that read these credentials route through the helpers
+// below so the toggle decision lives in exactly one place:
+//   - src/lib/tiktok-oauth.ts (this file)         — exchange + refresh
+//   - src/app/api/auth/tiktok/login/route.ts      — login redirect
+//   - src/app/api/auth/tiktok/status/route.ts     — exposes sandbox flag
+//   - scripts/run-autoposter-once.js              — JS mirror in main()
+// ============================================================
+
+/** True when `TIKTOK_USE_SANDBOX` env is set to `'true'` or `'1'`. */
+export function tikTokIsSandboxMode(): boolean {
+  const v = envTrim('TIKTOK_USE_SANDBOX').toLowerCase()
+  return v === 'true' || v === '1'
+}
+
+/** Resolve the active TikTok client_key — production or sandbox. */
+export function getTikTokClientKey(): string {
+  return tikTokIsSandboxMode()
+    ? envTrim('TIKTOK_CLIENT_KEY_SANDBOX')
+    : envTrim('TIKTOK_CLIENT_KEY')
+}
+
+/** Resolve the active TikTok client_secret — production or sandbox. */
+export function getTikTokClientSecret(): string {
+  return tikTokIsSandboxMode()
+    ? envTrim('TIKTOK_CLIENT_SECRET_SANDBOX')
+    : envTrim('TIKTOK_CLIENT_SECRET')
+}
+
 /**
  * Trade a TikTok authorization `code` for an access + refresh token pair.
  *
@@ -88,10 +127,14 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string,
 ): Promise<TikTokTokenResponse> {
-  const clientKey = envTrim('TIKTOK_CLIENT_KEY')
-  const clientSecret = envTrim('TIKTOK_CLIENT_SECRET')
+  const clientKey = getTikTokClientKey()
+  const clientSecret = getTikTokClientSecret()
   if (!clientKey || !clientSecret) {
-    throw new Error('TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured')
+    throw new Error(
+      tikTokIsSandboxMode()
+        ? 'TIKTOK_CLIENT_KEY_SANDBOX / TIKTOK_CLIENT_SECRET_SANDBOX not configured (TIKTOK_USE_SANDBOX=true)'
+        : 'TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured',
+    )
   }
 
   const res = await fetch(TIKTOK_OAUTH_URL, {
@@ -126,10 +169,14 @@ export async function exchangeCodeForTokens(
 export async function refreshAccessToken(
   refreshToken: string,
 ): Promise<TikTokTokenResponse> {
-  const clientKey = envTrim('TIKTOK_CLIENT_KEY')
-  const clientSecret = envTrim('TIKTOK_CLIENT_SECRET')
+  const clientKey = getTikTokClientKey()
+  const clientSecret = getTikTokClientSecret()
   if (!clientKey || !clientSecret) {
-    throw new Error('TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured')
+    throw new Error(
+      tikTokIsSandboxMode()
+        ? 'TIKTOK_CLIENT_KEY_SANDBOX / TIKTOK_CLIENT_SECRET_SANDBOX not configured (TIKTOK_USE_SANDBOX=true)'
+        : 'TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured',
+    )
   }
 
   const res = await fetch(TIKTOK_OAUTH_URL, {

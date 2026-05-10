@@ -18,6 +18,10 @@ interface TikTokStatus {
   connected: boolean
   expires_at: string | null
   open_id: string | null
+  // Phase 14AM.1 — true while TIKTOK_USE_SANDBOX env is set on the server.
+  // Surfaces a "Sandbox mode" pill on the settings page so the operator
+  // never confuses the audited production app with the pre-audit sandbox.
+  sandbox?: boolean
 }
 
 function SettingsPageInner() {
@@ -140,6 +144,14 @@ function SettingsPageInner() {
                   <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700">✓ Connected</span>
                 ) : (
                   <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">Not connected</span>
+                )}
+                {tiktokStatus?.sandbox && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700"
+                    title="TIKTOK_USE_SANDBOX is enabled. OAuth + posting routes are using the sandbox app credentials. Flip to false in Vercel env after the audited production app is approved."
+                  >
+                    🧪 Sandbox mode
+                  </span>
                 )}
               </p>
               {tiktokStatus?.connected && (tiktokStatus.open_id || tiktokStatus.expires_at) && (

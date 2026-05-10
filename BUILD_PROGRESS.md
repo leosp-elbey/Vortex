@@ -1,6 +1,7 @@
 # VortexTrips Build Progress
 
-**Last updated:** 2026-05-09 (Phase 14AM shipping in working tree — TikTok App Review Hardening. Five surgical changes: (1) `public/.well-known/tiktok-developers-site-verification.txt` placeholder for TikTok's domain ownership verification — operator pastes the real token before submission; (2) "TikTok Connection" subsection in `/privacy/page.tsx`; (3) "TikTok Integration" subsection in `/terms/page.tsx`; (4) per-user rate limit (10/hour) on `/api/automations/post-to-tiktok` with `Retry-After` header; (5) CSRF state cookie validation between `/api/auth/tiktok/login` (sets `tt_oauth_state`, httpOnly Secure SameSite=Lax, 10-min TTL) and `/api/auth/tiktok/callback` (validates against query param, rejects mismatch / missing, clears cookie in success and failure paths to prevent replay). The Phase 14R `void state` no-op is removed. Lint + typecheck clean.)
+**Last updated:** 2026-05-09 (Phase 14AM.1 shipping in working tree — TikTok Sandbox Credential Toggle. New `TIKTOK_USE_SANDBOX` env var (default `false` = production). When `true`/`1`, every TikTok touch point reads `TIKTOK_CLIENT_KEY_SANDBOX` / `TIKTOK_CLIENT_SECRET_SANDBOX` instead of the production keys. Single decision point in `src/lib/tiktok-oauth.ts` (`tikTokIsSandboxMode`, `getTikTokClientKey`, `getTikTokClientSecret` exports); login route + status route + JS mirror in script + settings UI all route through it. Status route now returns `sandbox: boolean`; settings page shows amber "🧪 Sandbox mode" pill when active. Both credential pairs coexist in Vercel env; flip the toggle to switch between them. `.env.example` documents all three new vars. Lint + typecheck clean.)
+**Earlier this session:** 2026-05-09 (Phase 14AM shipping in working tree — TikTok App Review Hardening. Five surgical changes: (1) `public/.well-known/tiktok-developers-site-verification.txt` placeholder for TikTok's domain ownership verification — operator pastes the real token before submission; (2) "TikTok Connection" subsection in `/privacy/page.tsx`; (3) "TikTok Integration" subsection in `/terms/page.tsx`; (4) per-user rate limit (10/hour) on `/api/automations/post-to-tiktok` with `Retry-After` header; (5) CSRF state cookie validation between `/api/auth/tiktok/login` (sets `tt_oauth_state`, httpOnly Secure SameSite=Lax, 10-min TTL) and `/api/auth/tiktok/callback` (validates against query param, rejects mismatch / missing, clears cookie in success and failure paths to prevent replay). The Phase 14R `void state` no-op is removed. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AL shipping in working tree — TikTok Connect Button on Settings. Adds a clickable "Connect TikTok" button to `/dashboard/settings` so the operator's TikTok app-review demo video can show real UI interactions instead of typing the OAuth URL into the address bar. New `/api/auth/tiktok/status` admin-only endpoint returns sanitized state (`{ connected, expires_at, open_id }`) WITHOUT shipping access_token / refresh_token to the browser. Settings page gains a "Connected Accounts" section with a green ✓ Connected badge / metadata line / scope hint / black Connect-or-Reconnect button, and reads OAuth callback query params (`?platform=tiktok&connected=...`) to surface a toast then strip the params via `router.replace`. Suspense wrapper added per Next.js 16 client-component-with-useSearchParams requirement. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AK shipping in working tree — TikTok OAuth Login Route. Operator hit a 404 visiting `/api/auth/tiktok/login` while trying to authorize the TikTok Direct Post API. Phase 14R built only the callback at `/api/auth/tiktok/callback`; the corresponding LOGIN route — the user-initiated step that constructs the authorize URL and 302-redirects the browser to TikTok — was never created. 14AK adds it: `src/app/api/auth/tiktok/login/route.ts` reads `TIKTOK_CLIENT_KEY`, generates a CSRF `state`, computes the same `redirect_uri` the callback uses, and 302-redirects to `https://www.tiktok.com/v2/auth/authorize/` with `scope=user.info.basic,video.publish`. The full OAuth handshake is now end-to-end functional. Lint + typecheck clean.)
 **Earlier this session:** 2026-05-09 (Phase 14AJ shipping in working tree — Vercel Pro Scale Up. Operator upgraded to Vercel Pro; autoposter cron schedule now `0 14,18,22 * * *` (10 AM / 2 PM / 6 PM EST = 3 posts/day in steady state). The Phase 14S `queue_size_gt_1` refusal is removed: cron picks the OLDEST eligible row by `queued_for_posting_at` FIFO, leaves the rest for the next tick. Eligibility limit raised from 5 to 50 for full queue visibility. Response payload includes `queue_depth_before` / `queue_depth_remaining`. `scripts/run-autoposter-once.js` mirrors the same FIFO behavior. Kill switch + atomic UPDATE invariants unchanged. Lint + typecheck clean.)
@@ -17,6 +18,38 @@
 ---
 
 ## Current focus
+
+**Phase 14AM.1 — TikTok Sandbox Credential Toggle (in working tree, 2026-05-09 — single env var that flips OAuth + posting routes between production and sandbox apps; no DB schema change; no platform calls).**
+
+The operator received separate TikTok Sandbox credentials from the Developer Portal (`TIKTOK_CLIENT_KEY_SANDBOX` / `TIKTOK_CLIENT_SECRET_SANDBOX`) needed to record the app review demo before audit approval. 14AM.1 adds a runtime toggle so the production credentials and sandbox credentials can coexist in Vercel env without manual swapping.
+
+**Built in 14AM.1:**
+- [x] **`src/lib/tiktok-oauth.ts`.** Three new exports: `tikTokIsSandboxMode()`, `getTikTokClientKey()`, `getTikTokClientSecret()`. `exchangeCodeForTokens` and `refreshAccessToken` now read credentials via the helpers. Error message names the missing var dynamically based on active mode.
+- [x] **`src/app/api/auth/tiktok/login/route.ts`.** Imports `getTikTokClientKey` + `tikTokIsSandboxMode`. `clientKey` resolved via the helper. Refusal message names the missing var dynamically.
+- [x] **`src/app/api/auth/tiktok/status/route.ts`.** Response payload now includes `sandbox: tikTokIsSandboxMode()`.
+- [x] **`src/app/dashboard/settings/page.tsx`.** `TikTokStatus` type gains optional `sandbox?: boolean`. Amber "🧪 Sandbox mode" pill renders next to the connected/disconnected pill when sandbox mode is on, with a tooltip explaining the post-audit transition.
+- [x] **`scripts/run-autoposter-once.js`.** New JS-mirror helpers: `tikTokSandboxEnabledJs(env)`, `getTikTokClientKeyJs(env)`, `getTikTokClientSecretJs(env)`. `refreshTikTokTokensJs` now uses them.
+- [x] **`.env.example`.** Three new documented vars: `TIKTOK_USE_SANDBOX=false`, `TIKTOK_CLIENT_KEY_SANDBOX=`, `TIKTOK_CLIENT_SECRET_SANDBOX=`.
+
+**Behavior matrix:** unset/false → production keys; true/1 → `_SANDBOX` keys + amber UI pill.
+
+**Verification:**
+- ✅ `npm run lint` clean
+- ✅ `npx tsc --noEmit` clean
+- ✅ Single source of truth — all four touch points route through `tikTokIsSandboxMode()` / `tikTokSandboxEnabledJs()`
+- ✅ No hard-coded `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` reads in active code paths (grep-verified)
+
+**Operator runbook for sandbox switch:**
+1. Add 4 Vercel env vars (Production + Preview): `TIKTOK_USE_SANDBOX=true`, `TIKTOK_CLIENT_KEY_SANDBOX=<sandbox key>`, `TIKTOK_CLIENT_SECRET_SANDBOX=<sandbox secret>`. Keep production keys set too.
+2. Confirm sandbox app has `https://www.vortextrips.com/api/auth/tiktok/callback` as a registered redirect URI.
+3. Redeploy on Vercel.
+4. Visit `/dashboard/settings` — amber "🧪 Sandbox mode" pill confirms the switch. Click Connect TikTok → authorize against sandbox app.
+5. Record demo + submit.
+6. After audit approval: set `TIKTOK_USE_SANDBOX=false`, redeploy, reconnect.
+
+---
+
+## Earlier focus
 
 **Phase 14AM — TikTok App Review Hardening (in working tree, 2026-05-09 — domain verification + privacy/terms + state CSRF + post-route rate limit; no DB schema change; no platform calls).**
 

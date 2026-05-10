@@ -1,15 +1,18 @@
 // Phase 14AL — TikTok connection status endpoint.
+// Phase 14AM.1 — also reports `sandbox: boolean` so the settings page can
+// show a clear "Sandbox mode" indicator while TIKTOK_USE_SANDBOX=true.
 //
 // GET /api/auth/tiktok/status (admin-only)
-//   → 200 { connected: boolean, expires_at: string | null, open_id: string | null }
+//   → 200 { connected: boolean, expires_at: string | null, open_id: string | null, sandbox: boolean }
 //   → 401 if not authenticated as an admin
 //
 // Powers the "Connected Accounts" section on /dashboard/settings — lets the
-// dashboard show ✓ Connected / Not Connected, the expiration timestamp, and
-// a partial open_id without ever shipping the access_token or refresh_token
-// to the browser. The four TikTok rows in `site_settings` are admin-only
-// per migration 007 RLS, but this route reads via the admin client so it
-// can run from a 'use client' page on the dashboard.
+// dashboard show ✓ Connected / Not Connected, the expiration timestamp,
+// a partial open_id, and a Sandbox-mode pill — without ever shipping the
+// access_token or refresh_token to the browser. The four TikTok rows in
+// `site_settings` are admin-only per migration 007 RLS, but this route
+// reads via the admin client so it can run from a 'use client' page on
+// the dashboard.
 //
 // Constraints:
 //   - never returns access_token or refresh_token
@@ -21,6 +24,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { tikTokIsSandboxMode } from '@/lib/tiktok-oauth'
 
 export async function GET() {
   const supabase = await createClient()
@@ -61,5 +65,6 @@ export async function GET() {
     connected,
     expires_at: map.get('tiktok_token_expires_at') ?? null,
     open_id: map.get('tiktok_open_id') ?? null,
+    sandbox: tikTokIsSandboxMode(),
   })
 }

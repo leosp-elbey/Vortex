@@ -297,11 +297,32 @@ async function loadTikTokTokensJs(supabase) {
   }
 }
 
+// Phase 14AM.1 — sandbox credential toggle. JS mirror of the helpers in
+// src/lib/tiktok-oauth.ts. `TIKTOK_USE_SANDBOX=true` (or `=1`) flips the
+// script to the `_SANDBOX` credential pair so the manual runner posts via
+// the same sandbox app the OAuth flow connects against.
+function tikTokSandboxEnabledJs(env) {
+  const v = (env.TIKTOK_USE_SANDBOX ?? '').trim().toLowerCase()
+  return v === 'true' || v === '1'
+}
+function getTikTokClientKeyJs(env) {
+  return tikTokSandboxEnabledJs(env)
+    ? (env.TIKTOK_CLIENT_KEY_SANDBOX ?? '').trim()
+    : (env.TIKTOK_CLIENT_KEY ?? '').trim()
+}
+function getTikTokClientSecretJs(env) {
+  return tikTokSandboxEnabledJs(env)
+    ? (env.TIKTOK_CLIENT_SECRET_SANDBOX ?? '').trim()
+    : (env.TIKTOK_CLIENT_SECRET ?? '').trim()
+}
+
 async function refreshTikTokTokensJs(env, refreshToken) {
-  const clientKey = env.TIKTOK_CLIENT_KEY
-  const clientSecret = env.TIKTOK_CLIENT_SECRET
+  const clientKey = getTikTokClientKeyJs(env)
+  const clientSecret = getTikTokClientSecretJs(env)
   if (!nonEmpty(clientKey) || !nonEmpty(clientSecret)) {
-    throw new Error('TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured')
+    throw new Error(tikTokSandboxEnabledJs(env)
+      ? 'TIKTOK_CLIENT_KEY_SANDBOX / TIKTOK_CLIENT_SECRET_SANDBOX not configured (TIKTOK_USE_SANDBOX=true)'
+      : 'TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET not configured')
   }
   const res = await fetch(TIKTOK_OAUTH_URL, {
     method: 'POST',

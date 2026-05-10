@@ -40,6 +40,7 @@
 //   - no platform calls beyond the redirect itself
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getTikTokClientKey, tikTokIsSandboxMode } from '@/lib/tiktok-oauth'
 
 const AUTHORIZE_URL = 'https://www.tiktok.com/v2/auth/authorize/'
 const SCOPES = 'user.info.basic,video.publish'
@@ -50,10 +51,6 @@ const STATE_COOKIE = 'tt_oauth_state'
  *  enough that a stolen cookie has limited replay value. */
 const STATE_COOKIE_MAX_AGE_SECONDS = 60 * 10
 
-function envTrim(key: string): string {
-  return (process.env[key] ?? '').trim()
-}
-
 /** Build the absolute callback URI. Mirrors callback/route.ts:callbackUrl(). */
 function callbackUrl(request: NextRequest): string {
   const base = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin
@@ -61,12 +58,14 @@ function callbackUrl(request: NextRequest): string {
 }
 
 export async function GET(request: NextRequest) {
-  const clientKey = envTrim('TIKTOK_CLIENT_KEY')
+  // Phase 14AM.1 — credential resolution honors TIKTOK_USE_SANDBOX.
+  const clientKey = getTikTokClientKey()
   if (!clientKey) {
+    const missingVar = tikTokIsSandboxMode() ? 'TIKTOK_CLIENT_KEY_SANDBOX' : 'TIKTOK_CLIENT_KEY'
     return NextResponse.json(
       {
         error:
-          'TIKTOK_CLIENT_KEY is not configured. Set it in Vercel → Project Settings → Environment Variables and redeploy before starting the OAuth flow.',
+          `${missingVar} is not configured. Set it in Vercel → Project Settings → Environment Variables and redeploy before starting the OAuth flow.`,
       },
       { status: 500 },
     )
