@@ -272,10 +272,10 @@ export const EMAIL_TEMPLATES = {
     `),
   }),
 
-  // ─── MLM / NETWORK MARKETER OUTREACH SEQUENCE ────────────────────────────
+  // ─── SBA / TRAVEL AFFILIATE OUTREACH SEQUENCE ────────────────────────────
 
   // Day 0 — Pattern interrupt. Speak their language.
-  mlmDay0: (firstName: string) => ({
+  sbaDay0: (firstName: string) => ({
     subject: `${firstName} — the travel product that sells itself`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — quick question.</h2>
@@ -293,7 +293,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 2 — The product demo. Let the price gap do the work.
-  mlmDay2: (firstName: string) => ({
+  sbaDay2: (firstName: string) => ({
     subject: `${firstName}, this is what your customers will see`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">This is what closes deals, ${firstName}.</h2>
@@ -320,7 +320,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 4 — SBA earnings. Show the money.
-  mlmDay4: (firstName: string) => ({
+  sbaDay4: (firstName: string) => ({
     subject: `What VortexTrips affiliates actually earn, ${firstName}`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let's talk about the money, ${firstName}.</h2>
@@ -352,7 +352,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 6 — Objection handling. Answers to what they're thinking.
-  mlmDay6: (firstName: string) => ({
+  sbaDay6: (firstName: string) => ({
     subject: `"I'm already in something" — I hear this a lot, ${firstName}`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">"I already have a company." — Let me address this directly.</h2>
@@ -372,12 +372,12 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 9 — Social proof from SBAs
-  mlmDay9: (firstName: string) => ({
+  sbaDay9: (firstName: string) => ({
     subject: `${firstName} — what network marketers are saying after 90 days`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Real results from people who were exactly where you are, ${firstName}.</h2>
       <div style="background:#f9f9f9;border-left:4px solid #FF6B35;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
-        <p style="margin:0 0 8px;font-style:italic;color:#444">"I've been in 3 different MLMs. Travel is the easiest conversation I've ever had. I showed my cousin a hotel comparison and she signed up before I finished explaining. It literally sells itself."</p>
+        <p style="margin:0 0 8px;font-style:italic;color:#444">"I've tried 3 different affiliate programs. Travel is the easiest conversation I've ever had. I showed my cousin a hotel comparison and she signed up before I finished explaining. It literally sells itself."</p>
         <p style="margin:0;font-size:13px;font-weight:700;color:#FF6B35">— Marcus D., Miami FL · SBA for 6 months</p>
       </div>
       <div style="background:#f9f9f9;border-left:4px solid #16C79A;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
@@ -394,8 +394,8 @@ export const EMAIL_TEMPLATES = {
     `),
   }),
 
-  // Day 12 — The comparison close. Travel vs other MLMs.
-  mlmDay12: (firstName: string) => ({
+  // Day 12 — The comparison close. Travel vs other affiliate programs.
+  sbaDay12: (firstName: string) => ({
     subject: `${firstName}, why travel beats supplements in network marketing`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let me make a case for travel, ${firstName}.</h2>
@@ -423,7 +423,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 15 — Hard close.
-  mlmDay15: (firstName: string) => ({
+  sbaDay15: (firstName: string) => ({
     subject: `${firstName} — last note from me for a while`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">I'll keep this short, ${firstName}.</h2>
@@ -438,10 +438,10 @@ export const EMAIL_TEMPLATES = {
     `),
   }),
 
-  // ─── MLM LONG-TERM MONTHLY NURTURE ────────────────────────────────────────
+  // ─── SBA LONG-TERM MONTHLY NURTURE ────────────────────────────────────────
 
   // Month 1 (Day 30) — Soft re-engagement. New angle.
-  mlmMonth1: (firstName: string) => ({
+  sbaMonth1: (firstName: string) => ({
     subject: `${firstName} — one travel deal worth seeing this month`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — checking in with something real.</h2>
@@ -459,7 +459,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Month 2 (Day 60) — Results-focused. Real member win.
-  mlmMonth2: (firstName: string) => ({
+  sbaMonth2: (firstName: string) => ({
     subject: `${firstName} — a member just saved $3,200 on their honeymoon`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">This happened last week, ${firstName}.</h2>
@@ -478,7 +478,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Month 3 (Day 90) — Quarter check-in. FOMO angle.
-  mlmMonth3: (firstName: string) => ({
+  sbaMonth3: (firstName: string) => ({
     subject: `${firstName} — 3 months of savings you could have had`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">3 months. Here's what members saved, ${firstName}.</h2>
@@ -499,7 +499,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Month 4 (Day 120) — Seasonal/timely. Spring/summer travel push.
-  mlmMonth4: (firstName: string) => ({
+  sbaMonth4: (firstName: string) => ({
     subject: `${firstName} — summer travel season is coming. Are you ready?`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Summer is the biggest travel season of the year, ${firstName}.</h2>
@@ -517,7 +517,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Month 5 (Day 150) — Value re-anchor. New testimonial angle.
-  mlmMonth5: (firstName: string) => ({
+  sbaMonth5: (firstName: string) => ({
     subject: `${firstName} — this post got 47 DMs in 24 hours`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">One screenshot. 47 DMs. ${firstName}, this is the content strategy.</h2>
@@ -532,7 +532,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Month 6 (Day 180) — The final long-term touch. Respect + open door.
-  mlmMonth6: (firstName: string) => ({
+  sbaMonth6: (firstName: string) => ({
     subject: `6 months, ${firstName}. Still here when you're ready.`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — 6 months. I want to say something real.</h2>

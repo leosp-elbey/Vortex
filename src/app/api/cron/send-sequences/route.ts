@@ -4,6 +4,7 @@ import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 import { sendEmail } from '@/lib/resend'
 import { EMAIL_TEMPLATES, type EmailTemplateKey } from '@/lib/email-templates'
 import { computeEmailHealth, renderHealthEmailHTML, type EmailHealthReport } from '@/lib/email-health'
+import { isSuppressedContactStatus } from '@/lib/sequence-suppression'
 
 async function runHealthCheck(): Promise<EmailHealthReport | null> {
   try {
@@ -30,13 +31,17 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient()
 
+  // Phase 14AQ — batch size lowered from 250 → 50 to spread sends across
+  // multiple cron ticks (avoids burst-rate complaints at the email provider
+  // and gives the per-row suppression check more headroom inside the
+  // function timeout).
   const { data: items, error } = await supabase
     .from('sequence_queue')
     .select('*, contacts(first_name, email, phone, status, tags)')
     .eq('status', 'pending')
     .lte('scheduled_at', new Date().toISOString())
     .order('scheduled_at', { ascending: true })
-    .limit(250)
+    .limit(50)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!items || items.length === 0) return NextResponse.json({ success: true, processed: 0 })
@@ -62,7 +67,11 @@ export async function GET(request: NextRequest) {
         tags: string[]
       } | null
 
-      if (!contact || contact.status === 'churned') {
+      // Phase 14AQ — widen the suppression check beyond 'churned' to also
+      // skip unsubscribed, bounced, and rejected contacts. The list is
+      // sourced from src/lib/sequence-suppression.ts so the cron + the
+      // two queue-time entry points stay consistent.
+      if (!contact || isSuppressedContactStatus(contact.status)) {
         await supabase.from('sequence_queue').update({ status: 'skipped', sent_at: now }).eq('id', item.id)
         skipped++
         return

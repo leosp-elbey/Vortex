@@ -13,6 +13,7 @@ import { EMAIL_TEMPLATES } from '@/lib/email-templates'
 import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
 import { checkFormToken } from '@/lib/webhook-auth'
 import { bounded, WEBHOOK_BOUND_MS } from '@/lib/bounded-wait'
+import { isSuppressedContactStatus } from '@/lib/sequence-suppression'
 
 const LOG_PREFIX = '[lead-created]'
 
@@ -151,32 +152,46 @@ export async function POST(request: NextRequest) {
       console.error('Day 0 welcome email error:', emailErr)
     }
 
-    // Remaining nurture sequence (Day 1 welcome email sent directly above)
-    await bounded(
-      supabase.from('sequence_queue').insert([
-        // Day 2 — SMS follow-up
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
-        // Day 3 — email social proof
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
-        // Day 5 — email savings calculator
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
-        // Day 7 — SMS + email urgency
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
-        // Day 10 — email FAQ
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
-        // Day 12 — SMS last chance
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
-        // Day 14 — email breakup
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
-      ]),
-      WEBHOOK_BOUND_MS,
-      'nurture sequence_queue batch insert',
-      LOG_PREFIX,
-    )
+    // Phase 14AQ — queue-time suppression. The contact was just inserted
+    // above with status='lead' so this guard is effectively defensive
+    // (will only fire if the contact's status was set to a suppressed
+    // value during the same request — e.g., upstream caller passed
+    // status: 'churned' to re-enroll a known-bad lead). The cron at
+    // /api/cron/send-sequences also checks at send-time; this is the
+    // companion check at queue-time.
+    const nurtureSuppressed = isSuppressedContactStatus(contact.status)
 
-    // SBA sequence — send Day 1 welcome email immediately, queue the rest
-    if (enroll_sba) {
+    // Remaining nurture sequence (Day 1 welcome email sent directly above)
+    if (nurtureSuppressed) {
+      console.warn('[lead-created] queue-time suppression — skipping nurture sequence', { contact_id: contact.id, status: contact.status })
+    } else {
+      await bounded(
+        supabase.from('sequence_queue').insert([
+          // Day 2 — SMS follow-up
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
+          // Day 3 — email social proof
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
+          // Day 5 — email savings calculator
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
+          // Day 7 — SMS + email urgency
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
+          // Day 10 — email FAQ
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
+          // Day 12 — SMS last chance
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
+          // Day 14 — email breakup
+          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
+        ]),
+        WEBHOOK_BOUND_MS,
+        'nurture sequence_queue batch insert',
+        LOG_PREFIX,
+      )
+    }
+
+    // SBA sequence — send Day 1 welcome email immediately, queue the rest.
+    // Phase 14AQ — same queue-time suppression guard as the nurture branch.
+    if (enroll_sba && !nurtureSuppressed) {
       try {
         const { subject, html } = EMAIL_TEMPLATES.sbaDay1Email(first_name)
         await sendEmail({ to: email, subject, html })

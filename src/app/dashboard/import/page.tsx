@@ -165,7 +165,7 @@ export default function ImportPage() {
             source: r.source || 'import',
             notes: r.notes || undefined,
           })),
-          sequence: 'mlm-outreach',
+          sequence: 'sba-outreach',
         }),
       })
       const data = await res.json()
@@ -182,7 +182,7 @@ export default function ImportPage() {
     <div className="p-8 max-w-5xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-black text-[#1A1A2E]">Bulk Import Leads</h1>
-        <p className="text-gray-500 mt-1">Upload a CSV or Excel file of contacts — they&apos;ll be enrolled in the 6-month MLM email nurture sequence automatically.</p>
+        <p className="text-gray-500 mt-1">Upload a CSV or Excel file of contacts — they&apos;ll be enrolled in the 6-month SBA email nurture sequence automatically.</p>
       </div>
 
       {/* Template download hint */}
@@ -278,7 +278,7 @@ export default function ImportPage() {
             {result.inserted > 0 ? 'Import Complete' : 'Import Finished'}
           </h3>
           <div className="text-sm space-y-1">
-            <p><strong>{result.inserted}</strong> contacts imported and enrolled in 6-month MLM email sequence</p>
+            <p><strong>{result.inserted}</strong> contacts imported and enrolled in 6-month SBA email sequence</p>
             {result.skipped > 0 && <p className="text-gray-500"><strong>{result.skipped}</strong> duplicates skipped (email already in CRM)</p>}
             {result.errors.length > 0 && (
               <div className="mt-3">
