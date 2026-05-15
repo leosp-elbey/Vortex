@@ -1,6 +1,10 @@
 import Link from 'next/link'
 import Footer from '@/components/Footer'
 
+export const metadata = {
+  title: "Terms & Conditions — VortexTrips",
+}
+
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
@@ -10,7 +14,7 @@ export default function TermsPage() {
 
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-black text-[#1A1A2E] mb-4">Terms &amp; Conditions</h1>
-        <p className="text-gray-500 mb-10">Last updated: April 20, 2026</p>
+        <p className="text-gray-500 mb-10">Last updated: May 15, 2026</p>
 
         <div className="bg-white rounded-2xl shadow-sm p-8 space-y-8 text-gray-700 leading-relaxed">
 
@@ -21,7 +25,7 @@ export default function TermsPage() {
 
           <section>
             <h2 className="text-xl font-bold text-[#1A1A2E] mb-3">2. SMS / Text Messaging Program Terms</h2>
-            <p className="mb-3"><strong>Program Name:</strong> VortexTrips SMS Notifications</p>
+            <p className="mb-3"><strong>Program Name:</strong> VortexTrips SMS Program</p>
             <p className="mb-3"><strong>Program Description:</strong> By providing your mobile phone number and opting in to receive SMS messages from VortexTrips, you agree to receive recurring marketing, transactional, and account-related text messages, including but not limited to: account confirmation, scheduled travel consultation reminders, booking updates, support responses, and occasional travel deal notifications.</p>
             <p className="mb-3"><strong>How to Opt In:</strong> Opt in by entering your phone number on <a href="https://www.vortextrips.com" className="text-[#FF6B35] hover:underline">https://www.vortextrips.com</a> and checking the SMS consent box. Consent is not a condition of any purchase.</p>
             <p className="mb-3"><strong>How to Opt Out:</strong> Reply <strong>STOP</strong> to any message at any time to cancel. After replying STOP, you will receive a confirmation message and no further SMS messages will be sent unless you re-subscribe.</p>

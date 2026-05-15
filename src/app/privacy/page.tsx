@@ -1,6 +1,10 @@
 import Link from 'next/link'
 import Footer from '@/components/Footer'
 
+export const metadata = {
+  title: "Privacy Policy — VortexTrips",
+}
+
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-gray-50">
@@ -10,7 +14,7 @@ export default function PrivacyPage() {
 
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-black text-[#1A1A2E] mb-4">Privacy Policy</h1>
-        <p className="text-gray-500 mb-10">Last updated: April 20, 2026</p>
+        <p className="text-gray-500 mb-10">Last updated: May 15, 2026</p>
 
         <div className="bg-white rounded-2xl shadow-sm p-8 space-y-8 text-gray-700 leading-relaxed">
           <section>
