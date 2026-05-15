@@ -12,8 +12,14 @@ async function runHealthCheck(): Promise<EmailHealthReport | null> {
     const adminEmail = (process.env.ADMIN_NOTIFICATION_EMAIL ?? '').trim()
     if (!adminEmail) return report
 
-    if (report.verdict !== 'GREEN' && report.total >= 10) {
-      const subject = `${report.verdict === 'RED' ? '🔴' : '🟡'} VortexTrips Email Health: ${report.verdict} (${report.bounceRate.toFixed(1)}% bounce)`
+    // Phase 14AR — daily health report fires on ALL verdicts (including
+    // GREEN). Previously the YELLOW/RED-only condition meant the operator
+    // never saw a "system healthy" signal — silence was indistinguishable
+    // from a broken cron. `total >= 10` filter retained so we don't email
+    // a meaningless report on near-zero send volume.
+    if (report.total >= 10) {
+      const icon = report.verdict === 'RED' ? '🔴' : report.verdict === 'YELLOW' ? '🟡' : '✅'
+      const subject = `${icon} VortexTrips Email Health: ${report.verdict} (${report.bounceRate.toFixed(1)}% bounce)`
       await sendEmail({ to: adminEmail, subject, html: renderHealthEmailHTML(report) })
     }
     return report
@@ -89,6 +95,7 @@ export async function GET(request: NextRequest) {
 
           const templateFn = SMS_TEMPLATES[item.template_key as keyof typeof SMS_TEMPLATES]
           if (!templateFn) {
+            console.warn(`[send-sequences] Unknown template_key "${item.template_key}" for queue row ${item.id} — skipping`)
             await supabase.from('sequence_queue').update({ status: 'skipped' }).eq('id', item.id)
             skipped++
             return
@@ -112,6 +119,7 @@ export async function GET(request: NextRequest) {
 
           const templateFn = EMAIL_TEMPLATES[item.template_key as EmailTemplateKey]
           if (!templateFn) {
+            console.warn(`[send-sequences] Unknown template_key "${item.template_key}" for queue row ${item.id} — skipping`)
             await supabase.from('sequence_queue').update({ status: 'skipped' }).eq('id', item.id)
             skipped++
             return

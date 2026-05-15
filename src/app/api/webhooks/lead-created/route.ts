@@ -105,6 +105,19 @@ export async function POST(request: NextRequest) {
       LOG_PREFIX,
     )
 
+    // Phase 14AR — early suppression guard. If the contact was created with
+    // a status that means "do not contact" (churned, unsubscribed, bounced,
+    // rejected — e.g. an upstream caller re-importing a known-bad lead), we
+    // skip ALL outreach: Day-0 SMS, Day-1 welcome email, nurture queue, SBA
+    // enrollment, and the Bland.ai voice call. The contacts + opportunities
+    // rows above are still persisted for record-keeping. Replaces the
+    // partial queue-time guards from Phase 14AQ that only protected the
+    // queued nurture rows — the immediate Day-0 sends used to slip through.
+    if (isSuppressedContactStatus(contact.status)) {
+      console.warn('[lead-created] queue-time suppression — skipping all sends', { contact_id: contact.id, status: contact.status })
+      return NextResponse.json({ success: true, contactId: contact.id, suppressed: true })
+    }
+
     // Day 0 — SMS immediately. Bookkeeping bound for the sequence_queue
     // insert; the SMS send itself has its own internal client.
     if (phone) {
@@ -152,46 +165,39 @@ export async function POST(request: NextRequest) {
       console.error('Day 0 welcome email error:', emailErr)
     }
 
-    // Phase 14AQ — queue-time suppression. The contact was just inserted
-    // above with status='lead' so this guard is effectively defensive
-    // (will only fire if the contact's status was set to a suppressed
-    // value during the same request — e.g., upstream caller passed
-    // status: 'churned' to re-enroll a known-bad lead). The cron at
-    // /api/cron/send-sequences also checks at send-time; this is the
-    // companion check at queue-time.
-    const nurtureSuppressed = isSuppressedContactStatus(contact.status)
-
-    // Remaining nurture sequence (Day 1 welcome email sent directly above)
-    if (nurtureSuppressed) {
-      console.warn('[lead-created] queue-time suppression — skipping nurture sequence', { contact_id: contact.id, status: contact.status })
-    } else {
-      await bounded(
-        supabase.from('sequence_queue').insert([
-          // Day 2 — SMS follow-up
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
-          // Day 3 — email social proof
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
-          // Day 5 — email savings calculator
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
-          // Day 7 — SMS + email urgency
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
-          // Day 10 — email FAQ
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
-          // Day 12 — SMS last chance
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
-          // Day 14 — email breakup
-          { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
-        ]),
-        WEBHOOK_BOUND_MS,
-        'nurture sequence_queue batch insert',
-        LOG_PREFIX,
-      )
-    }
+    // Remaining nurture sequence (Day 1 welcome email sent directly above).
+    // Phase 14AR — the early suppression guard above already returns 200
+    // before reaching this point if the contact is suppressed, so the
+    // per-branch nurtureSuppressed flag from Phase 14AQ is no longer
+    // needed here.
+    await bounded(
+      supabase.from('sequence_queue').insert([
+        // Day 2 — SMS follow-up
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
+        // Day 3 — email social proof
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
+        // Day 5 — email savings calculator
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
+        // Day 7 — SMS + email urgency
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
+        // Day 10 — email FAQ
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
+        // Day 12 — SMS last chance
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
+        // Day 14 — email breakup
+        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
+      ]),
+      WEBHOOK_BOUND_MS,
+      'nurture sequence_queue batch insert',
+      LOG_PREFIX,
+    )
 
     // SBA sequence — send Day 1 welcome email immediately, queue the rest.
-    // Phase 14AQ — same queue-time suppression guard as the nurture branch.
-    if (enroll_sba && !nurtureSuppressed) {
+    // Phase 14AR — suppression is already enforced by the early-return
+    // guard above (right after the opportunities insert), so no extra
+    // suppression flag is needed here.
+    if (enroll_sba) {
       try {
         const { subject, html } = EMAIL_TEMPLATES.sbaDay1Email(first_name)
         await sendEmail({ to: email, subject, html })

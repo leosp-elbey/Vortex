@@ -1,5 +1,12 @@
 import { createAdminClient } from './supabase/admin'
 
+// Phase 14AR — fail-fast on missing credentials at module load. Previously
+// `process.env.BLAND_API_KEY!` was asserted non-null only at call time, which
+// surfaced a cryptic Bland 401 instead of a clear configuration error.
+if (!process.env.BLAND_API_KEY) {
+  throw new Error('[bland.ts] BLAND_API_KEY is not set — voice calls will not work')
+}
+
 interface BlandCallResult {
   callId: string
   status: string

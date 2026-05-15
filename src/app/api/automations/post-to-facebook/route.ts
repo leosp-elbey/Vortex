@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
+import { logMetaTokenHealth } from '@/lib/meta-token-healthcheck'
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID
 const PAGE_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
@@ -45,6 +46,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Phase 14AR — log token expiry to Vercel function logs before each
+    // post attempt. Fires non-blocking; never throws. Operator sees expiry
+    // approaching in the cron logs and can rotate before posts start
+    // failing with 401.
+    await logMetaTokenHealth(PAGE_TOKEN, 'facebook')
+
     const rawHashtags = (rawPost as unknown as { hashtags?: string[] | null }).hashtags
     const hashtags = rawHashtags?.map((h: string) => `#${h}`).join(' ') ?? ''
     const message = `${post.caption ?? ''}\n\n${hashtags}`.trim()
