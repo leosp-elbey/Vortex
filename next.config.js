@@ -54,6 +54,14 @@ const nextConfig = {
         source: '/v/p/:path*',
         destination: 'https://videos.pexels.com/video-files/:path*',
       },
+      {
+        // Phase 14AU — Supabase Storage proxy for legacy HeyGen-era TikTok
+        // videos (Phase 14L.2.2 pipeline). Same URL-ownership-via-verified-
+        // domain pattern as the Pexels /v/p/* rewrite above. Bucket is 'media'
+        // and the public path is content/tiktok/<filename>.
+        source: '/v/s/:path*',
+        destination: 'https://mufpiphjddpacbxlbpqi.supabase.co/storage/v1/object/public/media/content/tiktok/:path*',
+      },
     ]
   },
   images: {

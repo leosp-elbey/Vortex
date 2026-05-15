@@ -141,19 +141,31 @@ export function getTikTokClientSecret(): string {
 
 const PEXELS_VIDEO_HOST = 'videos.pexels.com'
 const PEXELS_VIDEO_PATH_PREFIX = '/video-files/'
-const PROXY_PATH_PREFIX = '/v/p/'
+const PEXELS_PROXY_PATH_PREFIX = '/v/p/'
+
+// Phase 14AU — Supabase Storage proxy for legacy HeyGen-era TikTok videos.
+// 26 approved TikTok rows still reference Supabase Storage URLs (Phase 14L.2.2
+// HeyGen pipeline, pre-Phase-14AG Pexels swap). Without this proxy they would
+// all fail TikTok's URL-ownership check on the next autoposter tick and flip
+// the kill switch back off. Path shape from the live DB:
+//   /storage/v1/object/public/media/content/tiktok/<filename>
+// matches the Supabase public-bucket URL convention (bucket = 'media',
+// path = 'content/tiktok/<id>-<hash>.mp4').
+const SUPABASE_STORAGE_HOST_SUFFIX = '.supabase.co'
+const SUPABASE_STORAGE_PATH_PREFIX = '/storage/v1/object/public/media/content/tiktok/'
+const SUPABASE_PROXY_PATH_PREFIX = '/v/s/'
 
 /**
  * Translate a video URL into a TikTok-compatible URL whose host is on
  * a domain we've registered with the TikTok Developer Portal.
  *
- * - If `videoUrl` is on `videos.pexels.com/video-files/...`, returns
- *   the equivalent `<APP_HOST>/v/p/...` URL that proxies through Vercel
- *   Edge.
- * - For any other URL (already on `vortextrips.com`, on
- *   Supabase Storage, etc.), returns the URL unchanged. TikTok will
- *   accept or reject based on whether that host is also registered;
- *   this helper doesn't second-guess.
+ * - Pexels CDN (`videos.pexels.com/video-files/...`) →
+ *   `<APP_HOST>/v/p/...` (Phase 14AO).
+ * - Supabase Storage (`*.supabase.co/storage/v1/object/public/media/content/tiktok/...`) →
+ *   `<APP_HOST>/v/s/...` (Phase 14AU).
+ * - For any other URL (already on `vortextrips.com`, etc.), returns the URL
+ *   unchanged. TikTok will accept or reject based on whether that host is
+ *   also registered; this helper doesn't second-guess.
  *
  * `appHostOverride` lets a caller pass an explicit host when
  * NEXT_PUBLIC_APP_URL isn't set (e.g., a CLI script). When omitted,
@@ -167,8 +179,6 @@ export function proxyVideoUrlForTikTok(videoUrl: string, appHostOverride?: strin
   } catch {
     return videoUrl
   }
-  if (parsed.hostname !== PEXELS_VIDEO_HOST) return videoUrl
-  if (!parsed.pathname.startsWith(PEXELS_VIDEO_PATH_PREFIX)) return videoUrl
 
   const appHost = (
     appHostOverride
@@ -176,8 +186,22 @@ export function proxyVideoUrlForTikTok(videoUrl: string, appHostOverride?: strin
     ?? 'https://www.vortextrips.com'
   ).replace(/\/+$/, '')
 
-  const tail = parsed.pathname.slice(PEXELS_VIDEO_PATH_PREFIX.length)
-  return `${appHost}${PROXY_PATH_PREFIX}${tail}${parsed.search}`
+  // Pexels CDN → /v/p/* proxy (Phase 14AO).
+  if (parsed.hostname === PEXELS_VIDEO_HOST && parsed.pathname.startsWith(PEXELS_VIDEO_PATH_PREFIX)) {
+    const tail = parsed.pathname.slice(PEXELS_VIDEO_PATH_PREFIX.length)
+    return `${appHost}${PEXELS_PROXY_PATH_PREFIX}${tail}${parsed.search}`
+  }
+
+  // Supabase Storage → /v/s/* proxy (Phase 14AU).
+  if (
+    parsed.hostname.endsWith(SUPABASE_STORAGE_HOST_SUFFIX) &&
+    parsed.pathname.startsWith(SUPABASE_STORAGE_PATH_PREFIX)
+  ) {
+    const tail = parsed.pathname.slice(SUPABASE_STORAGE_PATH_PREFIX.length)
+    return `${appHost}${SUPABASE_PROXY_PATH_PREFIX}${tail}${parsed.search}`
+  }
+
+  return videoUrl
 }
 
 /**
