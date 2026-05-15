@@ -22,11 +22,15 @@
 //   7. On non-2xx or no publish_id: leave the row intact, return 500/502
 //      with TikTok's error.
 //
+// Phase 14AQ.1 — first production post confirmed working 2026-05-14 with
+// account=Private + TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE. creator_info
+// returned only ['SELF_ONLY'] for the private account, the fallback at the
+// privacyLevel pick site (~line 200) selected SELF_ONLY, and TikTok accepted
+// the init. Once the Content Posting API product passes TikTok audit, flip
+// the account to public and posts will publish as PUBLIC_TO_EVERYONE without
+// any code change.
+//
 // What this route does NOT do (deliberate scope cuts):
-//   - Does NOT pre-query /v2/post/publish/creator_info/query/ for allowed
-//     privacy levels. We default to TIKTOK_PRIVACY_LEVEL (env var, default
-//     'SELF_ONLY') — the safest setting for an unaudited app. Operators
-//     flip to 'PUBLIC_TO_EVERYONE' once their TikTok app is fully audited.
 //   - Does NOT poll /v2/post/publish/status/fetch/. The init response is
 //     authoritative for "TikTok accepted the post." The actual download +
 //     processing happens server-side; if the URL is unreachable or the
