@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      first_name, last_name, email, phone, source = 'homepage',
+      first_name, last_name, email, phone, source = 'webhook',
       utm_source, utm_medium, utm_campaign,
       status = 'lead', sms_consent = false, enroll_sba = false,
       // Phase 14AT — dual A2P consent + interest dropdown from the

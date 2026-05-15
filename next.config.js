@@ -29,8 +29,8 @@ const nextConfig = {
   // TikTok's Content Posting API requires that any URL passed to its
   // /v2/post/publish/video/init/ endpoint with `source: 'PULL_FROM_URL'`
   // come from a domain registered + verified in the TikTok Developer
-  // Portal (we verified `www.vortextrips.com` via the file at
-  // `/.well-known/tiktok-developers-site-verification.txt`).
+  // Portal (we verified `www.vortextrips.com` via the HTML meta tag in
+  // src/app/layout.tsx + the root-level signature file under /public).
   //
   // Pre-14AO, the TikTok routes sent video URLs straight from Pexels'
   // CDN (`videos.pexels.com`) — TikTok rejected these with the
