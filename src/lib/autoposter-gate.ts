@@ -98,7 +98,13 @@ export interface AutoposterDryRunSummary {
 interface GetEligibleOptions {
   /** Cap how many candidate rows are scanned. Defaults to 100; never query more than 1000. */
   limit?: number
-  /** Optional platform filter (e.g. 'instagram'). When omitted, all platforms are scanned. */
+  /**
+   * Optional platform filter (e.g. 'instagram', 'youtube'). When omitted, all
+   * platforms are scanned. Phase 14AS — the new /api/cron/youtube-once cron
+   * passes `'youtube'` so it only sees YouTube rows; the existing
+   * /api/cron/autoposter-once still scans all platforms and filters at the
+   * route level via its SUPPORTED_PLATFORMS set.
+   */
   platform?: string
   /** Override the wall-clock anchor for tests. Default: new Date(). */
   now?: Date

@@ -47,8 +47,8 @@ Every external service that is actually called from `src/`. Verified by greping 
 | 8 | **OpenAI** | DALL-E image generation + GPT completions (lead scoring, content gen) | `src/lib/openai.ts`, `src/lib/media-providers.ts`, `src/app/api/dashboard/generate-content/route.ts` | API key (`OPENAI_API_KEY`) | ✅ |
 | 9 | **Pexels** | Stock travel images + videos (PULL_FROM_URL proxied through verified domain for TikTok) | `src/lib/media-providers.ts`, `src/app/api/dashboard/generate-content/route.ts` | API key (`PEXELS_API_KEY`) | ✅ |
 | 10 | **HeyGen** | AI avatar video generation for SBA campaign | `src/app/api/admin/generate-sba-video/route.ts`, `src/app/api/admin/sba-video-status/route.ts`, `src/app/api/cron/check-heygen-jobs/route.ts` | API key (`HEYGEN_API_KEY`) | 🟡 Admin-trigger only, polled by cron |
-| 11 | **YouTube Data API** | Upload videos to YouTube (built but unscheduled) | `src/app/api/auth/youtube/{route,callback}/route.ts`, `src/app/api/admin/upload-to-youtube/route.ts` | OAuth 2.0 (Google) | 💤 Built, no cron fires it |
-| 12 | **Google OAuth (oauth2.googleapis.com)** | YouTube auth handshake | `src/app/api/auth/youtube/callback/route.ts`, `src/app/api/admin/upload-to-youtube/route.ts` | Client ID + Secret | 💤 Same — only used during YouTube flows |
+| 11 | **YouTube Data API** | Upload videos to YouTube via resumable upload (manual button + daily cron) | `src/lib/youtube-oauth.ts`, `src/app/api/auth/youtube/{route,callback}/route.ts`, `src/app/api/admin/upload-to-youtube/route.ts`, `src/app/api/cron/youtube-once/route.ts` | OAuth 2.0 (Google), refresh-token stored in `site_settings.youtube_refresh_token` | ✅ Cron fires daily 12:00 UTC (Phase 14AS) — operator clones a TikTok row, sets platform='youtube', Marks Ready; cron picks it up |
+| 12 | **Google OAuth (oauth2.googleapis.com)** | YouTube access-token refresh on every upload | `src/lib/youtube-oauth.ts` (shared helper), `src/app/api/auth/youtube/callback/route.ts` (initial handshake) | Client ID + Secret | ✅ Used on every cron tick + every manual upload |
 | 13 | **OpenRouter** | (Was intended for multi-model routing) | — | env var present, never read in `src/` | 🔍 Not wired |
 | 14 | **Anthropic** | (Was intended for Claude API) | — | env var present, never read in `src/` (Anthropic SDK is imported in `src/lib/ai-models.ts` for metadata only) | 🔍 Not wired |
 | 15 | **Make.com** | — | — | — | 🔍 Not wired — no outbound calls to `*.make.com` anywhere in `src/`. If Make.com is part of the architecture, it must be a webhook *consumer* of our endpoints, not a service we call |
@@ -133,6 +133,8 @@ All crons defined in [vercel.json](vercel.json). Vercel Pro plan supports multip
 | `/api/cron/send-sequences` | `0 10 * * *` | Daily 10:00 | Drains pending `sequence_queue` rows (email + SMS), 50/tick in parallel chunks of 10. Includes inline email-health alert. | Bearer `CRON_SECRET` |
 | `/api/cron/score-and-branch` | `0 9 * * *` | Daily 09:00 | Re-scores contacts, branches inactive ones to suppressed status | Bearer `CRON_SECRET` |
 | `/api/cron/autoposter-once` | `0 14,18,22 * * *` | Daily 14:00 + 18:00 + 22:00 | Picks oldest eligible `content_calendar` row by `queued_for_posting_at`, dispatches to FB/IG/TikTok, atomic UPDATE on success | Bearer `CRON_SECRET` + kill-switch (`site_settings.autoposter_cron_enabled`) |
+| `/api/cron/check-heygen-jobs` | `0 11 * * *` | Daily 11:00 | Polls HeyGen for pending SBA video render; writes URL to `site_settings.sba_video_url` when complete | Bearer `CRON_SECRET` |
+| `/api/cron/youtube-once` | `0 12 * * *` | Daily 12:00 | YouTube auto-post — picks oldest eligible `platform='youtube'` row, resumable upload to YouTube, atomic UPDATE on success | Bearer `CRON_SECRET` + **separate** kill-switch (`site_settings.youtube_cron_enabled`) |
 
 **Cron-adjacent routes** (callable manually but not on a schedule):
 - `/api/cron/autoposter-dry-run` — dry-run sibling of `autoposter-once`
@@ -229,7 +231,7 @@ Derived from 34 migration files in `supabase/migrations/`. Row counts cannot be 
 | 4 | `content_calendar` | Scheduled social posts with `status` (draft/approved/posted/rejected), `posting_status` (idle/ready/blocked), `posting_gate_approved` flag, `media_metadata` JSONB | ✅ admin-only | `004` + `022,024,029,032,033` (additive columns) |
 | 5 | `admin_users` | Whitelist of operator UUIDs allowed to access admin routes | ✅ admin-only | `005_create_admin_users.sql` |
 | 6 | `sequence_queue` | Pending email + SMS sends with `sequence_name`, `step`, `channel`, `template_key`, `scheduled_at`, `status` | ✅ admin-only | `006_create_sequence_queue.sql` |
-| 7 | `site_settings` | Key-value store for TikTok tokens, autoposter kill-switch, etc. (`key` PK) | ✅ admin-only | `007_create_site_settings.sql` |
+| 7 | `site_settings` | Key-value store for TikTok tokens (`tiktok_*`), YouTube refresh token (`youtube_refresh_token`), HeyGen SBA video URL (`sba_video_url`), autoposter kill-switch (`autoposter_cron_enabled`), **YouTube cron kill-switch (`youtube_cron_enabled`, Phase 14AS)**, etc. (`key` PK) | ✅ admin-only | `007_create_site_settings.sql` |
 | 8 | `contact_events` | Event log (visits, clicks, conversions) with UTM fields | ✅ admin-only | `008` + `027` (UTM cols) |
 | 9 | `partners` | Affiliate / Surge365 partners reference data | ✅ admin-only | `009_create_partners.sql` |
 | 10 | `trips` | Trips reference data | ✅ admin-only | `010_create_trips.sql` |
@@ -341,7 +343,7 @@ These are commonly assumed parts of the stack that are **not actually wired in `
 | OpenRouter | 🔍 Not wired | `OPENROUTER_API_KEY` is in `.env.local` but never read. |
 | ManyChat | 🔍 Not built | Mentioned in `CLAUDE.md`. No code. |
 | Twitter/X auto-post | 🔍 Refused | Explicitly disabled in [autoposter-once/route.ts:77](src/app/api/cron/autoposter-once/route.ts#L77) (Phase 14Q). |
-| YouTube cron upload | 💤 Built but unscheduled | OAuth + upload route exist but no `vercel.json` cron fires them. Manual-only via dashboard. |
+| YouTube cron upload | ✅ Wired (Phase 14AS) | Daily 12:00 UTC at `/api/cron/youtube-once`. Separate kill switch `youtube_cron_enabled`. |
 | Daily email-health report to `leoelbey@gmail.com` | 🔍 Not built | `runHealthCheck()` inside `send-sequences` cron only fires on YELLOW/RED verdict to `ADMIN_NOTIFICATION_EMAIL` (env var). No unconditional daily report exists. |
 | Distributed rate limiter | 🔍 Not built | `src/lib/rate-limit.ts` is in-memory only — resets on Vercel cold-start. |
 | Bland.ai env-var presence check | 🔍 Not built | `BLAND_API_KEY` is asserted non-null at call time, fails late if missing. |

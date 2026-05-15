@@ -1,22 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getFreshAccessToken } from '@/lib/youtube-oauth'
 
-async function getFreshAccessToken(refreshToken: string): Promise<string> {
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: process.env.YOUTUBE_CLIENT_ID!,
-      client_secret: process.env.YOUTUBE_CLIENT_SECRET!,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  })
-  const data = await res.json()
-  if (!data.access_token) throw new Error('Failed to refresh YouTube access token')
-  return data.access_token
-}
+// Phase 14AS — getFreshAccessToken moved to src/lib/youtube-oauth.ts so the
+// new /api/cron/youtube-once route shares one source of truth for OAuth
+// refresh. Behavior is identical; error messages are slightly clearer.
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
