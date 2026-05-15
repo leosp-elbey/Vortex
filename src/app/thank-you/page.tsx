@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import AutoRedirect from '@/components/AutoRedirect'
 
 interface Props {
   searchParams: Promise<{ from?: string }>
@@ -10,8 +11,17 @@ export default async function ThankYouPage({ searchParams }: Props) {
   const isSBA = from === 'sba'
   const isQuote = from === 'quote'
 
+  // Phase 14AT — when the visit came from the homepage opt-in (the default
+  // 'lead' case — no explicit `from` query param), auto-forward to the
+  // /free redirect (next.config → https://myvortex365.com/leosp) after 3
+  // seconds. Keeps the thank-you page in the funnel for tracking + gives
+  // the user a moment to read the "Watch Your Phone" copy before bouncing
+  // to the partner portal. SBA and quote flows keep the static experience.
+  const shouldAutoRedirect = !isSBA && !isQuote
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1A1A2E] to-[#0F3460] flex flex-col">
+      {shouldAutoRedirect && <AutoRedirect to="https://vortextrips.com/free" delayMs={3000} />}
       <nav className="px-6 py-4">
         <Link href="/" className="text-2xl font-black text-white">Vortex<span className="text-[#FF6B35]">Trips</span></Link>
       </nav>

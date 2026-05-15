@@ -1,116 +1,29 @@
-'use client'
+// Phase 14AT — Homepage rebuild.
+//
+// Server component. The form state previously lived inline in this file
+// has been extracted to src/components/HomepageForm.tsx so this page can
+// be statically rendered + carry its own metadata block.
+//
+// Above-fold: NEW headline + subheadline + HomepageForm (4 required fields
+// + interest dropdown + 2 separate A2P-compliant SMS consent checkboxes).
+//
+// Below-fold: the new band (3 benefits + social-proof strip + secondary
+// /join CTA) sits between the hero and the legacy sections (How It Works,
+// Benefits grid, Testimonials, Destinations, Quiz CTA, Final CTA). All
+// legacy sections are preserved verbatim — they are content the rest of
+// the system feeds from (testimonial photos, destination links, etc.).
 
-import { useState } from 'react'
 import Link from 'next/link'
+import HomepageForm from '@/components/HomepageForm'
 import ExitIntent from '@/components/ExitIntent'
 import Footer from '@/components/Footer'
 
-interface LeadFormProps {
-  id: string
-  form: { first_name: string; email: string; phone: string; smsConsent: boolean }
-  loading: boolean
-  error: string
-  onChange: (field: string, value: string | boolean) => void
-  onSubmit: (e: React.FormEvent) => void
-}
-
-function LeadForm({ id, form, loading, error, onChange, onSubmit }: LeadFormProps) {
-  return (
-    <form onSubmit={onSubmit} id={id} className="space-y-4">
-      <input
-        type="text"
-        placeholder="First Name"
-        required
-        autoComplete="given-name"
-        value={form.first_name}
-        onChange={e => onChange('first_name', e.target.value)}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      <input
-        type="email"
-        placeholder="Email Address"
-        required
-        autoComplete="email"
-        value={form.email}
-        onChange={e => onChange('email', e.target.value)}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      <input
-        type="tel"
-        placeholder="Phone Number (required for SMS updates)"
-        autoComplete="tel"
-        required={form.smsConsent}
-        value={form.phone}
-        onChange={e => onChange('phone', e.target.value)}
-        className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-[#FF6B35]"
-      />
-      <p className="text-xs text-gray-400 -mt-2">Msg &amp; data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies.</p>
-      <label className="flex items-start gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={form.smsConsent}
-          onChange={e => onChange('smsConsent', e.target.checked)}
-          className="mt-0.5 flex-shrink-0 accent-[#FF6B35]"
-        />
-        <span className="text-xs text-gray-500">
-          By checking this box, I consent to receive recurring marketing and informational SMS messages from VortexTrips at the phone number provided. Consent is not a condition of purchase. Msg &amp; data rates may apply. Reply HELP for help, STOP to cancel. Message frequency varies. View our{' '}
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] underline">Privacy Policy</a> and{' '}
-          <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] underline">Terms</a>.
-        </span>
-      </label>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full bg-[#FF6B35] hover:bg-[#e55a25] text-white font-bold py-4 px-6 rounded-lg text-lg transition-all duration-200 disabled:opacity-60 shadow-lg hover:shadow-xl"
-      >
-        {loading ? 'Getting you in...' : 'Unlock Your Travel Savings →'}
-      </button>
-      <p className="text-xs text-center text-gray-500">No credit card required. Free to join. Cancel anytime.</p>
-    </form>
-  )
+export const metadata = {
+  title: 'VortexTrips — Search Member-Only Travel Prices',
+  description: 'Get free access to wholesale hotel, flight, and package rates. No credit card required.',
 }
 
 export default function LandingPage() {
-  const [form, setForm] = useState({ first_name: '', email: '', phone: '', smsConsent: false })
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleChange = (field: string, value: string | boolean) => {
-    setForm(f => ({ ...f, [field]: value }))
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-
-    try {
-      const res = await fetch('/api/webhooks/lead-created', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Vortex-Form-Token': process.env.NEXT_PUBLIC_FORM_TOKEN ?? '',
-        },
-        body: JSON.stringify({ ...form, source: 'landing-page' }),
-      })
-
-      if (!res.ok) {
-        const data = await res.json()
-        const msg = data.error === 'Email already registered'
-          ? "You're already in our system! Check your inbox or call us at support@vortextrips.com."
-          : data.error || 'Something went wrong'
-        throw new Error(msg)
-      }
-
-      window.location.href = 'https://myvortex365.com/leosp'
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div className="min-h-screen">
       {/* Nav */}
@@ -129,7 +42,7 @@ export default function LandingPage() {
         </a>
       </nav>
 
-      {/* Hero */}
+      {/* Hero — Phase 14AT new copy + new HomepageForm */}
       <section
         id="hero-form"
         className="relative text-white py-20 px-6"
@@ -141,13 +54,11 @@ export default function LandingPage() {
             <div className="inline-block bg-[#16C79A]/20 text-[#16C79A] text-sm font-semibold px-3 py-1 rounded-full mb-6">
               ✈️ Members save $1,200+ per trip on average
             </div>
-            <h1 className="text-5xl md:text-6xl font-black leading-tight mb-6">
-              Stop Overpaying.<br />
-              <span className="gradient-text">Save Up to 40-60%</span><br />
-              on Member Travel Rates.
+            <h1 className="text-4xl md:text-6xl font-black leading-tight mb-6">
+              Search Hotels, Flights &amp; Packages at <span className="gradient-text">Member-Only Prices</span>
             </h1>
             <p className="text-xl text-gray-300 mb-8 leading-relaxed">
-              VortexTrips gives you exclusive member-only rates on hotels, flights, and vacation packages — the same deals travel insiders have been using for years.
+              Get free access to wholesale travel rates. No credit card. No commitment.
             </p>
             <div className="flex flex-wrap gap-4 text-sm text-gray-400">
               {['✓ No blackout dates', '✓ 500,000+ hotels worldwide', '✓ AI-powered deal matching', '✓ Personal travel consultant'].map(item => (
@@ -157,30 +68,49 @@ export default function LandingPage() {
           </div>
 
           <div className="bg-white rounded-2xl p-8 shadow-2xl">
-            <h2 className="text-xl font-bold text-[#1A1A2E] mb-2">Unlock Your Travel Savings</h2>
-            <p className="text-gray-500 mb-4 text-sm">Drop your info — we&apos;ll set up your free savings account and call you in 60 seconds with your personalized rates.</p>
-            <LeadForm
-              id="hero-form"
-              form={form}
-              loading={loading}
-              error={error}
-              onChange={handleChange}
-              onSubmit={handleSubmit}
-            />
-            <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-gray-400 text-xs">or skip the call</span>
-              <div className="flex-1 h-px bg-gray-200" />
+            <h2 className="text-xl font-bold text-[#1A1A2E] mb-2">Start Saving for Free</h2>
+            <p className="text-gray-500 mb-4 text-sm">Drop your info — we&apos;ll set up your free savings account and call you within minutes with your personalized rates.</p>
+            <HomepageForm formId="hero-form-card" />
+          </div>
+        </div>
+      </section>
+
+      {/* Phase 14AT — NEW BAND: 3 benefits + social proof + secondary /join CTA */}
+      <section className="py-16 px-6 bg-white">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-10 mb-12">
+            <div className="text-center">
+              <div className="text-5xl mb-3" aria-hidden="true">✈️</div>
+              <h3 className="text-xl font-bold text-[#1A1A2E] mb-2">Member-Only Pricing</h3>
+              <p className="text-gray-500">Hotels up to 85% off retail.</p>
             </div>
-            <a
-              href="https://myvortex365.com/leosp"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full text-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl text-sm transition-all"
+            <div className="text-center">
+              <div className="text-5xl mb-3" aria-hidden="true">💰</div>
+              <h3 className="text-xl font-bold text-[#1A1A2E] mb-2">3 &amp; Free</h3>
+              <p className="text-gray-500">Refer 3 members and your monthly fee is waived.</p>
+            </div>
+            <div className="text-center">
+              <div className="text-5xl mb-3" aria-hidden="true">🌍</div>
+              <h3 className="text-xl font-bold text-[#1A1A2E] mb-2">Travel Anywhere</h3>
+              <p className="text-gray-500">Hotels, flights, packages, cruises worldwide.</p>
+            </div>
+          </div>
+
+          {/* Social proof strip */}
+          <div className="bg-gray-50 rounded-2xl py-6 px-8 text-center mb-10">
+            <p className="text-2xl text-[#FF6B35] mb-1" aria-label="5 out of 5 stars">⭐⭐⭐⭐⭐</p>
+            <p className="text-gray-700 font-semibold">Join 700+ members saving on every trip</p>
+          </div>
+
+          {/* Secondary CTA */}
+          <div className="text-center">
+            <p className="text-gray-500 mb-3">Already saving? Help others do the same.</p>
+            <Link
+              href="/join"
+              className="inline-block border-2 border-[#FF6B35] text-[#FF6B35] font-bold px-8 py-3 rounded-xl hover:bg-[#FF6B35] hover:text-white transition-colors"
             >
-              Create My Free Account Directly →
-            </a>
-            <p className="text-xs text-gray-400 mt-2 text-center">No credit card required.</p>
+              Join the Affiliate Program →
+            </Link>
           </div>
         </div>
       </section>
@@ -330,7 +260,7 @@ export default function LandingPage() {
       </section>
 
       {/* Final CTA */}
-      <section id="join" className="py-20 px-6 bg-[#1A1A2E]">
+      <section id="join-cta" className="py-20 px-6 bg-[#1A1A2E]">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-4xl font-black text-white mb-4">
             Start Saving for Free — Right Now
@@ -348,14 +278,7 @@ export default function LandingPage() {
           </a>
           <p className="text-gray-500 text-sm mb-10">or leave your info below and we&apos;ll call you in 60 seconds</p>
           <div className="bg-white rounded-2xl p-8">
-            <LeadForm
-              id="cta-form"
-              form={form}
-              loading={loading}
-              error={error}
-              onChange={handleChange}
-              onSubmit={handleSubmit}
-            />
+            <HomepageForm formId="cta-form" />
           </div>
           <div className="mt-8 pt-8 border-t border-white/10">
             <p className="text-gray-400 mb-4">Want to earn commissions sharing travel deals?</p>

@@ -41,9 +41,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      first_name, last_name, email, phone, source = 'landing-page',
+      first_name, last_name, email, phone, source = 'homepage',
       utm_source, utm_medium, utm_campaign,
       status = 'lead', sms_consent = false, enroll_sba = false,
+      // Phase 14AT — dual A2P consent + interest dropdown from the
+      // homepage rebuild. Persisted into contacts.custom_fields so the
+      // marketing path knows which consent was given. `interest` records
+      // the dropdown selection ('save' | 'earn' | 'both').
+      sms_transactional_consent = false,
+      sms_marketing_consent = false,
+      interest,
     } = body
 
     if (!first_name || !email) {
@@ -69,6 +76,13 @@ export async function POST(request: NextRequest) {
           custom_fields: {
             utm_source, utm_medium, utm_campaign,
             ...(sms_consent ? { sms_consent: 'true' } : {}),
+            // Phase 14AT — record each consent independently so future
+            // suppression / re-targeting code can branch on the exact
+            // consent path. Stored as string 'true' for parity with the
+            // legacy sms_consent shape.
+            ...(sms_transactional_consent ? { sms_transactional_consent: 'true' } : {}),
+            ...(sms_marketing_consent ? { sms_marketing_consent: 'true' } : {}),
+            ...(interest ? { interest: String(interest) } : {}),
           },
         })
         .select()
