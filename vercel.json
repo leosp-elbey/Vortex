@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "src/app/api/pilot/style-a/route.ts": {
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/weekly-content",
