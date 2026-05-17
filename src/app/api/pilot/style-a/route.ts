@@ -191,29 +191,198 @@ async function submitShotstackRender(edit: unknown, apiKey: string): Promise<str
  * Resolves with the rendered MP4 URL on `status === 'done'`.
  * Throws on `status === 'failed'` or when the 180s budget expires.
  */
-async function pollShotstackRender(renderId: string, apiKey: string): Promise<string> {
+async function pollShotstackRender(renderId: string, apiKey: string, runId: string): Promise<string> {
   const url = `${SHOTSTACK_SUBMIT_URL}/${renderId}`
   const startedAt = Date.now()
+  let attempt = 0
   while (Date.now() - startedAt < SHOTSTACK_POLL_TIMEOUT_MS) {
     await new Promise(resolve => setTimeout(resolve, SHOTSTACK_POLL_INTERVAL_MS))
+    attempt++
     const res = await fetch(url, { headers: { 'x-api-key': apiKey } })
     const data = (await res.json().catch(() => ({}))) as ShotstackStatusResponse
     if (!res.ok) {
       const detail = JSON.stringify(data).slice(0, 300)
+      console.error(`[pilot/style-a] poll runId=${runId} attempt=${attempt} HTTP ${res.status}: ${detail}`)
       throw new Error(`Shotstack poll failed: HTTP ${res.status}: ${detail}`)
     }
-    const status = (data.response?.status ?? '').toLowerCase()
-    if (status === 'done') {
+    const pollStatus = (data.response?.status ?? '').toLowerCase()
+    // Phase 15A.1 — per-poll visibility. First render timed out at 180s
+    // despite Shotstack completing in ~22s; logging each polled status
+    // surfaces silent fall-through when data.response is shaped oddly.
+    console.log(`[pilot/style-a] poll runId=${runId} attempt=${attempt} status=${pollStatus || '<missing>'}`)
+    if (pollStatus === 'done') {
       const finalUrl = data.response?.url
       if (!finalUrl) throw new Error('Shotstack reported done but returned no URL')
       return finalUrl
     }
-    if (status === 'failed') {
-      throw new Error(`Shotstack render failed: ${data.response?.error ?? 'unknown'}`)
+    if (pollStatus === 'failed') {
+      const errMsg = data.response?.error ?? 'unknown'
+      console.error(`[pilot/style-a] poll runId=${runId} attempt=${attempt} FAILED error=${errMsg}`)
+      throw new Error(`Shotstack render failed: ${errMsg}`)
     }
     // status is one of: queued | fetching | rendering | saving — keep polling.
   }
   throw new Error(`Shotstack poll timeout after ${SHOTSTACK_POLL_TIMEOUT_MS}ms`)
+}
+
+/**
+ * Phase 15A.1 — Build a per-beat title overlay using Shotstack `html` assets
+ * so we can ship readable TikTok-scale typography (the built-in `title` asset
+ * was unreadable at scroll speed in 15A's first render).
+ *
+ * Beat-specific layouts:
+ *   index 0 → big "$320/NIGHT" hook, no background card, drop shadow
+ *   index 2 → "Public price" + red strikethrough on $1,260/night
+ *   index 3 → "Member rate" + orange (#FF6B35) $320/night
+ *   index 7 → final CTA: orange "Link in bio →" + white "vortextrips.com"
+ *   default → generic dark-translucent card with white bold text (beats 2,5,6,7)
+ *
+ * Every clip carries `position: 'center'` at the clip level so the html
+ * frame sits in the middle of the 9:16 canvas. Scale is intentionally NOT
+ * set — Shotstack scales html assets via the `width`/`height` props on the
+ * asset itself.
+ */
+function buildTitleClipForBeat(b: Beat, index: number): Record<string, unknown> {
+  let asset: Record<string, unknown>
+
+  if (index === 0) {
+    // Beat 1 — opening hook, no background card.
+    asset = {
+      type: 'html',
+      html: `<div class="hook">$320<span class="unit">/NIGHT</span></div>`,
+      css: `
+        .hook {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 1000px;
+          color: #FFFFFF;
+          font-family: 'Arial Black', sans-serif;
+          font-weight: 900;
+          font-size: 220px;
+          letter-spacing: -4px;
+          text-shadow: 0px 6px 24px rgba(0,0,0,0.85);
+        }
+        .unit { font-size: 80px; letter-spacing: 0; margin-left: 12px; }
+      `,
+      width: 1080,
+      height: 500,
+      background: 'transparent',
+    }
+  } else if (index === 2) {
+    // Beat 3 — public price with red strikethrough.
+    asset = {
+      type: 'html',
+      html: `<div class="text-card"><div class="label">Public price:</div><div class="strike">$1,260/night</div></div>`,
+      css: `
+        .text-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 900px;
+          padding: 50px 50px;
+          background: rgba(26, 26, 46, 0.78);
+          color: #FFFFFF;
+          font-family: 'Arial Black', sans-serif;
+          font-weight: 900;
+          text-align: center;
+          border-radius: 20px;
+        }
+        .label { font-size: 70px; opacity: 0.85; margin-bottom: 16px; }
+        .strike { font-size: 130px; color: #E63946; text-decoration: line-through; text-decoration-thickness: 10px; }
+      `,
+      width: 1000,
+      height: 600,
+      background: 'transparent',
+    }
+  } else if (index === 3) {
+    // Beat 4 — member rate, orange.
+    asset = {
+      type: 'html',
+      html: `<div class="text-card"><div class="label">Member rate:</div><div class="price">$320/night</div></div>`,
+      css: `
+        .text-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 900px;
+          padding: 50px 50px;
+          background: rgba(26, 26, 46, 0.78);
+          color: #FFFFFF;
+          font-family: 'Arial Black', sans-serif;
+          font-weight: 900;
+          text-align: center;
+          border-radius: 20px;
+        }
+        .label { font-size: 70px; opacity: 0.85; margin-bottom: 16px; }
+        .price { font-size: 130px; color: #FF6B35; }
+      `,
+      width: 1000,
+      height: 600,
+      background: 'transparent',
+    }
+  } else if (index === 7) {
+    // Beat 8 — final CTA.
+    asset = {
+      type: 'html',
+      html: `<div class="cta"><div class="arrow">Link in bio →</div><div class="domain">vortextrips.com</div></div>`,
+      css: `
+        .cta {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 1000px;
+          color: #FFFFFF;
+          font-family: 'Arial Black', sans-serif;
+          font-weight: 900;
+          text-align: center;
+        }
+        .arrow { font-size: 110px; color: #FF6B35; margin-bottom: 30px; }
+        .domain { font-size: 90px; color: #FFFFFF; letter-spacing: -2px; }
+      `,
+      width: 1080,
+      height: 800,
+      background: 'transparent',
+    }
+  } else {
+    // Beats 2, 5, 6, 7 (indices 1, 4, 5, 6) — generic body card.
+    asset = {
+      type: 'html',
+      html: `<div class="text-card">${b.text.replace(/\n/g, '<br/>')}</div>`,
+      css: `
+        .text-card {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 900px;
+          padding: 40px 50px;
+          background: rgba(26, 26, 46, 0.75);
+          color: #FFFFFF;
+          font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+          font-weight: 900;
+          font-size: 100px;
+          line-height: 1.15;
+          text-align: center;
+          border-radius: 20px;
+          letter-spacing: -1px;
+        }
+      `,
+      width: 1000,
+      height: 600,
+      background: 'transparent',
+    }
+  }
+
+  return {
+    asset,
+    start: b.start,
+    length: b.length,
+    position: 'center',
+    transition: { in: 'fade', out: 'fade' },
+  }
 }
 
 /**
@@ -227,20 +396,7 @@ function buildShotstackEdit(
   pexelsUrls: Array<string | null>,
   voiceoverUrl: string,
 ): unknown {
-  const titleClips = BEATS.map(b => ({
-    asset: {
-      type: 'title',
-      text: b.text,
-      style: 'minimal',
-      color: b.start === 5.0 ? '#E63946' : (b.start === 8.0 ? '#FF6B35' : '#FFFFFF'),
-      size: (b.start === 0 || b.start === 19.5) ? 'x-large' : 'large',
-      background: 'transparent',
-      position: 'center',
-    },
-    start: b.start,
-    length: b.length,
-    transition: { in: 'fade', out: 'fade' },
-  }))
+  const titleClips = BEATS.map((b, i) => buildTitleClipForBeat(b, i))
 
   const audioClips = [{
     asset: { type: 'audio', src: voiceoverUrl, volume: 1 },
@@ -261,7 +417,9 @@ function buildShotstackEdit(
       asset: { type: 'video', src, volume: 0 },
       start: b.start,
       length: b.length,
-      fit: 'cover',
+      // Phase 15A.1 — `crop` enforces canvas fill on 9:16; `cover` was
+      // letterboxing landscape Pexels sources into the vertical canvas.
+      fit: 'crop',
       effect: videoClips.length % 2 === 0 ? 'zoomIn' : 'zoomOut',
     })
   }
@@ -277,6 +435,12 @@ function buildShotstackEdit(
     },
     output: {
       format: 'mp4',
+      // Phase 15A.1 — triple-redundancy to force 9:16 1080×1920 regardless
+      // of how Shotstack interprets defaults on the stage tier. First render
+      // came out 16:9 with only `size` set; `aspectRatio` + `resolution`
+      // belt-and-suspenders the vertical output.
+      aspectRatio: '9:16',
+      resolution: '1080',
       size: { width: 1080, height: 1920 },
       fps: 25,
     },
@@ -343,7 +507,7 @@ export async function POST(request: NextRequest) {
     // 6. Build the Shotstack Edit, submit, and poll until done.
     const edit = buildShotstackEdit(pexelsUrls, voiceoverUrl)
     const renderId = await submitShotstackRender(edit, shotstackKey)
-    const shotstackUrl = await pollShotstackRender(renderId, shotstackKey)
+    const shotstackUrl = await pollShotstackRender(renderId, shotstackKey, runId)
 
     // 7. Download the rendered MP4 once and re-upload to Supabase Storage
     //    so the asset is durable beyond Shotstack's stage retention window.
