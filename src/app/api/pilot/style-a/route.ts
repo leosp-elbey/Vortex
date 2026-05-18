@@ -48,10 +48,10 @@ interface Beat {
 }
 
 const BEATS: readonly Beat[] = [
-  { start: 0.0,  length: 2.5, query: 'luxury beach resort aerial drone',  text: '$320/NIGHT.',                          voiceover: 'Three twenty a night.' },
+  { start: 0.0,  length: 2.5, query: 'luxury beach resort aerial drone turquoise water', text: '$320/NIGHT.',                          voiceover: 'Three twenty a night.' },
   { start: 2.5,  length: 2.5, query: 'infinity pool ocean view tropical', text: '5-star resort.\nRiviera Maya.',         voiceover: 'Five star resort. Riviera Maya Mexico.' },
   { start: 5.0,  length: 3.0, query: 'luxury hotel lobby modern',         text: 'Public price:\n$1,260/night',           voiceover: 'Public price? Twelve sixty a night.' },
-  { start: 8.0,  length: 3.0, query: 'tropical suite balcony sunset',     text: 'Member rate:\n$320/night',              voiceover: 'Member rate? Three twenty.' },
+  { start: 8.0,  length: 3.0, query: 'luxury hotel suite interior modern bed', text: 'Member rate:\n$320/night',              voiceover: 'Member rate? Three twenty.' },
   { start: 11.0, length: 3.5, query: 'palm trees beach cocktail',         text: 'Same room.\nSame week.\nSame hotel.',   voiceover: 'Same room. Same week. Same hotel.' },
   { start: 14.5, length: 2.5, query: 'person walking tropical beach back',text: 'The difference?',                       voiceover: 'The only difference...' },
   { start: 17.0, length: 2.5, query: 'hands smartphone booking app',     text: 'Member access.',                        voiceover: 'Member access.' },
@@ -246,27 +246,39 @@ function buildTitleClipForBeat(b: Beat, index: number): Record<string, unknown> 
   let asset: Record<string, unknown>
 
   if (index === 0) {
-    // Beat 1 — opening hook, no background card.
+    // Beat 1 — opening hook. Phase 15A.2: wrapped in navy card so the hook
+    // is legible regardless of what B-roll happens to be behind it.
     asset = {
       type: 'html',
-      html: `<div class="hook">$320<span class="unit">/NIGHT</span></div>`,
+      html: `<div class="hook-card"><div class="hook">$320<span class="unit">/NIGHT</span></div></div>`,
       css: `
-        .hook {
+        .hook-card {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 1000px;
-          color: #FFFFFF;
-          font-family: 'Arial Black', sans-serif;
-          font-weight: 900;
-          font-size: 220px;
-          letter-spacing: -4px;
-          text-shadow: 0px 6px 24px rgba(0,0,0,0.85);
+          width: 980px;
+          padding: 60px 50px;
+          background: rgba(26, 26, 46, 0.80);
+          border-radius: 24px;
+          text-align: center;
         }
-        .unit { font-size: 80px; letter-spacing: 0; margin-left: 12px; }
+        .hook {
+          color: #FFFFFF;
+          font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+          font-weight: 900;
+          font-size: 200px;
+          letter-spacing: -4px;
+          line-height: 1;
+        }
+        .unit {
+          font-size: 80px;
+          letter-spacing: 0;
+          margin-left: 12px;
+          color: #FF6B35;
+        }
       `,
       width: 1080,
-      height: 500,
+      height: 600,
       background: 'transparent',
     }
   } else if (index === 2) {
@@ -324,27 +336,42 @@ function buildTitleClipForBeat(b: Beat, index: number): Record<string, unknown> 
       background: 'transparent',
     }
   } else if (index === 7) {
-    // Beat 8 — final CTA.
+    // Beat 8 — final CTA. Phase 15A.2: wrapped in navy card for consistency
+    // with the rest of the beats and so the CTA pops over any background.
     asset = {
       type: 'html',
-      html: `<div class="cta"><div class="arrow">Link in bio →</div><div class="domain">vortextrips.com</div></div>`,
+      html: `<div class="cta-card"><div class="arrow">Link in bio →</div><div class="domain">vortextrips.com</div></div>`,
       css: `
-        .cta {
+        .cta-card {
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          width: 1000px;
+          width: 980px;
+          padding: 50px 40px;
+          background: rgba(26, 26, 46, 0.85);
+          border-radius: 24px;
+          text-align: center;
+        }
+        .arrow {
+          color: #FF6B35;
+          font-family: 'Arial Black', sans-serif;
+          font-weight: 900;
+          font-size: 100px;
+          margin-bottom: 24px;
+          line-height: 1;
+        }
+        .domain {
           color: #FFFFFF;
           font-family: 'Arial Black', sans-serif;
           font-weight: 900;
-          text-align: center;
+          font-size: 78px;
+          letter-spacing: -2px;
+          line-height: 1;
         }
-        .arrow { font-size: 110px; color: #FF6B35; margin-bottom: 30px; }
-        .domain { font-size: 90px; color: #FFFFFF; letter-spacing: -2px; }
       `,
       width: 1080,
-      height: 800,
+      height: 600,
       background: 'transparent',
     }
   } else {
@@ -386,30 +413,98 @@ function buildTitleClipForBeat(b: Beat, index: number): Record<string, unknown> 
 }
 
 /**
- * Assemble the 3-track Shotstack timeline:
- *   Track 0 (top)    — title overlays (one per beat 1..8)
- *   Track 1 (middle) — single 22s voiceover audio clip
- *   Track 2 (bottom) — B-roll videos for beats 1..7 only (beat 8 left empty so
- *                      the timeline.background navy shows through)
+ * Phase 15A.2 — Probe an uploaded audio file via Shotstack's stage probe
+ * endpoint to recover its real duration in seconds. Returns null on any
+ * failure (HTTP error, malformed payload, non-numeric duration) so the
+ * caller can fall back to the static 22s scripted timing without aborting
+ * the render. Defensive across response-shape variants (duration may be a
+ * string OR number, may live under metadata.streams or top-level streams).
+ */
+async function probeShotstackAudio(audioUrl: string, apiKey: string, runId: string): Promise<number | null> {
+  try {
+    const probeUrl = `https://api.shotstack.io/edit/stage/probe/${encodeURIComponent(audioUrl)}`
+    const res = await fetch(probeUrl, { headers: { 'x-api-key': apiKey } })
+    if (!res.ok) {
+      console.warn(`[pilot/style-a] probe-failed runId=${runId} http=${res.status}`)
+      return null
+    }
+    const data = (await res.json().catch(() => null)) as {
+      response?: {
+        metadata?: { streams?: Array<{ duration?: number | string }>; format?: { duration?: number | string } }
+        streams?: Array<{ duration?: number | string }>
+      }
+    } | null
+    if (!data) {
+      console.warn(`[pilot/style-a] probe-failed runId=${runId} reason=no-json`)
+      return null
+    }
+    const rawDur =
+      data.response?.metadata?.streams?.[0]?.duration ??
+      data.response?.streams?.[0]?.duration ??
+      data.response?.metadata?.format?.duration
+    const dur = typeof rawDur === 'number' ? rawDur : (typeof rawDur === 'string' ? parseFloat(rawDur) : NaN)
+    if (!isFinite(dur) || dur <= 0) {
+      console.warn(`[pilot/style-a] probe-failed runId=${runId} reason=bad-duration raw=${String(rawDur)}`)
+      return null
+    }
+    return dur
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[pilot/style-a] probe-failed runId=${runId} reason=exception error=${message}`)
+    return null
+  }
+}
+
+/**
+ * Assemble the 3-track Shotstack timeline.
+ *
+ * Phase 15A.2 — accepts warped `beats` (start/length scaled to the actual
+ * voiceover duration so visuals stay in sync with audio) and the probed
+ * `voiceoverDurationSec` (so Track 1's audio clip length matches reality,
+ * not the scripted 22s). Track 0 (text overlays) uses the warped beats
+ * with each clip's length further shortened by 0.2s to leave a transition
+ * gap between cards — prevents the "two text boxes visible at once"
+ * artifact from 15A.1's overlapping fade in/out. Track 2 (B-roll) uses
+ * the unshortened warped beats so video fills the full timeline without
+ * navy flashes between cuts.
+ *
+ *   Track 0 (top)    — title overlays, one per beat 1..8, with 0.2s gaps
+ *   Track 1 (middle) — single voiceover audio clip at probed duration
+ *   Track 2 (bottom) — B-roll videos for beats 1..7 only (beat 8 query=null,
+ *                      timeline.background navy shows through that window)
  */
 function buildShotstackEdit(
   pexelsUrls: Array<string | null>,
   voiceoverUrl: string,
+  beats: readonly Beat[],
+  voiceoverDurationSec: number,
 ): unknown {
-  const titleClips = BEATS.map((b, i) => buildTitleClipForBeat(b, i))
+  // Phase 15A.2 — shorten each text clip by 0.2s to leave a visible gap
+  // between cards. Default Shotstack fade is ~0.5s, so without the gap the
+  // tail of beat N and the head of beat N+1 overlap. Clamp at a 0.8s floor
+  // so very short warped beats still get rendered.
+  const TEXT_GAP_SEC = 0.20
+  const textClipBeats: Beat[] = beats.map((b, i) => {
+    const next = beats[i + 1]
+    const nextStart = next ? next.start : (b.start + b.length)
+    const maxLength = nextStart - b.start - TEXT_GAP_SEC
+    return { ...b, length: Math.max(0.8, Math.min(b.length, maxLength)) }
+  })
+
+  const titleClips = textClipBeats.map((b, i) => buildTitleClipForBeat(b, i))
 
   const audioClips = [{
     asset: { type: 'audio', src: voiceoverUrl, volume: 1 },
     start: 0,
-    length: 22,
+    length: voiceoverDurationSec,
   }]
 
-  // Beat 8 has query=null → no video clip. Filter it out so Track 2 has 7
-  // clips covering 0-19.5s; the remaining 19.5-22s gap shows the timeline
-  // background (#1A1A2E) — that's the closing-card navy backdrop.
+  // Beat 8 has query=null → no video clip. Filter it out; the timeline
+  // background (#1A1A2E) shows through that window so the closing card has
+  // a clean navy backdrop.
   const videoClips: unknown[] = []
-  for (let i = 0; i < BEATS.length; i++) {
-    const b = BEATS[i]
+  for (let i = 0; i < beats.length; i++) {
+    const b = beats[i]
     if (b.query === null) continue
     const src = pexelsUrls[i]
     if (!src) continue
@@ -504,8 +599,28 @@ export async function POST(request: NextRequest) {
       return idx >= 0 ? (fetched[idx]?.videoUrl ?? null) : null
     })
 
-    // 6. Build the Shotstack Edit, submit, and poll until done.
-    const edit = buildShotstackEdit(pexelsUrls, voiceoverUrl)
+    // 6. Phase 15A.2 — probe the uploaded voiceover for actual duration so
+    //    we can warp the on-screen text + B-roll beats to match. Falls back
+    //    to the static 22s scripted timing on probe failure (probe helper
+    //    returns null on any error; never throws).
+    let voiceoverDurationSec = 22.0
+    let beats: readonly Beat[] = BEATS
+    const probed = await probeShotstackAudio(voiceoverUrl, shotstackKey, runId)
+    if (probed !== null) {
+      voiceoverDurationSec = probed
+      const warpFactor = voiceoverDurationSec / 22.0
+      beats = BEATS.map(b => ({
+        ...b,
+        start: +(b.start * warpFactor).toFixed(3),
+        length: +(b.length * warpFactor).toFixed(3),
+      }))
+      console.log(`[pilot/style-a] timing runId=${runId} voiceoverDuration=${voiceoverDurationSec}s warpFactor=${warpFactor.toFixed(3)}`)
+    } else {
+      console.warn(`[pilot/style-a] probe-failed runId=${runId} falling-back-to-static-timing`)
+    }
+
+    // 7. Build the Shotstack Edit, submit, and poll until done.
+    const edit = buildShotstackEdit(pexelsUrls, voiceoverUrl, beats, voiceoverDurationSec)
     const renderId = await submitShotstackRender(edit, shotstackKey)
     const shotstackUrl = await pollShotstackRender(renderId, shotstackKey, runId)
 
