@@ -122,7 +122,7 @@ export async function computeEmailHealth(
   let verdict: HealthVerdict
   let recommendedAction: string
 
-  if (total < 10) {
+  if (finalized < 10) {
     verdict = 'GREEN'
     recommendedAction = `Volume too low (${total}) for a confident verdict — defaulting to GREEN.`
   } else if (deliveryRate < 95 || bounceRate > 5 || complaintRate > 0.3) {
