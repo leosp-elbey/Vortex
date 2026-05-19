@@ -96,7 +96,7 @@ Every external service that is actually called from `src/`. Verified by greping 
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase browser/SSR | `src/lib/supabase/{client,server}.ts` | ✅ active |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase browser/SSR | `src/lib/supabase/{client,server}.ts` | ✅ active |
 | `OPENAI_API_KEY` | OpenAI | `src/lib/openai.ts:22,48`, `src/lib/media-providers.ts:227` | ✅ active |
-| `OPENROUTER_API_KEY` | OpenRouter (intended) | — | 🔍 orphan |
+| `OPENROUTER_API_KEY` | OpenRouter (AI routing) | `src/lib/ai-router.ts:140,182`, `src/app/api/admin/env-check/route.ts:9` | 💤 dormant-but-wired |
 | `PEXELS_API_KEY` | Pexels | `src/lib/media-providers.ts` | ✅ active |
 | `RESEND_API_KEY` | Resend | `src/lib/resend.ts:24`, `src/lib/email-health.ts:92` | ✅ active |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase admin client | `src/lib/supabase/admin.ts:6` | ✅ active |
@@ -113,13 +113,18 @@ Every external service that is actually called from `src/`. Verified by greping 
 
 **Also referenced in code but injected by Vercel (NOT in `.env.local`):** `NODE_ENV`, `VERCEL_ENV`, `VERCEL_URL`, `TIKTOK_USE_SANDBOX` (toggle, optional).
 
-**Orphans (in `.env.local` but never read in `src/`):**
+**Truly orphan** (in `.env.local`, ZERO references in `src/` — safe to delete from Vercel):
 - `FACEBOOK_APP_SECRET`
 - `NEXT_PUBLIC_FB_APP_ID`
 - `NEXT_PUBLIC_FB_LOGIN_CONFIG_ID`
-- `OPENROUTER_API_KEY`
-- `ANTHROPIC_API_KEY` (only referenced as metadata, no fetch)
-- `TIKTOK_CLIENT_KEY_SANDBOX`, `TIKTOK_CLIENT_SECRET_SANDBOX` (toggle is off in production)
+
+**Dormant but wired** (referenced by inactive code paths — **DO NOT delete**; removing breaks future activation):
+- `OPENROUTER_API_KEY` — referenced by [src/lib/ai-router.ts:140,182](src/lib/ai-router.ts#L140) and [src/app/api/admin/env-check/route.ts:9](src/app/api/admin/env-check/route.ts#L9). Code path is currently inactive but expects the env var to exist.
+- `TIKTOK_CLIENT_KEY_SANDBOX` — referenced by [src/lib/tiktok-oauth.ts:107,225](src/lib/tiktok-oauth.ts#L107) and [src/app/api/auth/tiktok/login/route.ts:64](src/app/api/auth/tiktok/login/route.ts#L64). Gated behind `TIKTOK_USE_SANDBOX` toggle (currently `false` in production).
+- `TIKTOK_CLIENT_SECRET_SANDBOX` — referenced by [src/lib/tiktok-oauth.ts:114,267](src/lib/tiktok-oauth.ts#L114). Same sandbox gating.
+- `ANTHROPIC_API_KEY` — referenced as SDK metadata only in [src/lib/ai-models.ts:14](src/lib/ai-models.ts#L14) (no fetch call). Kept for future Anthropic integration.
+
+> **Distinction:** *orphan* = zero references anywhere in `src/`. *Dormant-but-wired* = referenced by inactive code paths; removing the env var would break the dormant path the moment it activates.
 
 ---
 
@@ -340,7 +345,7 @@ These are commonly assumed parts of the stack that are **not actually wired in `
 | Make.com | 🔍 Not wired | No outbound calls anywhere. If Make.com is used, it's calling our webhooks, not us calling Make. |
 | GoHighLevel API | 🔍 Not wired | Only mentioned in `CLAUDE.md`. Our `/api/webhooks/lead-created` is *consumable* by GHL, but we don't call GHL. |
 | Anthropic Claude API | 🔍 Not wired | `ANTHROPIC_API_KEY` is in `.env.local` but only used for SDK metadata in `src/lib/ai-models.ts:14`. No actual Anthropic completion calls in `src/`. |
-| OpenRouter | 🔍 Not wired | `OPENROUTER_API_KEY` is in `.env.local` but never read. |
+| OpenRouter | 💤 Dormant but wired | `OPENROUTER_API_KEY` is referenced by `src/lib/ai-router.ts` (lines 140, 182) but no caller currently exercises the path. Env var must remain set for the dormant code path to typecheck. |
 | ManyChat | 🔍 Not built | Mentioned in `CLAUDE.md`. No code. |
 | Twitter/X auto-post | 🔍 Refused | Explicitly disabled in [autoposter-once/route.ts:77](src/app/api/cron/autoposter-once/route.ts#L77) (Phase 14Q). |
 | YouTube cron upload | ✅ Wired (Phase 14AS) | Daily 12:00 UTC at `/api/cron/youtube-once`. Separate kill switch `youtube_cron_enabled`. |
