@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { Icon } from '@/components/Icon'
 
 interface Review {
   id: string
@@ -150,7 +151,11 @@ export default function ReviewsPage() {
                     </div>
                   )}
                 </div>
-                <div className="text-[#FF6B35] mb-2">{'⭐'.repeat(r.rating)}</div>
+                <div className="flex gap-0.5 text-[#FF6B35] mb-2" role="img" aria-label={`Rated ${r.rating} out of 5 stars`}>
+                  {Array.from({ length: r.rating }, (_, i) => (
+                    <Icon key={i} name="star" className="w-4 h-4" />
+                  ))}
+                </div>
                 <p className="text-gray-600 text-sm italic">&quot;{r.review_text}&quot;</p>
               </div>
             ))}
@@ -164,7 +169,9 @@ export default function ReviewsPage() {
 
           {submitted ? (
             <div className="text-center py-8">
-              <div className="text-5xl mb-4">🎉</div>
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#16C79A]/15">
+                <Icon name="sparkles" className="h-8 w-8 text-[#16C79A]" />
+              </div>
               <h3 className="text-xl font-bold text-[#1A1A2E] mb-2">Thank you, {form.first_name}!</h3>
               <p className="text-gray-500">Your review has been submitted and will appear after a quick review by our team.</p>
             </div>

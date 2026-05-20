@@ -20,35 +20,11 @@ import Link from 'next/link'
 import HomepageForm from '@/components/HomepageForm'
 import ExitIntent from '@/components/ExitIntent'
 import Footer from '@/components/Footer'
-import { Icon, Stars, type IconName } from '@/components/Icon'
+import { Icon, Stars, IconTile } from '@/components/Icon'
 
 export const metadata = {
   title: 'VortexTrips — Search Member-Only Travel Prices',
   description: 'Get free access to wholesale hotel, flight, and package rates. No credit card required.',
-}
-
-// Brand-tinted icon tile used across the benefit sections.
-function IconTile({
-  name,
-  tone,
-  className = '',
-}: {
-  name: IconName
-  tone: 'orange' | 'teal' | 'navy'
-  className?: string
-}) {
-  const tones = {
-    orange: 'bg-[#FF6B35]/10 text-[#FF6B35]',
-    teal: 'bg-[#16C79A]/10 text-[#16C79A]',
-    navy: 'bg-[#1A1A2E]/10 text-[#1A1A2E]',
-  }
-  return (
-    <div
-      className={`flex items-center justify-center rounded-2xl ${tones[tone]} ${className}`}
-    >
-      <Icon name={name} className="w-7 h-7" />
-    </div>
-  )
 }
 
 export default function LandingPage() {

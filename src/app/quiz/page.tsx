@@ -3,56 +3,64 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Icon, type IconName } from '@/components/Icon'
 
-const QUESTIONS = [
+interface QuizOption {
+  value: string
+  label: string
+  desc: string
+  icon: IconName
+}
+
+const QUESTIONS: { id: string; question: string; options: QuizOption[] }[] = [
   {
     id: 'traveler_type',
     question: 'What kind of traveler are you?',
     options: [
-      { value: 'beach', label: '🏖️ Beach & relaxation', desc: 'Sun, sand, and zero plans' },
-      { value: 'adventure', label: '🧗 Adventure & outdoors', desc: 'Hikes, excursions, and experiences' },
-      { value: 'culture', label: '🏛️ Culture & city explorer', desc: 'Museums, food, and local life' },
-      { value: 'luxury', label: '💎 Luxury & indulgence', desc: 'Fine dining, spas, and 5-star stays' },
+      { value: 'beach', icon: 'umbrella', label: 'Beach & relaxation', desc: 'Sun, sand, and zero plans' },
+      { value: 'adventure', icon: 'mountain', label: 'Adventure & outdoors', desc: 'Hikes, excursions, and experiences' },
+      { value: 'culture', icon: 'landmark', label: 'Culture & city explorer', desc: 'Museums, food, and local life' },
+      { value: 'luxury', icon: 'gem', label: 'Luxury & indulgence', desc: 'Fine dining, spas, and 5-star stays' },
     ],
   },
   {
     id: 'travel_frequency',
     question: 'How often do you travel per year?',
     options: [
-      { value: '1', label: '✈️ Once a year', desc: 'One big trip annually' },
-      { value: '2-3', label: '✈️✈️ 2–3 times', desc: 'A few getaways a year' },
-      { value: '4+', label: '🌍 4+ times', desc: 'Frequent traveler' },
-      { value: 'planning', label: '📅 Planning my first trip', desc: 'Just getting started' },
+      { value: '1', icon: 'plane', label: 'Once a year', desc: 'One big trip annually' },
+      { value: '2-3', icon: 'plane', label: '2–3 times', desc: 'A few getaways a year' },
+      { value: '4+', icon: 'globe', label: '4+ times', desc: 'Frequent traveler' },
+      { value: 'planning', icon: 'calendar', label: 'Planning my first trip', desc: 'Just getting started' },
     ],
   },
   {
     id: 'group_type',
     question: 'Who do you usually travel with?',
     options: [
-      { value: 'solo', label: '🧍 Solo', desc: 'Just me' },
-      { value: 'couple', label: '👫 Partner / couple', desc: 'Romantic getaways' },
-      { value: 'family', label: '👨‍👩‍👧‍👦 Family', desc: 'Kids in tow' },
-      { value: 'friends', label: '👯 Friends / group', desc: 'Group trips' },
+      { value: 'solo', icon: 'user', label: 'Solo', desc: 'Just me' },
+      { value: 'couple', icon: 'users', label: 'Partner / couple', desc: 'Romantic getaways' },
+      { value: 'family', icon: 'users', label: 'Family', desc: 'Kids in tow' },
+      { value: 'friends', icon: 'users', label: 'Friends / group', desc: 'Group trips' },
     ],
   },
   {
     id: 'budget_range',
     question: 'What\'s your typical trip budget?',
     options: [
-      { value: 'under-1k', label: '💵 Under $1,000', desc: 'Budget-conscious' },
-      { value: '1k-3k', label: '💵💵 $1,000–$3,000', desc: 'Mid-range' },
-      { value: '3k-7k', label: '💵💵💵 $3,000–$7,000', desc: 'Comfortable spend' },
-      { value: '7k+', label: '💎 $7,000+', desc: 'No limits on a great trip' },
+      { value: 'under-1k', icon: 'tag', label: 'Under $1,000', desc: 'Budget-conscious' },
+      { value: '1k-3k', icon: 'tag', label: '$1,000–$3,000', desc: 'Mid-range' },
+      { value: '3k-7k', icon: 'tag', label: '$3,000–$7,000', desc: 'Comfortable spend' },
+      { value: '7k+', icon: 'gem', label: '$7,000+', desc: 'No limits on a great trip' },
     ],
   },
   {
     id: 'top_destination',
     question: 'Where\'s your dream next trip?',
     options: [
-      { value: 'cancun', label: '🌴 Cancún / Caribbean', desc: 'Beach paradise' },
-      { value: 'europe', label: '🗼 Europe', desc: 'Paris, Rome, London...' },
-      { value: 'vegas', label: '🎰 Las Vegas', desc: 'Entertainment capital' },
-      { value: 'other', label: '🌍 Somewhere else', desc: 'I have a specific destination' },
+      { value: 'cancun', icon: 'umbrella', label: 'Cancún / Caribbean', desc: 'Beach paradise' },
+      { value: 'europe', icon: 'landmark', label: 'Europe', desc: 'Paris, Rome, London...' },
+      { value: 'vegas', icon: 'star', label: 'Las Vegas', desc: 'Entertainment capital' },
+      { value: 'other', icon: 'globe', label: 'Somewhere else', desc: 'I have a specific destination' },
     ],
   },
 ]
@@ -153,9 +161,11 @@ export default function QuizPage() {
                   <button key={opt.value} onClick={() => handleAnswer(opt.value)}
                     className="w-full text-left bg-white/10 hover:bg-white/20 border border-white/20 hover:border-[#FF6B35] rounded-xl p-4 transition-all group">
                     <div className="flex items-center gap-3">
-                      <span className="text-lg">{opt.label.split(' ')[0]}</span>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#FF6B35]/15 text-[#FF6B35] transition-colors group-hover:bg-[#FF6B35]/25">
+                        <Icon name={opt.icon} className="h-5 w-5" />
+                      </span>
                       <div>
-                        <p className="text-white font-semibold">{opt.label.substring(opt.label.indexOf(' ') + 1)}</p>
+                        <p className="text-white font-semibold">{opt.label}</p>
                         <p className="text-gray-400 text-sm">{opt.desc}</p>
                       </div>
                     </div>
@@ -166,7 +176,9 @@ export default function QuizPage() {
           ) : (
             <div>
               <div className="text-center mb-8">
-                <div className="text-5xl mb-4">🎯</div>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#FF6B35]/15">
+                  <Icon name="target" className="h-8 w-8 text-[#FF6B35]" />
+                </div>
                 <h2 className="text-3xl font-black text-white mb-3">{resultData?.title}</h2>
                 <p className="text-gray-300 leading-relaxed">{resultData?.desc}</p>
               </div>

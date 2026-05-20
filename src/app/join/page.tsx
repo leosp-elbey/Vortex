@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { Icon } from '@/components/Icon'
 
 export default function JoinPage() {
   const [submitted] = useState(false)
@@ -45,7 +46,7 @@ export default function JoinPage() {
                 'Cancel anytime',
               ].map(benefit => (
                 <div key={benefit} className="flex items-center gap-3">
-                  <span className="text-[#16C79A] font-bold">✓</span>
+                  <Icon name="check" className="w-4 h-4 text-[#16C79A] shrink-0" />
                   <span className="text-gray-700 text-sm">{benefit}</span>
                 </div>
               ))}
@@ -111,7 +112,10 @@ export default function JoinPage() {
             </div>
 
             <div className="bg-[#1A1A2E] rounded-xl p-6 text-white">
-              <p className="text-[#16C79A] font-semibold mb-2">🛡️ 30-Day Money-Back Guarantee</p>
+              <p className="flex items-center gap-2 text-[#16C79A] font-semibold mb-2">
+                <Icon name="shield" className="w-5 h-5 shrink-0" />
+                30-Day Money-Back Guarantee
+              </p>
               <p className="text-gray-300 text-sm">
                 If you don&apos;t save more than your membership cost on your first trip within 30 days, we&apos;ll refund you — no questions asked.
               </p>

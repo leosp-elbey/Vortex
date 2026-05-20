@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import ExitIntent from '@/components/ExitIntent'
+import { Icon } from '@/components/Icon'
 
 const EARNINGS = [
   { role: 'Part-Time Affiliate', monthly: '$400 – $1,200', how: '3–8 referrals/month' },
@@ -74,7 +75,9 @@ export default function SBAPage() {
     return (
       <div className="min-h-screen bg-[#1A1A2E] flex items-center justify-center px-4">
         <div className="max-w-lg text-center">
-          <div className="text-6xl mb-6">🎉</div>
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-[#FF6B35]/20">
+            <Icon name="sparkles" className="h-10 w-10 text-[#FF6B35]" />
+          </div>
           <h1 className="text-3xl font-black text-white mb-4">You&apos;re In — Check Your Inbox</h1>
           <p className="text-gray-300 text-lg mb-8">
             We just sent your SBA welcome package with your affiliate links, marketing kit, and first commission tips.
@@ -142,7 +145,7 @@ export default function SBAPage() {
             rel="noopener noreferrer"
             className="group bg-gradient-to-br from-[#FF6B35] to-orange-700 rounded-2xl p-8 hover:scale-[1.02] transition-transform shadow-xl shadow-orange-900/30"
           >
-            <div className="text-5xl mb-4">🎬</div>
+            <Icon name="play" className="w-12 h-12 mb-4" />
             <h3 className="text-xl font-bold mb-2">Opportunity Video</h3>
             <p className="text-white/90 text-sm leading-relaxed mb-4">Why this exists and who it&apos;s for. The 5-minute company overview every prospect should watch.</p>
             <span className="inline-flex items-center gap-2 font-semibold text-sm group-hover:gap-3 transition-all">
@@ -155,7 +158,7 @@ export default function SBAPage() {
             rel="noopener noreferrer"
             className="group bg-gradient-to-br from-[#1A1A2E] to-slate-900 border border-white/10 rounded-2xl p-8 hover:scale-[1.02] transition-transform shadow-xl"
           >
-            <div className="text-5xl mb-4">📊</div>
+            <Icon name="bar-chart" className="w-12 h-12 mb-4 text-[#FF6B35]" />
             <h3 className="text-xl font-bold mb-2">Powerline Video</h3>
             <p className="text-gray-300 text-sm leading-relaxed mb-4">How the comp plan actually works. See exactly how affiliates earn from referrals and team building.</p>
             <span className="inline-flex items-center gap-2 font-semibold text-[#FF6B35] text-sm group-hover:gap-3 transition-all">
@@ -171,12 +174,14 @@ export default function SBAPage() {
           <h2 className="text-3xl font-black text-center mb-12">Why Travel Beats Every Other Affiliate Product</h2>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { icon: '✈️', title: 'Everyone Already Travels', body: '92% of Americans travel at least once a year. You don\'t need to create demand — you just connect people to better prices.' },
-              { icon: '💰', title: 'The Savings Are Obvious', body: 'When someone sees $4,200 for a hotel and you show them the same room for $1,100 through our portal, the sale is basically done.' },
-              { icon: '🔄', title: 'Repeat Business Built In', body: 'Members travel multiple times a year. Every trip is another commission. Every satisfied member tells 3 friends.' },
+              { icon: 'plane' as const, title: 'Everyone Already Travels', body: '92% of Americans travel at least once a year. You don\'t need to create demand — you just connect people to better prices.' },
+              { icon: 'tag' as const, title: 'The Savings Are Obvious', body: 'When someone sees $4,200 for a hotel and you show them the same room for $1,100 through our portal, the sale is basically done.' },
+              { icon: 'repeat' as const, title: 'Repeat Business Built In', body: 'Members travel multiple times a year. Every trip is another commission. Every satisfied member tells 3 friends.' },
             ].map(card => (
               <div key={card.title} className="bg-white/10 rounded-2xl p-8">
-                <div className="text-4xl mb-4">{card.icon}</div>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#FF6B35]/15 text-[#FF6B35]">
+                  <Icon name={card.icon} className="h-6 w-6" />
+                </div>
                 <h3 className="font-bold text-xl mb-3">{card.title}</h3>
                 <p className="text-gray-300 leading-relaxed">{card.body}</p>
               </div>
@@ -218,15 +223,17 @@ export default function SBAPage() {
           <h2 className="text-3xl font-black text-center mb-12">Everything You Need to Succeed</h2>
           <div className="grid md:grid-cols-2 gap-6">
             {[
-              { icon: '🔗', title: 'Personal Booking Portal', body: 'Your own branded link — members you refer book directly through your portal.' },
-              { icon: '🤖', title: 'AI Follow-Up System', body: 'Our AI follows up with your leads via email and text so you don\'t have to chase anyone.' },
-              { icon: '📱', title: 'Social Media Templates', body: 'Ready-to-post captions, images, and video scripts — post and earn.' },
-              { icon: '📊', title: 'Real-Time Dashboard', body: 'Track your referrals, commissions, and team growth from your phone.' },
-              { icon: '🎓', title: 'Training & Onboarding', body: 'Step-by-step affiliate training delivered to your inbox the day you join.' },
-              { icon: '💬', title: 'Support Community', body: 'Private group with top affiliates sharing strategies, wins, and travel tips.' },
+              { icon: 'link' as const, title: 'Personal Booking Portal', body: 'Your own branded link — members you refer book directly through your portal.' },
+              { icon: 'sparkles' as const, title: 'AI Follow-Up System', body: 'Our AI follows up with your leads via email and text so you don\'t have to chase anyone.' },
+              { icon: 'smartphone' as const, title: 'Social Media Templates', body: 'Ready-to-post captions, images, and video scripts — post and earn.' },
+              { icon: 'bar-chart' as const, title: 'Real-Time Dashboard', body: 'Track your referrals, commissions, and team growth from your phone.' },
+              { icon: 'graduation-cap' as const, title: 'Training & Onboarding', body: 'Step-by-step affiliate training delivered to your inbox the day you join.' },
+              { icon: 'message-circle' as const, title: 'Support Community', body: 'Private group with top affiliates sharing strategies, wins, and travel tips.' },
             ].map(item => (
               <div key={item.title} className="flex gap-4 bg-white/10 rounded-xl p-6">
-                <span className="text-3xl flex-shrink-0">{item.icon}</span>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#FF6B35]/15 text-[#FF6B35]">
+                  <Icon name={item.icon} className="h-6 w-6" />
+                </div>
                 <div>
                   <h3 className="font-bold text-lg mb-1">{item.title}</h3>
                   <p className="text-gray-300 text-sm leading-relaxed">{item.body}</p>

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import AutoRedirect from '@/components/AutoRedirect'
+import { Icon } from '@/components/Icon'
 
 interface Props {
   searchParams: Promise<{ from?: string }>
@@ -28,7 +29,12 @@ export default async function ThankYouPage({ searchParams }: Props) {
 
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="max-w-xl text-center">
-          <div className="text-6xl mb-6">{isSBA ? '🎉' : '📞'}</div>
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-[#FF6B35]/15">
+            <Icon
+              name={isSBA ? 'sparkles' : isQuote ? 'mail' : 'phone'}
+              className="h-10 w-10 text-[#FF6B35]"
+            />
+          </div>
 
           <h1 className="text-4xl font-black text-white mb-4">
             {isSBA
@@ -79,9 +85,10 @@ export default async function ThankYouPage({ searchParams }: Props) {
               href="https://myvortex365.com/leosp"
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-[#16C79A] text-white font-black px-6 py-4 rounded-xl hover:bg-emerald-500 transition-colors text-center text-lg"
+              className="inline-flex items-center justify-center gap-2 bg-[#16C79A] text-white font-black px-6 py-4 rounded-xl hover:bg-emerald-500 transition-colors text-center text-lg"
             >
-              ✅ Create My Free Savings Account →
+              <Icon name="check" className="w-5 h-5 shrink-0" />
+              Create My Free Savings Account →
             </a>
             <a
               href="/go"
