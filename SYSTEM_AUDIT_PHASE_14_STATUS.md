@@ -162,7 +162,7 @@ All four require `Authorization: Bearer ${CRON_SECRET}`. Event-research failure 
 7. **Manually exercise `Verify with Claude` end-to-end** on a real `ai_jobs` row to confirm an `ai_verification_logs` insert. Last verified 2026-04-29.
 
 ### Low priority
-8. Prune unused Vercel env vars (`NEXT_PUBLIC_FB_APP_ID`, `NEXT_PUBLIC_FB_LOGIN_CONFIG_ID`, `FACEBOOK_APP_SECRET`, `TIKTOK_*`, three unused Twitter vars, all `STRIPE_*`).
+8. Prune unused Vercel env vars (`TIKTOK_*`, three unused Twitter vars, all `STRIPE_*`).
 9. Add `UNIQUE(lower(event_name), event_year, lower(destination_city))` to `event_campaigns` to back up the app-level dedup. Currently a race-window of < 1ms exists.
 10. Build `src/lib/social-specs.ts` (Phase 14G prerequisite) to centralize per-platform image/video sizing.
 11. Restore the lost `typecheck` script alias note in CLAUDE memory; `package.json` already has it but the `KNOWN ISSUE` text in `PROJECT_STATE_CURRENT.md` line 92 is stale.

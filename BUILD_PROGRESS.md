@@ -2179,7 +2179,7 @@ Phase 11 sub-tasks (all complete):
   - [ ] **Leo to do:** in `.env.local`, fix duplicated `sk-ant-` prefix on `ANTHROPIC_API_KEY` (line 53). Confirm against Anthropic console.
   - [ ] **Leo to do:** in `.env.local`, rename `Management_Key` / `Your_new_API_key` → one canonical `OPENROUTER_API_KEY` (lines 56-57). Code reads `OPENROUTER_API_KEY` only.
   - [ ] **Leo to do:** Vercel env audit — run `vercel env ls production` and cross-check against the Required-vars list in `PROJECT_STATE_CURRENT.md`. Confirm no leading/trailing whitespace on values.
-  - [ ] **Leo to do (optional):** prune Vercel of unused `NEXT_PUBLIC_FB_APP_ID`, `NEXT_PUBLIC_FB_LOGIN_CONFIG_ID`, `FACEBOOK_APP_SECRET`, `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TWITTER_BEARER_TOKEN`, `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`, `STRIPE_*` (all declared but unused in current code).
+  - [ ] **Leo to do (optional):** prune Vercel of unused `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TWITTER_BEARER_TOKEN`, `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`, `STRIPE_*` (all declared but unused in current code).
 
 ## Session Safety Rules
 - One phase per session
