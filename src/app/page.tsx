@@ -262,20 +262,31 @@ export default function LandingPage() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[
-              { slug: 'cancun', name: 'Cancún', emoji: '🌴', saved: 'Save up to 59%' },
-              { slug: 'paris', name: 'Paris', emoji: '🗼', saved: 'Save up to 50%' },
-              { slug: 'vegas', name: 'Las Vegas', emoji: '🎰', saved: 'Save up to 55%' },
-              { slug: 'caribbean', name: 'Caribbean', emoji: '🚢', saved: 'Save up to 52%' },
-              { slug: 'orlando', name: 'Orlando', emoji: '🎡', saved: 'Save up to 48%' },
-            ].map(({ slug, name, emoji, saved }) => (
+              { slug: 'cancun', name: 'Cancún', saved: 'Save up to 59%' },
+              { slug: 'paris', name: 'Paris', saved: 'Save up to 50%' },
+              { slug: 'vegas', name: 'Las Vegas', saved: 'Save up to 55%' },
+              { slug: 'caribbean', name: 'Caribbean', saved: 'Save up to 52%' },
+              { slug: 'orlando', name: 'Orlando', saved: 'Save up to 48%' },
+            ].map(({ slug, name, saved }) => (
               <a
                 key={slug}
                 href={`/destinations/${slug}`}
-                className="bg-white rounded-xl p-5 text-center shadow-sm hover:shadow-md hover:-translate-y-1 hover:border-[#FF6B35] border-2 border-transparent transition-all duration-200 group"
+                className="group block overflow-hidden rounded-xl bg-white shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
               >
-                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gradient-to-br from-[#FF6B35]/10 to-[#16C79A]/10 flex items-center justify-center text-2xl" aria-hidden="true">{emoji}</div>
-                <p className="font-bold text-[#1A1A2E] group-hover:text-[#FF6B35] transition-colors">{name}</p>
-                <p className="text-xs text-[#16C79A] font-semibold mt-1">{saved}</p>
+                <div className="relative aspect-[4/3] overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- destination photo from /public; configuring next/image is out of scope */}
+                  <img
+                    src={`/destinations/${slug}.jpg`}
+                    alt={`${name} travel destination`}
+                    width={800}
+                    height={600}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                  <p className="absolute bottom-2 left-3 font-bold text-white text-sm drop-shadow-md">{name}</p>
+                </div>
+                <p className="px-3 py-2.5 text-center text-xs text-[#16C79A] font-semibold">{saved}</p>
               </a>
             ))}
           </div>
