@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { triggerCall } from '@/lib/bland'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
+import { hasSmsConsent } from '@/lib/sms-consent'
 import { sendEmail } from '@/lib/resend'
 import { EMAIL_TEMPLATES } from '@/lib/email-templates'
 import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     // Day 0 — SMS immediately. Bookkeeping bound for the sequence_queue
     // insert; the SMS send itself has its own internal client.
-    if (phone) {
+    if (phone && hasSmsConsent(contact)) {
       try {
         await sendSMS(phone, SMS_TEMPLATES.leadDay0(first_name), supabase)
         await bounded(
@@ -150,6 +151,8 @@ export async function POST(request: NextRequest) {
       } catch (smsErr) {
         console.error('Day 0 SMS error:', smsErr)
       }
+    } else if (phone) {
+      console.log(`[lead-created] Day-0 SMS skipped — no SMS consent on file — contact=${contact.id}`)
     }
 
     // Day 0 — send welcome email immediately (not via queue — cron runs once daily)
@@ -184,24 +187,34 @@ export async function POST(request: NextRequest) {
     // before reaching this point if the contact is suppressed, so the
     // per-branch nurtureSuppressed flag from Phase 14AQ is no longer
     // needed here.
+    // Phase 18.1D — the nurture batch mixes email + SMS rows. Email rows
+    // always queue; SMS rows queue only when SMS consent is on file.
+    const nurtureRows = [
+      // Day 2 — SMS follow-up
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
+      // Day 3 — email social proof
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
+      // Day 5 — email savings calculator
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
+      // Day 7 — SMS + email urgency
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
+      // Day 10 — email FAQ
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
+      // Day 12 — SMS last chance
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
+      // Day 14 — email breakup
+      { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
+    ]
+    const consentForNurture = hasSmsConsent(contact)
+    const nurtureToQueue = consentForNurture
+      ? nurtureRows
+      : nurtureRows.filter(r => r.channel !== 'sms')
+    if (!consentForNurture) {
+      console.log(`[lead-created] nurture SMS steps skipped — no SMS consent on file — contact=${contact.id}`)
+    }
     await bounded(
-      supabase.from('sequence_queue').insert([
-        // Day 2 — SMS follow-up
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
-        // Day 3 — email social proof
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
-        // Day 5 — email savings calculator
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 5, channel: 'email', template_key: 'leadDay5', scheduled_at: daysFromNow(5) },
-        // Day 7 — SMS + email urgency
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 6, channel: 'sms', template_key: 'leadDay7', scheduled_at: daysFromNow(7) },
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 7, channel: 'email', template_key: 'leadDay7', scheduled_at: hoursFromNow(7 * 24 + 4) },
-        // Day 10 — email FAQ
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
-        // Day 12 — SMS last chance
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
-        // Day 14 — email breakup
-        { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
-      ]),
+      supabase.from('sequence_queue').insert(nurtureToQueue),
       WEBHOOK_BOUND_MS,
       'nurture sequence_queue batch insert',
       LOG_PREFIX,

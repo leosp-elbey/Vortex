@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
+import { hasSmsConsent } from '@/lib/sms-consent'
 import { sendEmail } from '@/lib/resend'
 import { EMAIL_TEMPLATES, type EmailTemplateKey } from '@/lib/email-templates'
 import { computeEmailHealth, renderHealthEmailHTML, type EmailHealthReport } from '@/lib/email-health'
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
   // function timeout).
   const { data: items, error } = await supabase
     .from('sequence_queue')
-    .select('*, contacts(first_name, email, phone, status, tags)')
+    .select('*, contacts(first_name, email, phone, status, tags, custom_fields)')
     .eq('status', 'pending')
     .lte('scheduled_at', new Date().toISOString())
     .order('scheduled_at', { ascending: true })
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
         phone: string | null
         status: string
         tags: string[]
+        custom_fields: Record<string, unknown> | null
       } | null
 
       // Phase 14AQ — widen the suppression check beyond 'churned' to also
@@ -87,6 +89,15 @@ export async function GET(request: NextRequest) {
 
       try {
         if (item.channel === 'sms') {
+          // Phase 18.1D — server-side consent gate, checked before the
+          // opt-out tag. sequence_queue has no skipped_reason column, so the
+          // 'no-consent-recorded' reason is recorded in the log line.
+          if (!hasSmsConsent(contact)) {
+            await supabase.from('sequence_queue').update({ status: 'skipped', sent_at: now }).eq('id', item.id)
+            console.log(`[send-sequences] SMS skipped — no-consent-recorded — queue row ${item.id}`)
+            skipped++
+            return
+          }
           if (!contact.phone || smsOptedOut) {
             await supabase.from('sequence_queue').update({ status: 'skipped', sent_at: now }).eq('id', item.id)
             skipped++

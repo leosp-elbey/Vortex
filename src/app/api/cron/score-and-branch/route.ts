@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendSMS } from '@/lib/twilio'
+import { hasSmsConsent } from '@/lib/sms-consent'
 import { sendEmail } from '@/lib/resend'
 
 // For hot leads: cancel remaining generic nurture, send direct close message
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
   // and still have pending generic nurture steps
   const { data: hotLeads } = await supabase
     .from('contacts')
-    .select('id, first_name, email, phone, tags, lead_score')
+    .select('id, first_name, email, phone, tags, lead_score, custom_fields')
     .contains('tags', ['intent:hot'])
     .not('tags', 'cs', '["hot-lead-contacted"]')
     .eq('status', 'lead')
@@ -54,9 +55,11 @@ export async function GET(request: NextRequest) {
       .eq('sequence_name', 'lead-nurture')
       .eq('status', 'pending')
 
-    // Send hot-lead direct outreach
-    if (contact.phone) {
+    // Send hot-lead direct outreach (SMS consent-gated)
+    if (contact.phone && hasSmsConsent(contact)) {
       try { await sendSMS(contact.phone, HOT_LEAD_SMS(contact.first_name), supabase) } catch (e) { console.error(e) }
+    } else if (contact.phone) {
+      console.log(`[score-and-branch] hot-lead SMS skipped — no SMS consent — contact=${contact.id}`)
     }
 
     if (contact.email) {

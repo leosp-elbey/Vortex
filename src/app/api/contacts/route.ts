@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { hasSmsConsent } from '@/lib/sms-consent'
 
 // POST — manually add a lead from the dashboard
 export async function POST(request: NextRequest) {
@@ -53,7 +54,9 @@ export async function POST(request: NextRequest) {
   if (enroll_sequence) {
     const hoursFromNow = (h: number) => new Date(Date.now() + h * 3600000).toISOString()
     const daysFromNow = (d: number) => hoursFromNow(d * 24)
-    await admin.from('sequence_queue').insert([
+    // Phase 18.1D — manually-added contacts have no SMS consent recorded;
+    // queue email rows only unless explicit consent is on file.
+    const nurtureRows = [
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 2, channel: 'email', template_key: 'leadDay1', scheduled_at: daysFromNow(1) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 3, channel: 'sms', template_key: 'leadDay2', scheduled_at: daysFromNow(2) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 4, channel: 'email', template_key: 'leadDay3', scheduled_at: daysFromNow(3) },
@@ -63,7 +66,15 @@ export async function POST(request: NextRequest) {
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 8, channel: 'email', template_key: 'leadDay10', scheduled_at: daysFromNow(10) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 9, channel: 'sms', template_key: 'leadDay12', scheduled_at: daysFromNow(12) },
       { contact_id: contact.id, sequence_name: 'lead-nurture', step: 10, channel: 'email', template_key: 'leadDay14', scheduled_at: daysFromNow(14) },
-    ])
+    ]
+    const rowsToInsert = hasSmsConsent(contact)
+      ? nurtureRows
+      : nurtureRows.filter(r => r.channel !== 'sms')
+    const skippedSms = nurtureRows.length - rowsToInsert.length
+    if (skippedSms > 0) {
+      console.log(`[contacts] enroll_sequence — skipped ${skippedSms} SMS row(s), no SMS consent — contact=${contact.id}`)
+    }
+    await admin.from('sequence_queue').insert(rowsToInsert)
   }
 
   return NextResponse.json(contact, { status: 201 })
