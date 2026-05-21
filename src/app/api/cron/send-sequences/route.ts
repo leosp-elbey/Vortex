@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
             return
           }
 
-          await sendSMS(contact.phone, templateFn(contact.first_name))
+          await sendSMS(contact.phone, templateFn(contact.first_name), supabase)
           await supabase.from('ai_actions_log').insert({
             contact_id: item.contact_id,
             action_type: 'sms',

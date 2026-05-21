@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   // Send Day 0 SMS + email immediately
   if (contact.phone) {
     try {
-      await sendSMS(contact.phone, SMS_TEMPLATES.sbaDay0(contact.first_name))
+      await sendSMS(contact.phone, SMS_TEMPLATES.sbaDay0(contact.first_name), admin)
     } catch (e) { console.error('SBA Day0 SMS error:', e) }
   }
 

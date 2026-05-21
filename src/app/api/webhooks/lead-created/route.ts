@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
     // insert; the SMS send itself has its own internal client.
     if (phone) {
       try {
-        await sendSMS(phone, SMS_TEMPLATES.leadDay0(first_name))
+        await sendSMS(phone, SMS_TEMPLATES.leadDay0(first_name), supabase)
         await bounded(
           supabase.from('sequence_queue').insert({
             contact_id: contact.id, sequence_name: 'lead-nurture', step: 1,

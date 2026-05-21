@@ -92,7 +92,8 @@ export async function POST(request: NextRequest) {
   if (bestPartner.phone) {
     await sendSMS(
       bestPartner.phone,
-      `VortexTrips: New lead — ${contact.first_name}, ${destination || 'open destination'}, budget: ${budget || 'unknown'}. Email: ${contact.email}. Follow up ASAP.`
+      `VortexTrips: New lead — ${contact.first_name}, ${destination || 'open destination'}, budget: ${budget || 'unknown'}. Email: ${contact.email}. Follow up ASAP.`,
+      admin,
     )
   }
 

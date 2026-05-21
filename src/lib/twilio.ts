@@ -1,8 +1,41 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
 const FROM_NUMBER = process.env.TWILIO_PHONE_NUMBER!
 
-export async function sendSMS(to: string, body: string): Promise<{ sid: string }> {
+// Global SMS kill switch — reads site_settings.sms_send_enabled.
+// FAIL-SAFE: returns false (SMS OFF) on a missing row, a query error, a
+// thrown exception, or any value other than the exact string 'true'.
+async function readSmsKillSwitch(supabase: SupabaseClient): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('site_settings')
+      .select('value')
+      .eq('key', 'sms_send_enabled')
+      .maybeSingle()
+    if (error || !data) return false
+    return data.value === 'true'
+  } catch {
+    return false
+  }
+}
+
+export async function sendSMS(
+  to: string,
+  body: string,
+  supabase?: SupabaseClient,
+): Promise<{ sid: string } | { skipped: true; reason: string }> {
+  // When a Supabase client is supplied, the global kill switch is checked
+  // first. Default state (no row, or value != 'true') means SMS is OFF.
+  if (supabase) {
+    const enabled = await readSmsKillSwitch(supabase)
+    if (!enabled) {
+      console.log(`[sendSMS] skipped — kill switch off — to=${to}`)
+      return { skipped: true, reason: 'kill-switch-off' }
+    }
+  }
+
   if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM_NUMBER) {
     throw new Error('Twilio environment variables not configured')
   }

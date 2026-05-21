@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
     // Send hot-lead direct outreach
     if (contact.phone) {
-      try { await sendSMS(contact.phone, HOT_LEAD_SMS(contact.first_name)) } catch (e) { console.error(e) }
+      try { await sendSMS(contact.phone, HOT_LEAD_SMS(contact.first_name), supabase) } catch (e) { console.error(e) }
     }
 
     if (contact.email) {
