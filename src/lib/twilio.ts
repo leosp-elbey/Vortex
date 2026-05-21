@@ -3,6 +3,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
 const FROM_NUMBER = process.env.TWILIO_PHONE_NUMBER!
+// When set, sends route through the approved A2P Messaging Service /
+// campaign. When unset, sendSMS() falls back to the legacy From-number.
+const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID
 
 // Global SMS kill switch — reads site_settings.sms_send_enabled.
 // FAIL-SAFE: returns false (SMS OFF) on a missing row, a query error, a
@@ -36,8 +39,11 @@ export async function sendSMS(
     }
   }
 
-  if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM_NUMBER) {
+  if (!ACCOUNT_SID || !AUTH_TOKEN) {
     throw new Error('Twilio environment variables not configured')
+  }
+  if (!MESSAGING_SERVICE_SID && !FROM_NUMBER) {
+    throw new Error('Twilio sender not configured — set TWILIO_MESSAGING_SERVICE_SID or TWILIO_PHONE_NUMBER')
   }
 
   const url = `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`
@@ -45,7 +51,13 @@ export async function sendSMS(
 
   const params = new URLSearchParams()
   params.append('To', to)
-  params.append('From', FROM_NUMBER)
+  if (MESSAGING_SERVICE_SID) {
+    // Routes through the approved A2P campaign automatically.
+    params.append('MessagingServiceSid', MESSAGING_SERVICE_SID)
+  } else {
+    console.warn('[sendSMS] using legacy From-number — A2P routing may be unreliable. Set TWILIO_MESSAGING_SERVICE_SID.')
+    params.append('From', FROM_NUMBER)
+  }
   params.append('Body', body)
 
   const res = await fetch(url, {
