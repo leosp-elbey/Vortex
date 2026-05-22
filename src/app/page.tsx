@@ -90,7 +90,7 @@ export default function LandingPage() {
             <div className="text-center">
               <IconTile name="tag" tone="orange" className="w-14 h-14 mx-auto mb-4" />
               <h3 className="text-xl font-bold text-[#1A1A2E] mb-2">Member-Only Pricing</h3>
-              <p className="text-gray-600">Hotels up to 85% off retail.</p>
+              <p className="text-gray-600">Hotels up to 75% off retail.</p>
             </div>
             <div className="text-center">
               <IconTile name="gift" tone="teal" className="w-14 h-14 mx-auto mb-4" />
