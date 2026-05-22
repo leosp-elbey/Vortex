@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateCompletion } from '@/lib/openai'
 import { fetchAndStoreVideo } from '@/lib/media-providers'
+import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
 
 // Phase 14AI — manual "Generate This Week" button. Mirrors the synchronous
 // Pexels Video fetch behavior added to the weekly cron in Phase 14AG, so
@@ -35,18 +36,22 @@ export async function POST() {
     const weekOfStr = weekOf.toISOString().split('T')[0]
 
     const { content } = await generateCompletion({
-      systemPrompt: `You are a social media content strategist for VortexTrips, a travel savings membership.
-Brand voice: exciting, aspirational, benefit-driven. Real savings, real results.
-Key angles: "40-60% off", "exclusive member rates", "save $1,200+ per trip", "500,000+ hotels".
-IMPORTANT: Always use "VortexTrips" as the brand name. NEVER use "Travel Team Perks" — that is an old name.
-Return ONLY a valid JSON array — no markdown, no code blocks, nothing else.`,
+      // Phase 19.1B — use the shared SOCIAL_SYSTEM playbook (hook template,
+      // 75% savings framing, mandatory vortextrips.com/free link, 2-hashtag
+      // cap) instead of the old stale inline prompt. The JSON-output
+      // requirement is this route's own contract, so it is appended here
+      // rather than baked into SOCIAL_SYSTEM (which other callers parse as
+      // markdown).
+      systemPrompt: `${SOCIAL_SYSTEM}
+
+OUTPUT FORMAT (this call only): Return ONLY a valid JSON array — no markdown, no code blocks, no surrounding prose. Each array element is one post object with exactly the fields described in the user message.`,
       userPrompt: `Generate 5 social media posts for week of ${weekOfStr}.
 Platforms: instagram, facebook, tiktok, instagram, facebook (in this order).
 
 For EVERY post include these exact fields:
 - platform (string)
-- caption (string, platform-native length and tone)
-- hashtags (string array, 3-8 tags)
+- caption (string, platform-native length and tone; MUST follow the HOOK -> CONTRAST -> PROOF -> CTA template and contain the literal URL vortextrips.com/free)
+- hashtags (string array, MAXIMUM 2 tags — never more than 2)
 - image_prompt (string)
   - For instagram / facebook: a vivid photorealistic description for a Pexels image search. ALWAYS feature real people: happy families at resorts, couples on beaches, friends exploring cities, parents with kids at pools, smiling travelers checking into hotels. Include specific details: ethnicities, ages, clothing, location, lighting. Style: candid lifestyle photography, warm golden-hour light, NOT stock-photo-stiff.
   - For tiktok: a 3–7 word Pexels Video search query for a cinematic vertical travel B-roll clip. Examples: "cinematic beach drone overhead", "luxury resort pool aerial", "couple walking paris night street", "infinity pool ocean view sunset", "tropical waterfall slow motion". Strongly prefer concrete travel imagery over abstract concepts — the Pexels library is curated for travel.
