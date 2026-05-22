@@ -26,6 +26,12 @@
  *   APPLY (--apply)   — regenerates every eligible row and performs the
  *                       UPDATE one row at a time.
  *
+ * --limit N (apply only) — process only the first N eligible rows (same
+ *                       status filter + created_at ordering). Lets the
+ *                       operator apply to a small subset, spot-check the
+ *                       live result, then re-run without --limit for the
+ *                       full batch. Ignored in dry-run.
+ *
  * SAFETY:
  *   - Each row's gpt-4o call + update is wrapped in try/catch; on error the
  *     row id is logged and the batch CONTINUES.
@@ -36,8 +42,9 @@
  *     no-mutation cross-check.
  *
  * Run from the project root:
- *   npx tsx scripts/backfill-captions.ts            # dry-run (default)
- *   npx tsx scripts/backfill-captions.ts --apply    # write changes
+ *   npx tsx scripts/backfill-captions.ts                 # dry-run (default)
+ *   npx tsx scripts/backfill-captions.ts --apply         # write all changes
+ *   npx tsx scripts/backfill-captions.ts --apply --limit 5   # write first 5 only
  */
 
 import { readFileSync, existsSync } from 'fs'
@@ -59,6 +66,35 @@ const COLORS = {
 
 const APPLY = process.argv.includes('--apply')
 const MODE = APPLY ? 'APPLY' : 'DRY-RUN'
+
+/**
+ * Parse an optional `--limit N` / `--limit=N` flag. Returns null when absent.
+ * Exits with an error on a non-positive-integer value.
+ */
+function parseLimit(): number | null {
+  const argv = process.argv
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    let raw: string | undefined
+    if (arg === '--limit') {
+      raw = argv[i + 1]
+    } else if (arg.startsWith('--limit=')) {
+      raw = arg.slice('--limit='.length)
+    } else {
+      continue
+    }
+    const n = raw !== undefined ? Number.parseInt(raw, 10) : NaN
+    if (!Number.isInteger(n) || n <= 0) {
+      console.error('\x1b[31m--limit requires a positive integer (e.g. --limit 5)\x1b[0m')
+      process.exit(1)
+    }
+    return n
+  }
+  return null
+}
+
+/** Optional cap on how many rows --apply processes. null = no cap. */
+const LIMIT = parseLimit()
 
 /** Number of rows to generate + show a before/after for in dry-run mode. */
 const DRY_RUN_SAMPLE = 3
@@ -274,12 +310,17 @@ async function main(): Promise<void> {
   }
 
   // ── APPLY ────────────────────────────────────────────────────────────────
+  const targets = LIMIT !== null ? rows.slice(0, LIMIT) : rows
   console.log(`${COLORS.bold}2. Applying updates (caption + hashtags only)${COLORS.reset}`)
+  if (LIMIT !== null) {
+    console.log(`   ${COLORS.yellow}--limit ${LIMIT} — processing the first ${targets.length} of ${rows.length} eligible rows.${COLORS.reset}`)
+  }
+  console.log()
   let updated = 0
   let skipped = 0
   let failed = 0
 
-  for (const row of rows) {
+  for (const row of targets) {
     try {
       const next = await regenerateRow(row)
       const { error: updErr, count } = await supabase
@@ -312,6 +353,10 @@ async function main(): Promise<void> {
   console.log(`   ${COLORS.green}updated:${COLORS.reset} ${updated}`)
   console.log(`   ${COLORS.yellow}skipped:${COLORS.reset} ${skipped}`)
   console.log(`   ${COLORS.red}failed:${COLORS.reset}  ${failed}`)
+  if (LIMIT !== null) {
+    const remaining = rows.length - targets.length
+    console.log(`   ${COLORS.cyan}not processed (--limit):${COLORS.reset} ${remaining} — re-run without --limit for the full batch.`)
+  }
   console.log()
 
   // posted_at snapshot AFTER — must be unchanged (script never touches posted rows).
