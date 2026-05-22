@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateCompletion } from '@/lib/openai'
 import { fetchAndStoreVideo } from '@/lib/media-providers'
 import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
+import { enforceCaptionRules } from '@/lib/caption-format'
 
 // Phase 14AI — manual "Generate This Week" button. Mirrors the synchronous
 // Pexels Video fetch behavior added to the weekly cron in Phase 14AG, so
@@ -94,6 +95,10 @@ Return this exact JSON structure:
       let video_url: string | null = null
       let pexels_video_id: string | null = null
       const isTikTok = post.platform === 'tiktok'
+      // Phase 19.1C — deterministically guarantee the vortextrips.com/free
+      // link and the 2-hashtag cap before the row is inserted.
+      const { caption: enforcedCaption, hashtags: enforcedHashtags } =
+        enforceCaptionRules(post.caption, post.hashtags ?? [])
 
       // Image — Pexels search across all platforms.
       if (post.image_prompt) {
@@ -156,8 +161,8 @@ Return this exact JSON structure:
       return {
         week_of: weekOfStr,
         platform: post.platform,
-        caption: post.caption,
-        hashtags: post.hashtags || [],
+        caption: enforcedCaption,
+        hashtags: enforcedHashtags,
         image_prompt: post.image_prompt || '',
         image_url,
         video_url,

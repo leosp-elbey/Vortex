@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminUser } from '@/lib/admin-auth'
+import { enforceCaptionRules } from '@/lib/caption-format'
 
 // Twitter/X removed in Phase 14Q.
 const PostSchema = z.object({
@@ -48,14 +49,19 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const rows = posts.map((p) => ({
-    week_of: p.week_of,
-    platform: p.platform,
-    caption: p.caption,
-    hashtags: p.hashtags,
-    image_prompt: p.image_prompt ?? null,
-    status: 'approved' as const,
-  }))
+  const rows = posts.map((p) => {
+    // Phase 19.1C — deterministically guarantee the vortextrips.com/free
+    // link and the 2-hashtag cap before the row is inserted.
+    const { caption, hashtags } = enforceCaptionRules(p.caption, p.hashtags)
+    return {
+      week_of: p.week_of,
+      platform: p.platform,
+      caption,
+      hashtags,
+      image_prompt: p.image_prompt ?? null,
+      status: 'approved' as const,
+    }
+  })
 
   const { data: inserted, error: insertErr } = await auth.admin
     .from('content_calendar')

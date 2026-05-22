@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { runAIJob } from '@/lib/ai-router'
 import { SOCIAL_SYSTEM } from '@/lib/ai-prompts'
+import { enforceCaptionRules } from '@/lib/caption-format'
 import { runEventCampaignResearch, type RunResult as EventResearchResult } from '@/lib/event-campaign-generator'
 import { fetchAndStoreVideo } from '@/lib/media-providers'
 
@@ -132,11 +133,12 @@ function parseCalendarMarkdown(text: string): ParsedPost[] {
 
       const caption = captionMatch[1].trim()
       const hashtagsRaw = hashtagsMatch?.[1].trim() ?? ''
+      // No length cap here — enforceCaptionRules() applies the 2-hashtag
+      // hard cap at row-build time (Phase 19.1C, single source of truth).
       const hashtags = hashtagsRaw
         .split(/[,\s]+/)
         .map(h => h.trim().replace(/^#/, ''))
         .filter(h => h.length > 0 && h.length < 50)
-        .slice(0, 8)
       const imagePrompt = imageMatch?.[1].trim() ?? ''
       // Cap on_screen_hook at 10 words / 80 chars defensively even though
       // the prompt asks the AI for the same. Trailing punctuation kept.
@@ -282,6 +284,10 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       const p = posts[i]
       const image_url = imageUrls[i]
       const isTikTok = p.platform === 'tiktok'
+      // Phase 19.1C — deterministically guarantee the vortextrips.com/free
+      // link and the 2-hashtag cap before the row is inserted.
+      const { caption: enforcedCaption, hashtags: enforcedHashtags } =
+        enforceCaptionRules(p.caption, p.hashtags)
       let video_url: string | null = null
       let pexelsVideoId: string | null = null
       if (isTikTok && p.imagePrompt) {
@@ -315,8 +321,8 @@ Be terse. Skip filler. Optimize for parseability over prose.`
       rowsWithMedia.push({
         week_of: startDate,
         platform: p.platform,
-        caption: p.caption,
-        hashtags: p.hashtags,
+        caption: enforcedCaption,
+        hashtags: enforcedHashtags,
         image_prompt: p.imagePrompt,
         image_url,
         video_url,
