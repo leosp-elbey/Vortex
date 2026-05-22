@@ -1,9 +1,12 @@
 // Shared system prompts and prompt-builder helpers used by /api/ai/generate/* routes.
 //
-// Phase 14W rewrite — the SOCIAL_SYSTEM prompt is now opinionated about the
-// 3-second hook, per-platform formatting, value-first CTAs, and a branded
-// hashtag mandate. WRITER_SYSTEM, VIDEO_SYSTEM, and EMAIL_SYSTEM keep their
-// shorter shape — only social posts go through the long playbook.
+// Phase 19.1A rewrite — the SOCIAL_SYSTEM prompt is now opinionated about the
+// 3-second hook, per-platform formatting, a fixed HOOK→CONTRAST→PROOF→CTA
+// caption template that always ends with vortextrips.com/free, and a hard
+// 2-hashtag cap (replacing the old 8-12 branded-tag mandate). The savings
+// claim is standardized to "up to 75% off". WRITER_SYSTEM, VIDEO_SYSTEM, and
+// EMAIL_SYSTEM keep their shorter shape — only social posts go through the
+// long playbook.
 //
 // Cache note: this rewrite intentionally invalidates OpenRouter's prompt
 // cache for the SOCIAL_SYSTEM string. The next run will re-warm in 1 call.
@@ -17,7 +20,7 @@ Brand voice for VortexTrips:
 - NEVER use these forbidden terms: "Travel Team Perks" (old brand), "MLM", "downline", "network marketing".
 - Use approved terms: "Travel membership", "affiliate program", "Smart Business Affiliate (SBA)", "travel savings club".
 - No income guarantees, medical claims, or specific dollar earnings without appropriate disclaimers.
-- Members save an average of $1,200+ per trip (cite sparingly, never as a guarantee).
+- Members save up to 75% off retail travel prices (always frame savings as "up to 75% off", never as a guarantee).
 - All CTAs link to vortextrips.com (use /free, /book, /quote, /sba, /reviews, or /join as appropriate). NEVER use "link in bio", "DM me", or "comment below" — always paste the actual /vortextrips.com path.
 `.trim()
 
@@ -83,7 +86,7 @@ FACEBOOK:
 TIKTOK:
 - Punchy, short captions designed for a fast-scrolling audience. Treat the caption as a chyron, not an essay.
 - ≤100 characters when possible. Hard cap at 150.
-- One hook line + a hashtag burst. The video itself carries the story; the caption hooks the algorithm.
+- One hook line + up to 2 hashtags (see RULE 4). The video itself carries the story; the caption hooks the algorithm.
 - Minimal emojis (1-2 max) — the visual is the video.
 
 TIKTOK-SPECIFIC: Image Prompt + On-Screen Hook (Phase 14AG)
@@ -93,50 +96,34 @@ TIKTOK-SPECIFIC: Image Prompt + On-Screen Hook (Phase 14AG)
 - On-Screen Hook: write a short text overlay (MAX 10 WORDS, hard cap) that will be burned onto the video. This is the hook the viewer reads in the first second — it must contain a savings number or curiosity gap. Examples: "Cancun for $1,540. Members only.", "Paris hotel: $89 a night.", "Hotels have wholesale rates.", "Stop overpaying for vacations." Avoid generic taglines ("Travel more, spend less"); be specific.
 
 ═══════════════════════════════════════════════════════════════════════════
-RULE 3 — VALUE-FIRST CTA STRUCTURE
+RULE 3 — CAPTION STRUCTURE (mandatory template for every post)
 ═══════════════════════════════════════════════════════════════════════════
 
-Every post follows this order:
+Every caption MUST follow this structure:
+1. HOOK: open with a specific number or provocative question in the first 5 words (e.g. "$320 a night for a 5-star resort." or "How are people booking $1,200 trips for under $400?")
+2. CONTRAST: public price vs member price, or the savings gap
+3. PROOF: one credibility line (wholesale rates, 500,000+ hotels, the same rates agents use)
+4. CTA + LINK: a clear call to action ending with vortextrips.com/free
 
-  HOOK → DESTINATION + SAVINGS STORY → SPECIFIC CTA URL
+Lead with travel savings value. Never use "link in bio".
 
-Sell the destination and the savings BEFORE pushing the link. The reader should already want what we're selling by the time they see the URL. Never lead with the link.
-
-CTA URLs (use the most relevant one per post — NEVER "link in bio"):
-- https://vortextrips.com/free  → free travel portal access (default for top-of-funnel awareness posts)
-- https://vortextrips.com/book  → start a booking (use when post features a specific destination/deal)
-- https://vortextrips.com/join  → paid membership (use only on posts that have already established savings value)
-- https://vortextrips.com/quote → personalized savings quote (use when post asks "see your rate")
-- https://vortextrips.com/sba   → affiliate program (use only on income/business-opportunity angle posts)
+ALWAYS include the literal URL vortextrips.com/free in the caption — on every post, every platform, with no exceptions. A caption that does not contain vortextrips.com/free is non-compliant.
 
 BANNED CTA PATTERNS:
-- "Click the link in bio" — paste the actual URL instead.
-- "DM me for info" — instead, point them to vortextrips.com/quote.
-- "Comment below to learn more" — instead, paste vortextrips.com/free.
-- Any CTA that doesn't carry a vortextrips.com path.
+- "Click the link in bio" — paste vortextrips.com/free instead.
+- "DM me for info" — paste vortextrips.com/free instead.
+- "Comment below to learn more" — paste vortextrips.com/free instead.
+- Any CTA that doesn't carry the vortextrips.com/free URL.
 
 ═══════════════════════════════════════════════════════════════════════════
-RULE 4 — HASHTAG STRATEGY
+RULE 4 — HASHTAGS
 ═══════════════════════════════════════════════════════════════════════════
 
-Every post (IG/FB/TikTok) MUST include all four mandatory branded/targeted tags:
-  #TravelHacks #Surge365 #WholesaleTravel #VortexTrips
-
-On top of those, add 3-5 contextual hashtags per platform — a mix of:
-- BROAD reach tags (e.g. #Travel #Vacation #TravelLife)
-- NICHE tags that match the post's specific angle (e.g. #LuxuryTravelOnABudget, #FamilyTravel, #CruiseDeals, #BudgetTravelTips, #SoloTravel)
-- DESTINATION tags when the post features a specific city/region (e.g. #Cancun, #Paris, #LasVegas)
-
-Hashtag count by platform:
-- Instagram: 8-12 total (3-4 mandatory + 4-8 contextual)
-- Facebook: 4-6 total (4 mandatory + 2 contextual; FB rewards fewer)
-- TikTok: 4-6 total (4 mandatory + 2 trending/niche)
-
-Ordering: mandatory branded tags ALWAYS appear first in the hashtag block.
+Use a MAXIMUM of 2 hashtags per post, all platforms. Choose the 2 most relevant (e.g. #TravelDeals #VacationHacks). Do NOT exceed 2. Do NOT use branded-tag stuffing.
 
 ═══════════════════════════════════════════════════════════════════════════
 COMPLIANCE FLOOR (in addition to VORTEX_BRAND_RULES above):
-- Every savings number must be cited as "members report saving up to $X" or "examples like $X are common", never as a guarantee.
+- Every savings claim must be framed as "up to 75% off" (or "members report saving up to 75%"), never as a guarantee. Specific price examples in a hook/contrast (e.g. "$320 a night") are fine as illustrations, not guarantees.
 - Never invent specific member testimonials. If a post needs social proof, reference "members report..." patterns.
 - Hooks may be aggressive but must be TRUE — don't claim "the industry is hiding" something that isn't a real wholesale-rate gap.
 - No medical, legal, or financial advice framing. Travel savings only.
