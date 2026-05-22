@@ -272,6 +272,8 @@ COMPLETED:
 
 \- Automation architecture
 
+\- Social caption system — Phase 19 caption overhaul (COMPLETE, see PHASE 19 section below)
+
 
 
 IN PROGRESS:
@@ -289,6 +291,30 @@ NOT DONE:
 \- Testing
 
 \- Launch
+
+
+
+\---
+
+
+
+\# PHASE 19 — CAPTION OVERHAUL (COMPLETE)
+
+
+
+Status: COMPLETE — 2026-05-22
+
+
+
+\- 19.0 — Caption generator audit (read-only). Mapped the three caption generator paths feeding content\_calendar.
+
+\- 19.1 — Rewrote the SOCIAL\_SYSTEM caption template to HOOK → CONTRAST → PROOF → CTA, pointed the dashboard generator at SOCIAL\_SYSTEM, added the deterministic enforcer src/lib/caption-format.ts, and standardized the homepage savings claim to "up to 75% off". Commits: dc2a4fb, 60c5d19, 15bc170, 1b058b6.
+
+\- 19.2 — Built scripts/backfill-captions.ts (rate-limit retry, 5s throttle, idempotent skip) and regenerated all 114 active content\_calendar rows. Commits: a1e3e18, 90092b9, ad633b6.
+
+
+
+Result: captions are standardized on "up to 75% off" plus the vortextrips.com/free link. All 114 active content\_calendar rows now carry the /free link and at most 2 hashtags, with no "Travel Team Perks", "40-60%", or "85%" claims. The generator enforces this going forward via enforceCaptionRules in src/lib/caption-format.ts, applied in the weekly-content cron, the dashboard generator, and the ai/push-to-calendar route.
 
 
 
