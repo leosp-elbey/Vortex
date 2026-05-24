@@ -283,12 +283,22 @@ async function readKillSwitch(supabase: SupabaseAdmin): Promise<'enabled' | 'dis
 }
 
 async function flipKillSwitchToDisabled(supabase: SupabaseAdmin, reason: string): Promise<void> {
-  await supabase
+  // Phase 20.0 — the `description` field used to be on this payload but the
+  // site_settings schema has no such column, so the upsert was silently
+  // failing (42703) and the kill switch never actually flipped. Now we omit
+  // the field AND surface any upsert error so a future regression does not
+  // hide itself.
+  const { error } = await supabase
     .from('site_settings')
     .upsert(
-      { key: KILL_SWITCH_KEY, value: 'false', description: `auto-disabled: ${reason}`, updated_at: new Date().toISOString() },
+      { key: KILL_SWITCH_KEY, value: 'false', updated_at: new Date().toISOString() },
       { onConflict: 'key' },
     )
+  if (error) {
+    console.warn(
+      `[autoposter] WARN: failed to write kill switch — manual intervention required. Reason: ${reason}. DB error: ${error.message}`,
+    )
+  }
 }
 
 /**
