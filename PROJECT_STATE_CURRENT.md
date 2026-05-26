@@ -4,6 +4,8 @@
 
 ---
 
+**Last updated:** 2026-05-24 (Phases 19 + 20 session closeout. Caption overhaul complete: SOCIAL_SYSTEM rewritten to a HOOK → CONTRAST → PROOF → CTA template, deterministic `enforceCaptionRules` enforcer in `src/lib/caption-format.ts` guarantees the `vortextrips.com/free` link + 2-hashtag cap on every generator path, homepage savings claim standardized to "up to 75% off", all 114 active `content_calendar` rows regenerated through gpt-4o + the enforcer with rate-limit retry, 5s throttle, and idempotent skip. Phase 20.0 fixed a silent kill-switch write failure in the autoposter cron (the upsert wrote a nonexistent `description` column and the error was never captured, so the kill switch never actually flipped on failure — hence 3+ failed-then-emailed ticks per day). Phase 20.1 fully cleared Meta tokens (both permanent PAGE tokens, expires_at=0, all scopes present, IG link intact); Phase 20.2 isolated the IG failure to row b3e6ce95 (Supabase Storage image URL not fetchable by Meta's crawler suspected). Row b3e6ce95 marked rejected to unblock queue. Autoposter re-enabled. See the Phase 19-20 Session Closeout section below.)
+**Last known good commit:** `84978be` — "fix(autoposter): remove nonexistent description column + add kill-switch write error handling (phase 20.0)"
 **Last updated:** 2026-05-10 (Phase 14AO shipping in working tree — TikTok PULL_FROM_URL Verified-Domain Proxy. Once Phase 14AN wired the dashboard button to the actual API, the operator finally saw the real TikTok rejection: "TikTok publish init failed: Please review our URL ownership verification rules". Diagnosis: TikTok's `pull_from_url` source requires the video URL's host domain to be registered + verified in the TikTok Developer Portal. The operator verified `www.vortextrips.com`. Today's TikTok rows have `video_url` on `videos.pexels.com` (Pexels' CDN — Phase 14AG removed re-hosting to save cron time). We can't put a `.well-known` verification file on Pexels' infrastructure. Fix: a Next.js Edge rewrite at `/v/p/:path*` proxies to `https://videos.pexels.com/video-files/:path*` — Vercel's Edge handles it (no function invocation, no timeout). Three TikTok touch points (manual `/api/automations/post-to-tiktok`, autoposter cron, runner script JS mirror) call new `proxyVideoUrlForTikTok()` helper from `src/lib/tiktok-oauth.ts` to translate canonical Pexels URLs into vortextrips.com proxy URLs at publish time. The DB still stores the canonical Pexels URL in `content_calendar.video_url` for clean record-keeping; only what's sent to TikTok is rewritten. Non-Pexels URLs pass through unchanged. Lint + typecheck clean.)
 **Last known good commit:** `f37db62` — "Phase 14AN: wire dashboard Post to TikTok button to actual API"
 **Last updated:** 2026-05-10 (Phase 14AN shipping in working tree — Wire Dashboard "Post to TikTok" Button. Discovered while diagnosing why the operator's "Upload to TikTok" clicks weren't producing posts: the dashboard's TikTok button at `src/app/dashboard/content/page.tsx:417-426` was a hardcoded `<a href="https://www.tiktok.com/creator-center/upload">` — a link to TikTok's Creator Center, NOT a call to `/api/automations/post-to-tiktok`. Phases 14R / 14V / 14AM / 14AM.1 built the entire backend (Direct Post API + gate validation + atomic UPDATE + rate limit + sandbox toggle) but the dashboard never wired the button to it. Every "Upload to TikTok" click since 14R bypassed the integration and dumped operators in TikTok Studio's manual upload UI. Fix: new `postToTikTok(item)` handler mirroring the existing `postToInstagram` / `postToFacebook` patterns exactly — same fetch shape, same success/error toast, same optimistic state flip on success. The `<a>` element is replaced with a `<button onClick={postToTikTok}>` and the label changes from "Upload to TikTok" to "Post to TikTok" to match the FB/IG verb. Without this fix, the TikTok app review demo could not be recorded — the reviewer needs to see a button in the operator's dashboard fire the integration's API call, not a link to TikTok's product. Lint + typecheck clean. No DB schema change; no platform calls until the operator clicks the button.)
@@ -40,6 +42,56 @@
 **Production:** vortextrips.com (LIVE; **Phase 14A → 14Y deployed and verified**; Supabase migrations 017-033 applied; Hobby plan, 4 / 4 cron slots used; 8 live posts since 2026-05-05: 4 FB, 3 IG, 1 TikTok via manual workflow)
 
 **Live posting status:** **🤖 Fully autonomous, operator-controlled, verifiable, on-brand, health-monitored, hang-resistant (everywhere), CI-gated, performance-tracked, AND audited.** All defensive layers are in place. The next milestone for the operator is post-deploy activation: connecting TikTok, flipping the autoposter cron kill switch to `true`, and watching the first scheduled tick land.
+
+---
+
+## Phase 19-20 Session Closeout — 2026-05-24
+
+### Phase 19 — Caption overhaul (COMPLETE)
+
+| Sub-phase | Status | Commits |
+|---|---|---|
+| 19.0 Caption generator audit (read-only) | ✅ | (no code) |
+| 19.1 SOCIAL_SYSTEM rewrite + dashboard generator points at it + deterministic enforcer + homepage 75% | ✅ | `dc2a4fb`, `60c5d19`, `15bc170`, `1b058b6` |
+| 19.2 Backfill script (rate-limit retry + 5s throttle + idempotent skip) + all 114 active rows regenerated | ✅ | `a1e3e18`, `90092b9`, `ad633b6` |
+| 19 closeout doc | ✅ | `d3ca4fb` |
+
+Result: captions are standardized on "up to 75% off" + the `vortextrips.com/free` link. All 114 active `content_calendar` rows now carry the `/free` link and at most 2 hashtags, with no "Travel Team Perks", "40-60%", or "85%" claims. The new generator path enforces this going forward via `enforceCaptionRules` in `src/lib/caption-format.ts`, applied at the pre-insert point of the weekly-content cron, the dashboard generator, and the ai/push-to-calendar route.
+
+### Phase 20 — Autoposter stabilization (IN PROGRESS)
+
+**Phase 20.0 — Silent auto-disable bug (commit `84978be`).** `flipKillSwitchToDisabled()` in [src/app/api/cron/autoposter-once/route.ts](src/app/api/cron/autoposter-once/route.ts) was upserting a `description` field that does not exist in the `site_settings` schema — PostgREST rejected with `42703`, but the upsert's error was never destructured so the failure was invisible. Result: when the cron hit a definitive platform failure, it logged "auto-disabled cron", emailed the operator, returned 500 — and the kill switch in DB silently stayed `true`. The next tick fired 4 hours later and repeated the loop. Fix: drop the `description` field, capture the upsert error, log a clear `console.warn` if any future write fails. The kill switch now actually flips.
+
+**Phase 20.1 — Meta token health check (read-only diagnostic).** Both FB and IG access tokens are the same value, healthy, and permanent: `is_valid: true`, `type: PAGE`, `expires_at: 0`, `data_access_expires_at: 2026-07-26`, all required scopes (`instagram_basic`, `instagram_content_publish`, `pages_manage_posts`, `business_management`, etc.) present. Tokens match between `.env.local` and Vercel prod — no drift. `/v25.0/me`, `/{page_id}?fields=instagram_business_account`, `/{ig_id}?fields=id,username,name,followers_count,media_count`, and `/{ig_id}/media` all return successfully against the production token. The IG Business account (`17841425195442497`) is still linked to the FB Page (`1081317148396178`). Conclusion: the May 23 "Authorization Error" was NOT token expiry, revocation, or scope change.
+
+**Phase 20.2 — Row b3e6ce95 (Instagram) failure (in progress).** Row `b3e6ce95-3640-4010-a45c-ee6290c9f146` failed on 4 consecutive autoposter ticks with `Status check failed: Authorization Error`. The error is thrown from the container-status GET (the second call after a successful container-creation POST), not from creation or publish. Token is healthy (see 20.1). The row's `image_url` (`https://mufpiphjddpacbxlbpqi.supabase.co/storage/v1/object/public/media/content/1778353261118-instagram.jpg`) is publicly fetchable in a browser. Suspected root cause: Meta's crawler can't fetch the Supabase Storage URL from its IP range (or the image fails an undocumented spec check — dimensions / aspect ratio / file size / MIME); the "Authorization Error" appears to be a misleading Meta surface for a downstream media-fetch failure. Mitigation: row b3e6ce95 marked `rejected` to unblock the queue, autoposter re-enabled.
+
+**Open issue (BLOCKER before re-trusting Instagram queue):** if Supabase Storage URLs are structurally unfetchable by Meta crawlers, every queued Instagram row will hit the same wall. Needs a focused follow-up — either deeper Meta-side trace (test by re-hosting the image to a different public bucket and re-attempting), or experiment with image format/dimensions, before the next IG row is marked Ready.
+
+### Current system state (2026-05-24)
+
+| Component | State |
+|---|---|
+| Autoposter | ENABLED (kill switch = `true`) — re-enabled after skipping bad row |
+| SMS | DISABLED (kill switch = `false`) — built, tested, safe-OFF |
+| YouTube cron | ENABLED but no youtube rows queued yet |
+| TikTok | Posting but account still private (Bytedance Content Posting API audit pending — all posts invisible until resolved) |
+| Instagram | ACTIVE — row b3e6ce95 rejected to unblock queue; structural risk (see 20.2) |
+| Facebook | ACTIVE |
+| Contacts | ~742 total (17 organic, 719 import, 6 test) |
+| Content queue | 114 active rows, all Phase-19-compliant captions |
+| Vercel Analytics | live and collecting |
+| Facebook Pixel | deployed and firing |
+| Meta tokens | valid, permanent, `data_access_expires_at` = 2026-07-26 |
+
+### Outstanding issues (priority order)
+
+1. **Row b3e6ce95 IG failure root cause (Phase 20.2 follow-up).** May affect ALL future Instagram posts if structural.
+2. **TikTok account still private.** Pending Bytedance Content Posting API audit; all TikTok posts invisible until resolved.
+3. **YouTube never tested end-to-end.** OAuth complete, no rows queued.
+4. **Social bios not yet updated.** Copy drafted, Leo to apply manually.
+5. **Facebook pinned post not yet added.** Copy drafted, Leo to apply manually.
+6. **Traffic acquisition — zero strategy in place.** The #1 blocker for member growth. Deserves a dedicated session.
 
 ---
 

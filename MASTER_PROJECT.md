@@ -322,6 +322,68 @@ Result: captions are standardized on "up to 75% off" plus the vortextrips.com/fr
 
 
 
+\# PHASE 20 — AUTOPOSTER STABILIZATION (IN PROGRESS)
+
+
+
+Status: 20.0 SHIPPED · 20.1 COMPLETE · 20.2 IN PROGRESS — 2026-05-24
+
+
+
+\## Phase 20.0 — Silent auto-disable bug (commit 84978be)
+
+
+
+\- Fixed silent kill-switch write failure in src/app/api/cron/autoposter-once.ts.
+
+\- Removed the nonexistent `description` column from the site\_settings upsert (PostgREST was returning `42703 column site_settings.description does not exist`, but the upsert error was never captured, so the kill switch silently stayed `true` after every definitive failure).
+
+\- Added error surfacing via `console.warn` on any future kill-switch write failure ("[autoposter] WARN: failed to write kill switch — manual intervention required").
+
+\- Result: the autoposter now actually self-halts on a definitive failure instead of running every 4 hours, hitting the same bad row, and emailing the operator on every tick.
+
+
+
+\## Phase 20.1 — Meta token health check (read-only diagnostic)
+
+
+
+\- Full Meta `/debug_token` + `/me` + IG business account health check on both FACEBOOK\_PAGE\_ACCESS\_TOKEN and INSTAGRAM\_ACCESS\_TOKEN.
+
+\- Both tokens confirmed `is_valid: true`, `type: PAGE`, `expires_at: 0` (permanent / never expires), all required scopes (instagram\_basic, instagram\_content\_publish, pages\_manage\_posts, business\_management, etc.) present.
+
+\- `data_access_expires_at: 2026-07-26` (data-access ToS only, not auth).
+
+\- Tokens match between .env.local and Vercel prod — no env drift.
+
+\- IG Business account (17841425195442497) still linked to FB Page (1081317148396178); token can read the IG account directly and list its media. The May 22 successful IG post id is still queryable.
+
+\- Conclusion: the May 23 "Authorization Error" was NOT token expiry, revocation, or scope change. Token is healthy.
+
+
+
+\## Phase 20.2 — Row b3e6ce95 IG failure (in progress)
+
+
+
+\- Row b3e6ce95-3640-4010-a45c-ee6290c9f146 (instagram) failed on 4 consecutive autoposter cron ticks (3 on May 23, plus replay attempts) with `Status check failed: Authorization Error` — thrown from the container-status-poll step, not creation or publish.
+
+\- Token confirmed not the cause (see Phase 20.1).
+
+\- Image URL `https://mufpiphjddpacbxlbpqi.supabase.co/storage/v1/object/public/media/content/1778353261118-instagram.jpg` confirmed publicly accessible in a browser.
+
+\- Suspected root cause: Meta's media crawler cannot fetch the Supabase Storage URL from its IP range, OR the image fails an undocumented spec check (dimensions / aspect ratio / file size / MIME). The "Authorization Error" message appears to be a misleading Meta surface for a downstream media-fetch failure.
+
+\- Mitigation applied: row b3e6ce95 marked `rejected` to unblock the queue; autoposter re-enabled.
+
+\- Open question: if Supabase Storage URLs are structurally unfetchable by Meta crawlers, every queued Instagram row will hit the same wall. Needs a follow-up diagnostic (deeper Meta-side trace and/or experiment with a re-hosted image URL) before the next Instagram tick is trusted.
+
+
+
+\---
+
+
+
 \# EXECUTION MODE
 
 
