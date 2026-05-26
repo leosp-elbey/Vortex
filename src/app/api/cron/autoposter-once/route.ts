@@ -65,6 +65,7 @@ import {
 } from '@/lib/posting-gate'
 import { getAutoposterEligibleRows } from '@/lib/autoposter-gate'
 import { getValidTikTokAccessToken, proxyVideoUrlForTikTok, queryTikTokCreatorInfo } from '@/lib/tiktok-oauth'
+import { rewriteImageUrlForInstagram } from '@/lib/instagram-image-proxy'
 import { sendEmail } from '@/lib/resend'
 
 export const dynamic = 'force-dynamic'
@@ -152,11 +153,19 @@ async function postToInstagram(post: PostingGateRow, hashtags: string[] | null):
   const tagStr = (hashtags ?? []).map(h => `#${h}`).join(' ')
   const caption = `${post.caption ?? ''}\n\n${tagStr}`.trim()
 
+  // Phase 20.2 — proxy raw Supabase Storage URLs through the verified
+  // www.vortextrips.com host so Meta's container crawler can fetch them.
+  // See src/lib/instagram-image-proxy.ts.
+  const igImageUrl = rewriteImageUrlForInstagram(post.image_url!)
+  if (igImageUrl !== post.image_url) {
+    console.log('[autoposter] IG image rewritten:', post.image_url, '→', igImageUrl)
+  }
+
   // 1. Create container.
   const cRes = await fetch(`${GRAPH_API}/${IG_ACCOUNT_ID}/media`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ access_token: IG_TOKEN, caption, image_url: post.image_url, media_type: 'IMAGE' }),
+    body: JSON.stringify({ access_token: IG_TOKEN, caption, image_url: igImageUrl, media_type: 'IMAGE' }),
   })
   const cData = await cRes.json().catch(() => ({}))
   if (!cRes.ok || cData.error || !cData.id) {

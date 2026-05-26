@@ -510,6 +510,22 @@ async function postToTikTok(row, env, supabase) {
   return { ok: true, tiktok_publish_id: publishId }
 }
 
+/**
+ * Phase 20.2 — JS mirror of rewriteImageUrlForInstagram from
+ * src/lib/instagram-image-proxy.ts. Same rationale as the other JS
+ * mirrors in this script (see comment at top of file): the script is
+ * plain CommonJS and cannot import the TS helper, so the logic is
+ * duplicated. If the TS helper changes, update this mirror too.
+ */
+function rewriteImageUrlForInstagramJs(rawUrl) {
+  if (!rawUrl) return rawUrl
+  const SUPABASE_PROJECT = 'mufpiphjddpacbxlbpqi'
+  const storagePrefix = `https://${SUPABASE_PROJECT}.supabase.co/storage/v1/object/public/media/content/`
+  if (!rawUrl.startsWith(storagePrefix)) return rawUrl
+  const filePath = rawUrl.slice(storagePrefix.length)
+  return `https://www.vortextrips.com/v/i/${filePath}`
+}
+
 /** Mirror of post-to-instagram route. Three-step: container → wait → publish. */
 async function postToInstagram(row, env) {
   const IG_ACCOUNT_ID = env.INSTAGRAM_BUSINESS_ACCOUNT_ID
@@ -517,12 +533,20 @@ async function postToInstagram(row, env) {
   if (!nonEmpty(IG_ACCOUNT_ID) || !nonEmpty(IG_ACCESS_TOKEN)) return { ok: false, error: 'Instagram credentials not configured' }
   if (!nonEmpty(row.image_url)) return { ok: false, error: 'Instagram requires an image — no image_url found on this post' }
   const caption = buildMessage(row)
+
+  // Phase 20.2 — proxy raw Supabase URLs through the verified vortextrips.com
+  // host so Meta's container crawler can fetch them.
+  const igImageUrl = rewriteImageUrlForInstagramJs(row.image_url)
+  if (igImageUrl !== row.image_url) {
+    console.log(`${COLORS.dim}[IG] image rewritten: ${row.image_url} → ${igImageUrl}${COLORS.reset}`)
+  }
+
   try {
     // 1. Create container.
     const cRes = await fetch(`${GRAPH_API}/${IG_ACCOUNT_ID}/media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: IG_ACCESS_TOKEN, caption, image_url: row.image_url, media_type: 'IMAGE' }),
+      body: JSON.stringify({ access_token: IG_ACCESS_TOKEN, caption, image_url: igImageUrl, media_type: 'IMAGE' }),
     })
     const cData = await cRes.json().catch(() => ({}))
     if (!cRes.ok || cData.error || !cData.id) {
