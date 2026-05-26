@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { validateManualPostingGate, POSTING_GATE_ROW_SELECT_WITH_MEDIA, flattenPostingGateRow } from '@/lib/posting-gate'
 import { logMetaTokenHealth } from '@/lib/meta-token-healthcheck'
+import { rewriteImageUrlForInstagram } from '@/lib/instagram-image-proxy'
 
 const IG_ACCOUNT_ID = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID
 const IG_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN
@@ -134,7 +135,15 @@ export async function POST(request: NextRequest) {
     const caption = `${post.caption ?? ''}\n\n${hashtags}`.trim()
 
     // Image URL — sourced from the linked campaign_asset (Phase 14L).
-    const imageUrl = post.image_url ?? undefined
+    // Phase 20.2 — raw Supabase Storage URLs are routed through the verified
+    // `www.vortextrips.com/v/i/*` rewrite so Meta's container crawler can
+    // fetch them. Non-Supabase URLs (Pexels, vortextrips.com, etc.) pass
+    // through unchanged. See src/lib/instagram-image-proxy.ts.
+    const rawImageUrl = post.image_url ?? undefined
+    const imageUrl = rawImageUrl ? rewriteImageUrlForInstagram(rawImageUrl) : undefined
+    if (rawImageUrl && imageUrl !== rawImageUrl) {
+      console.log('[IG] image_url rewritten for Meta crawler', { content_id, from: rawImageUrl, to: imageUrl })
+    }
     const containerId = await createMediaContainer(caption, imageUrl)
     await waitForContainerReady(containerId)
     const igPostId = await publishContainer(containerId)

@@ -62,6 +62,21 @@ const nextConfig = {
         source: '/v/s/:path*',
         destination: 'https://mufpiphjddpacbxlbpqi.supabase.co/storage/v1/object/public/media/content/tiktok/:path*',
       },
+      {
+        // Phase 20.2 — Instagram image proxy. Meta's media-container crawler
+        // refuses to fetch raw Supabase Storage URLs (intermittent timeouts +
+        // it doesn't trust the host), so every image_url we hand to
+        // /{ig-account-id}/media is rewritten to come from the verified
+        // `www.vortextrips.com` host. Bucket is 'media' and the public path
+        // is content/<filename>.jpg (flat — platform name is embedded in the
+        // filename, not a subdirectory; see weekly-content/route.ts:80 and
+        // generate-content/route.ts:118). `:path*` preserves slashes so the
+        // legacy `content/instagram/<file>.jpg` layout produced by
+        // scripts/generate-missing-media.js also routes correctly via
+        // /v/i/instagram/<file>.jpg.
+        source: '/v/i/:path*',
+        destination: 'https://mufpiphjddpacbxlbpqi.supabase.co/storage/v1/object/public/media/content/:path*',
+      },
     ]
   },
   images: {
