@@ -22,17 +22,29 @@
 //                   seeds value='true' once applied).
 //
 // Allowed writes (only on Kling response):
-//   content_calendar.video_url            (when completed)
-//   content_calendar.media_status         ('ready' or 'failed')
-//   content_calendar.media_generated_at   (when completed)
+//   content_calendar.video_url            (single-clip path only — when completed)
+//   content_calendar.media_status         ('ready' for single-clip; 'failed' for either)
+//   content_calendar.media_generated_at   (single-clip path only — when completed)
 //   content_calendar.media_error          (when failed)
+//   content_calendar.media_metadata       (multi-clip path only — Phase 21C kling_clip_jobs[]
+//                                          status / video_url back-fill + completion timestamps)
 //
 // Forbidden writes:
 //   content_calendar.kling_job_id  (set by the submission step, never overwritten)
+//   content_calendar.video_url     (multi-clip path — assembler/Phase 21D writes it)
 //   any campaign_assets column
 //   site_settings (this cron has no auto-disable path — failures are
 //                  per-row, not pipeline-wide; the operator manages the
 //                  kill switch manually if needed).
+//
+// Phase 21C (multi-clip) addendum:
+//   YouTube orchestrator rows store 4 Kling job ids inside
+//   media_metadata.kling_clip_jobs[] instead of the scalar kling_job_id
+//   column. This route walks BOTH shapes per tick:
+//     - scalar path: legacy single-clip rows (Phase 21B)
+//     - JSONB path:  Phase 21C youtube rows with media_metadata.kling_clip_jobs[]
+//   The two paths share MAX_ROWS_PER_TICK so a busy week of YouTube
+//   orchestration can't starve the legacy single-clip queue.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -183,12 +195,151 @@ export async function GET(request: NextRequest) {
     stillPending++
   }
 
+  // ============================================================
+  // Phase 21C — multi-clip walk for YouTube orchestrator rows.
+  //
+  // The remaining MAX_ROWS_PER_TICK budget (after the scalar walk above)
+  // is what's left for multi-clip rows. In practice multi-clip rows are
+  // 1/week so the cap rarely matters; the budgeting just guarantees the
+  // scalar legacy queue can never be starved.
+  // ============================================================
+  const remainingBudget = Math.max(0, MAX_ROWS_PER_TICK - candidates.length)
+  let multiCompletedClips = 0
+  let multiFailedClips = 0
+  let multiRowsReadyForAssembly = 0
+  let multiRowsFailed = 0
+  let multiRowsStillPending = 0
+
+  if (remainingBudget > 0) {
+    const { data: multiRows, error: multiErr } = await supabase
+      .from('content_calendar')
+      .select('id, media_metadata, video_url, created_at')
+      .eq('platform', 'youtube')
+      .is('video_url', null)
+      .order('created_at', { ascending: true })
+      .limit(remainingBudget)
+
+    if (multiErr) {
+      // Don't fail the whole tick — scalar path already ran. Log + continue.
+      console.error('[check-kling-jobs] multi-clip query failed', { error: multiErr.message })
+    } else {
+      for (const row of multiRows ?? []) {
+        const meta = (row.media_metadata && typeof row.media_metadata === 'object')
+          ? (row.media_metadata as Record<string, unknown>)
+          : {}
+        const rawClips = meta.kling_clip_jobs
+        if (!Array.isArray(rawClips) || rawClips.length === 0) continue
+        const clips = rawClips as Array<Record<string, unknown>>
+
+        let rowMutated = false
+        const updatedClips: Array<Record<string, unknown>> = []
+
+        for (const clip of clips) {
+          const status = String(clip.status ?? 'unknown').toLowerCase()
+          // Terminal states — don't re-poll.
+          if (status === 'completed' || status === 'failed') {
+            updatedClips.push(clip)
+            continue
+          }
+          const jobId = typeof clip.job_id === 'string' ? clip.job_id : null
+          if (!jobId) {
+            // Submission failed at orchestrator step — leave as-is.
+            updatedClips.push(clip)
+            continue
+          }
+
+          const poll = await getKlingJobStatus(jobId)
+          if (!poll.success) {
+            // Transient poll failure — keep clip as-is, retry next tick.
+            errors.push({ row_id: row.id, error: `clip ${clip.scene_index ?? '?'} poll: ${poll.error ?? 'unknown'}` })
+            updatedClips.push(clip)
+            continue
+          }
+
+          if (poll.status === 'completed' && poll.videoUrl) {
+            updatedClips.push({
+              ...clip,
+              status: 'completed',
+              video_url: poll.videoUrl,
+              duration: poll.duration ?? null,
+            })
+            multiCompletedClips++
+            rowMutated = true
+          } else if (poll.status === 'failed') {
+            updatedClips.push({
+              ...clip,
+              status: 'failed',
+              raw_status: poll.rawStatus ?? null,
+            })
+            multiFailedClips++
+            rowMutated = true
+          } else {
+            // Still submitted / processing / unknown — write back the
+            // normalized status only if it changed.
+            const normalized = poll.status ?? 'unknown'
+            if (normalized !== status) rowMutated = true
+            updatedClips.push({ ...clip, status: normalized })
+          }
+        }
+
+        if (!rowMutated) {
+          multiRowsStillPending++
+          continue
+        }
+
+        const allCompleted = updatedClips.every(
+          c => String(c.status).toLowerCase() === 'completed' && typeof c.video_url === 'string',
+        )
+        const anyFailed = updatedClips.some(c => String(c.status).toLowerCase() === 'failed')
+
+        const newMeta: Record<string, unknown> = { ...meta, kling_clip_jobs: updatedClips }
+        if (allCompleted) newMeta.kling_clips_completed_at = new Date().toISOString()
+        if (anyFailed) newMeta.kling_clips_failed_at = new Date().toISOString()
+
+        const updatePayload: Record<string, unknown> = { media_metadata: newMeta }
+        if (anyFailed) {
+          const failedCount = updatedClips.filter(c => String(c.status).toLowerCase() === 'failed').length
+          updatePayload.media_status = 'failed'
+          updatePayload.media_error = `Kling render failed for ${failedCount}/${updatedClips.length} clip(s)`.slice(0, 1000)
+          multiRowsFailed++
+        } else if (allCompleted) {
+          // All 4 clips done — row is ready for Phase 21D assembly. Don't set
+          // media_status='ready' yet (that's gated on the assembled MP4
+          // landing in video_url); the kling_clips_completed_at timestamp is
+          // the signal the assembler watches for.
+          multiRowsReadyForAssembly++
+        } else {
+          multiRowsStillPending++
+        }
+
+        const { error: upErr } = await supabase
+          .from('content_calendar')
+          .update(updatePayload)
+          .eq('id', row.id)
+        if (upErr) {
+          errors.push({ row_id: row.id, error: `multi-clip UPDATE failed: ${upErr.message}` })
+        } else {
+          console.log('[check-kling-jobs] multi-clip row updated', {
+            row_id: row.id,
+            all_completed: allCompleted,
+            any_failed: anyFailed,
+          })
+        }
+      }
+    }
+  }
+
   return NextResponse.json({
     success: true,
     polled: candidates.length,
     completed,
     failed,
     still_pending: stillPending,
+    multi_clip_completed_clips: multiCompletedClips,
+    multi_clip_failed_clips: multiFailedClips,
+    multi_clip_rows_ready_for_assembly: multiRowsReadyForAssembly,
+    multi_clip_rows_failed: multiRowsFailed,
+    multi_clip_rows_still_pending: multiRowsStillPending,
     errors,
     started_at: startedAt,
   })

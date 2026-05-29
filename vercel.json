@@ -32,6 +32,10 @@
     {
       "path": "/api/cron/check-kling-jobs",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/generate-youtube-video",
+      "schedule": "0 10 * * 0"
     }
   ]
 }
