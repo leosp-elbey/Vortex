@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/youtube-once",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/check-kling-jobs",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
