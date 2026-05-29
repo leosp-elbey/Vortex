@@ -5,7 +5,7 @@
 //   Body: none (uses a fixed cinematic sample prompt).
 //   Returns: { kling_job_id, status, prompt }
 //
-// Used by the operator after wiring KLING_API_KEY + KLING_API_SECRET in
+// Used by the operator after wiring PIAPI_API_KEY in
 // Vercel env vars to confirm:
 //   1. JWT signing works (no "invalid token" / 401).
 //   2. The submission endpoint accepts the prompt + returns a task_id.

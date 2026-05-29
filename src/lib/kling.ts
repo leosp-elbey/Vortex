@@ -1,34 +1,38 @@
-// Phase 21B — Kling AI text-to-video wrapper for the cinematic YouTube pipeline.
+// Phase 21B (re-platformed) — Kling text-to-video via PiAPI reseller.
 //
-// Two-step async flow:
-//   1. generateCinematicClip(prompt, duration, aspectRatio) → POST submit
-//      → returns klingJobId. Caller persists into
-//      content_calendar.kling_job_id.
-//   2. getKlingJobStatus(jobId) → GET poll. The /api/cron/check-kling-jobs
-//      route walks pending jobs every 10 min and writes video_url +
-//      media_status='ready' when finished.
+// Originally hit Kling's first-party API at api-singapore.klingai.com
+// directly with hand-rolled HS256 JWTs. Re-platformed onto PiAPI's
+// unified-task gateway (https://api.piapi.ai) for self-serve credits
+// and a much simpler auth surface: a single x-api-key header in place of
+// per-request JWT signing.
 //
-// HTTP-only — matches the house style for AI providers (no SDK; see
-// src/lib/media-providers.ts and src/lib/elevenlabs.ts). JWT signing is
-// hand-rolled HS256 via node:crypto so we don't add a jsonwebtoken
-// dependency.
+// Public surface (consumed by /api/cron/check-kling-jobs, /api/cron/
+// generate-youtube-video, /api/admin/test-kling) is identical to the
+// first-party version — same function signatures, same return shapes —
+// so callers stay untouched.
 //
-// API reference:
-//   Base: https://api-singapore.klingai.com
-//   Submit: POST /v1/videos/text2video    body { prompt, duration, aspect_ratio }
-//   Query:  GET  /v1/videos/text2video/{task_id}
-//   Auth:   Authorization: Bearer <JWT> where JWT = HS256({iss,exp,nbf}, api_secret)
-//   Response envelope: { code: 0, message: "SUCCEED", data: {...} } on success.
+// API reference (verified against piapi.ai/docs/kling-api/create-task and
+// /get-task):
+//   Base: https://api.piapi.ai
+//   Submit: POST /api/v1/task
+//     body { model: "kling", task_type: "video_generation",
+//            input: { prompt, duration, aspect_ratio } }
+//   Query:  GET  /api/v1/task/{task_id}
+//   Auth:   x-api-key: <PIAPI_API_KEY>
+//   Response envelope: { code: 200, data: { task_id, status, output, error? }, message }
+//
+// Status strings PiAPI returns: Pending | Staged | Processing | Completed
+// | Failed (capitalized). normalizeStatus() lowercases + maps onto the
+// project's canonical KlingJobStatus enum.
+//
+// Video URL resolution is defensive — PiAPI emits different output shapes
+// per Kling model variant. Lookup order:
+//   1. data.output.works[0].video.resource_without_watermark   (standard, preferred)
+//   2. data.output.works[0].video.resource                     (standard, watermarked fallback)
+//   3. data.output.video                                       (Turbo / 3.0 fallback)
 
-import { createHmac } from 'node:crypto'
-
-const KLING_API_BASE = 'https://api-singapore.klingai.com'
-const KLING_TEXT2VIDEO_PATH = '/v1/videos/text2video'
-// 30-minute access tokens — short-lived so a leaked JWT has limited blast
-// radius. The signing is cheap enough to do per-request; no caching.
-const JWT_TTL_SECONDS = 1800
-// nbf slack absorbs clock skew between Vercel functions and Kling.
-const JWT_NBF_SLACK_SECONDS = 5
+const PIAPI_API_BASE = 'https://api.piapi.ai'
+const PIAPI_TASK_PATH = '/api/v1/task'
 const PROMPT_MAX_CHARS = 2500
 
 export type KlingJobStatus = 'submitted' | 'processing' | 'completed' | 'failed' | 'unknown'
@@ -46,7 +50,7 @@ export interface GenerateCinematicClipResult {
   success: boolean
   klingJobId?: string
   status?: KlingJobStatus
-  /** Raw status string from Kling for diagnostics. */
+  /** Raw status string from PiAPI for diagnostics. */
   rawStatus?: string
   error?: string
 }
@@ -58,7 +62,7 @@ export interface KlingJobStatusResult {
   videoUrl?: string | null
   /** Clip duration in seconds when status='completed'. */
   duration?: number | null
-  /** Raw status string from Kling for diagnostics. */
+  /** Raw status string from PiAPI for diagnostics. */
   rawStatus?: string
   error?: string
 }
@@ -67,105 +71,134 @@ function envTrim(key: string): string {
   return (process.env[key] ?? '').trim()
 }
 
-function base64url(input: Buffer | string): string {
-  const buf = typeof input === 'string' ? Buffer.from(input) : input
-  return buf.toString('base64url')
-}
-
 /**
- * Sign a Kling JWT (HS256). Per Kling docs:
- *   iss = api_key (developer access key)
- *   exp = unix-seconds, short-lived
- *   nbf = unix-seconds, with small slack
- *   key = api_secret
- */
-function signKlingJwt(apiKey: string, apiSecret: string): string {
-  const header = { alg: 'HS256', typ: 'JWT' }
-  const now = Math.floor(Date.now() / 1000)
-  const payload = {
-    iss: apiKey,
-    exp: now + JWT_TTL_SECONDS,
-    nbf: now - JWT_NBF_SLACK_SECONDS,
-  }
-  const encHeader = base64url(JSON.stringify(header))
-  const encPayload = base64url(JSON.stringify(payload))
-  const signingInput = `${encHeader}.${encPayload}`
-  const signature = createHmac('sha256', apiSecret).update(signingInput).digest()
-  return `${signingInput}.${base64url(signature)}`
-}
-
-/**
- * Returns true when both KLING_API_KEY and KLING_API_SECRET are non-empty.
- * Defensive — never throws.
+ * Returns true when PIAPI_API_KEY is non-empty. Defensive — never throws.
  */
 export function isKlingConfigured(): boolean {
-  return envTrim('KLING_API_KEY').length > 0 && envTrim('KLING_API_SECRET').length > 0
+  return envTrim('PIAPI_API_KEY').length > 0
 }
 
 /**
- * Map the variety of Kling status strings (submitted / queued / processing /
- * succeed / completed / failed / fail / error / running) onto a small fixed
- * set the cron + dashboards can pattern-match on.
+ * Map PiAPI's status strings (Pending / Staged / Processing / Completed /
+ * Failed — plus all the historical variants the prior direct-API client
+ * tolerated) onto the project's canonical enum.
  */
 function normalizeStatus(raw: string | undefined): KlingJobStatus {
   const v = (raw ?? '').toLowerCase().trim()
   if (!v) return 'unknown'
   if (v === 'succeed' || v === 'success' || v === 'completed' || v === 'finished') return 'completed'
   if (v === 'failed' || v === 'fail' || v === 'error') return 'failed'
-  if (v === 'submitted' || v === 'queued' || v === 'pending') return 'submitted'
+  // 'staged' (PiAPI's pre-processing queue state) collapses to 'submitted'
+  // so the poller treats it identically to a freshly-submitted job.
+  if (v === 'submitted' || v === 'queued' || v === 'pending' || v === 'staged') return 'submitted'
   if (v === 'processing' || v === 'running') return 'processing'
   return 'unknown'
 }
 
-interface KlingEnvelope {
+interface PiApiVideoWork {
+  video?: {
+    resource?: string
+    resource_without_watermark?: string
+  }
+}
+
+interface PiApiEnvelope {
   code?: number
   message?: string
   data?: {
     task_id?: string
-    task_status?: string
-    task_result?: {
-      videos?: Array<{ url?: string; duration?: number | string }>
+    status?: string
+    output?: {
+      /** Kling Standard model — array of works with watermarked + clean URLs. */
+      works?: PiApiVideoWork[]
+      /** Kling Turbo / Kling 3.0 — string URL at the top of output. */
+      video?: string
+      /** Kling Standard sometimes also surfaces a top-level video_url
+       *  on the initial submit response (empty string until rendered). */
+      video_url?: string
+      /** Some output payloads carry the duration in seconds. */
+      duration?: number | string
+    }
+    error?: {
+      code?: number | string
+      message?: string
     }
   }
 }
 
 /**
- * Submit a text-to-video job to Kling. Async — returns a job id. Caller
- * persists the id into content_calendar.kling_job_id; the poller cron
+ * Defensive multi-path lookup for the rendered video URL. PiAPI returns
+ * different output shapes per Kling model variant; prefer unwatermarked
+ * standard-Kling, fall back to watermarked standard, then to the
+ * Turbo/3.0 top-level field.
+ */
+function resolveVideoUrl(env: PiApiEnvelope): string | null {
+  const out = env.data?.output
+  if (!out) return null
+  const firstWork = Array.isArray(out.works) ? out.works[0] : undefined
+  const unwatermarked = firstWork?.video?.resource_without_watermark
+  if (typeof unwatermarked === 'string' && unwatermarked.length > 0) return unwatermarked
+  const watermarked = firstWork?.video?.resource
+  if (typeof watermarked === 'string' && watermarked.length > 0) return watermarked
+  const topLevelVideo = out.video
+  if (typeof topLevelVideo === 'string' && topLevelVideo.length > 0) return topLevelVideo
+  return null
+}
+
+/**
+ * Pull the best error string available from a PiAPI envelope. Prefers
+ * the inner data.error.message (PiAPI's preferred error surface) over
+ * the top-level message (often just "success" or a generic phrase).
+ */
+function resolveErrorDetail(env: PiApiEnvelope, fallback: string): string {
+  const inner = env.data?.error?.message
+  if (typeof inner === 'string' && inner.length > 0) return inner
+  if (typeof env.message === 'string' && env.message.length > 0) return env.message
+  return fallback
+}
+
+/**
+ * Submit a text-to-video job. Async — returns a task id. Caller persists
+ * the id into content_calendar.kling_job_id; the poller cron
  * (check-kling-jobs) walks it to completion.
  */
 export async function generateCinematicClip(opts: GenerateCinematicClipOptions): Promise<GenerateCinematicClipResult> {
-  const apiKey = envTrim('KLING_API_KEY')
-  const apiSecret = envTrim('KLING_API_SECRET')
-  if (!apiKey || !apiSecret) return { success: false, error: 'KLING_API_KEY / KLING_API_SECRET not set' }
+  const apiKey = envTrim('PIAPI_API_KEY')
+  if (!apiKey) return { success: false, error: 'PIAPI_API_KEY not set' }
   const prompt = opts.prompt?.trim() ?? ''
   if (!prompt) return { success: false, error: 'prompt is required' }
   const duration = opts.duration ?? 5
   const aspectRatio = opts.aspectRatio ?? '16:9'
 
   try {
-    const jwt = signKlingJwt(apiKey, apiSecret)
-    const res = await fetch(`${KLING_API_BASE}${KLING_TEXT2VIDEO_PATH}`, {
+    const res = await fetch(`${PIAPI_API_BASE}${PIAPI_TASK_PATH}`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${jwt}`,
+        'x-api-key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        prompt: prompt.slice(0, PROMPT_MAX_CHARS),
-        duration: String(duration),
-        aspect_ratio: aspectRatio,
+        model: 'kling',
+        task_type: 'video_generation',
+        input: {
+          prompt: prompt.slice(0, PROMPT_MAX_CHARS),
+          duration,
+          aspect_ratio: aspectRatio,
+        },
       }),
     })
-    const data = (await res.json().catch(() => ({}))) as KlingEnvelope
-    if (!res.ok || (typeof data.code === 'number' && data.code !== 0)) {
-      const message = data.message ?? `HTTP ${res.status}`
-      return { success: false, error: `Kling submit failed: ${message.slice(0, 300)}` }
+    const data = (await res.json().catch(() => ({}))) as PiApiEnvelope
+    // PiAPI success envelope uses code=200 (not Kling's code=0 from the
+    // first-party API). Accept any 2xx HTTP status as success too.
+    const codeOk = typeof data.code !== 'number' || data.code === 200 || data.code === 0
+    if (!res.ok || !codeOk) {
+      const detail = resolveErrorDetail(data, `HTTP ${res.status}`)
+      return { success: false, error: `Kling submit failed: ${detail.slice(0, 300)}` }
     }
     const taskId = data.data?.task_id
-    const rawStatus = data.data?.task_status
+    const rawStatus = data.data?.status
     if (typeof taskId !== 'string' || taskId.length === 0) {
-      return { success: false, error: 'Kling returned no task_id' }
+      return { success: false, error: 'PiAPI returned no task_id' }
     }
     return {
       success: true,
@@ -174,46 +207,45 @@ export async function generateCinematicClip(opts: GenerateCinematicClipOptions):
       rawStatus,
     }
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Kling fetch threw' }
+    return { success: false, error: err instanceof Error ? err.message : 'PiAPI fetch threw' }
   }
 }
 
 /**
- * Poll a Kling job. Returns the normalized status, plus the video URL
- * when finished. The /api/cron/check-kling-jobs route calls this for
- * each pending row and writes results back to content_calendar.
+ * Poll a Kling task via PiAPI. Returns the normalized status, plus the
+ * video URL when finished. The /api/cron/check-kling-jobs route calls
+ * this for each pending row and writes results back to content_calendar.
  */
 export async function getKlingJobStatus(jobId: string): Promise<KlingJobStatusResult> {
-  const apiKey = envTrim('KLING_API_KEY')
-  const apiSecret = envTrim('KLING_API_SECRET')
-  if (!apiKey || !apiSecret) return { success: false, error: 'KLING_API_KEY / KLING_API_SECRET not set' }
+  const apiKey = envTrim('PIAPI_API_KEY')
+  if (!apiKey) return { success: false, error: 'PIAPI_API_KEY not set' }
   if (!jobId) return { success: false, error: 'jobId is required' }
 
   try {
-    const jwt = signKlingJwt(apiKey, apiSecret)
-    const res = await fetch(`${KLING_API_BASE}${KLING_TEXT2VIDEO_PATH}/${encodeURIComponent(jobId)}`, {
+    const res = await fetch(`${PIAPI_API_BASE}${PIAPI_TASK_PATH}/${encodeURIComponent(jobId)}`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${jwt}` },
+      headers: { 'x-api-key': apiKey },
     })
-    const data = (await res.json().catch(() => ({}))) as KlingEnvelope
-    if (!res.ok || (typeof data.code === 'number' && data.code !== 0)) {
-      const message = data.message ?? `HTTP ${res.status}`
-      return { success: false, error: `Kling status query failed: ${message.slice(0, 300)}` }
+    const data = (await res.json().catch(() => ({}))) as PiApiEnvelope
+    const codeOk = typeof data.code !== 'number' || data.code === 200 || data.code === 0
+    if (!res.ok || !codeOk) {
+      const detail = resolveErrorDetail(data, `HTTP ${res.status}`)
+      return { success: false, error: `Kling status query failed: ${detail.slice(0, 300)}` }
     }
     const blob = data.data ?? {}
-    const rawStatus = blob.task_status
+    const rawStatus = blob.status
     const status = normalizeStatus(rawStatus)
-    const firstVideo = blob.task_result?.videos?.[0] ?? null
-    const videoUrl = firstVideo?.url ?? null
-    const duration = firstVideo?.duration != null ? Number(firstVideo.duration) : null
+    const videoUrl = resolveVideoUrl(data)
+    const rawDuration = blob.output?.duration
+    const duration = rawDuration != null ? Number(rawDuration) : null
     return {
       success: true,
       status,
       videoUrl,
-      duration: Number.isFinite(duration) ? duration : null,
+      duration: duration != null && Number.isFinite(duration) ? duration : null,
       rawStatus,
     }
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Kling fetch threw' }
+    return { success: false, error: err instanceof Error ? err.message : 'PiAPI fetch threw' }
   }
 }
