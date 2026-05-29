@@ -14,7 +14,7 @@
 // dependency.
 //
 // API reference:
-//   Base: https://api.klingai.com
+//   Base: https://api-singapore.klingai.com
 //   Submit: POST /v1/videos/text2video    body { prompt, duration, aspect_ratio }
 //   Query:  GET  /v1/videos/text2video/{task_id}
 //   Auth:   Authorization: Bearer <JWT> where JWT = HS256({iss,exp,nbf}, api_secret)
@@ -22,7 +22,7 @@
 
 import { createHmac } from 'node:crypto'
 
-const KLING_API_BASE = 'https://api.klingai.com'
+const KLING_API_BASE = 'https://api-singapore.klingai.com'
 const KLING_TEXT2VIDEO_PATH = '/v1/videos/text2video'
 // 30-minute access tokens — short-lived so a leaked JWT has limited blast
 // radius. The signing is cheap enough to do per-request; no caching.
