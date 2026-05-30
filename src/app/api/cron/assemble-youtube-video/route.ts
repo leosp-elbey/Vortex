@@ -255,6 +255,12 @@ async function pollExistingRender(
           status: 'approved',
           posting_status: 'ready',
           posting_gate_approved: true,
+          // The autoposter gate (validateAutoposterCandidate) requires
+          // manual_posting_only === true to post — it's the column the
+          // operator's dashboard "Mark Ready" click flips. The Phase 21A-D
+          // YouTube pipeline IS the operator's automated surrogate, so
+          // flipping it here is semantically correct.
+          manual_posting_only: true,
           queued_for_posting_at: nowIso,
           media_metadata: newMeta,
         },
