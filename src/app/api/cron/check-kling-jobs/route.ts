@@ -112,15 +112,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: queryErr.message }, { status: 500 })
   }
 
+  // No early return when the scalar queue is empty — the multi-clip walk
+  // for Phase 21C YouTube rows runs unconditionally below. Pre-fix, an
+  // empty scalar queue (the steady state — FB/IG/TikTok don't use Kling)
+  // short-circuited the function and starved the YouTube poller.
   const candidates = (rows ?? []) as PendingRow[]
-  if (candidates.length === 0) {
-    return NextResponse.json({
-      success: true,
-      polled: 0,
-      reason: 'no_pending_jobs',
-      started_at: startedAt,
-    })
-  }
 
   let completed = 0
   let failed = 0
