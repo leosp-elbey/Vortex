@@ -227,13 +227,35 @@ export async function GET(request: NextRequest) {
         if (!Array.isArray(rawClips) || rawClips.length === 0) continue
         const clips = rawClips as Array<Record<string, unknown>>
 
+        // TEMP DIAG (Phase 21B-21D pipeline shakedown) — remove after the
+        // first successful end-to-end YouTube video lands. Shows the raw
+        // clip-status snapshot so we can compare against the post-poll
+        // evaluation below.
+        console.log('[check-kling-jobs] multi-clip row enter', {
+          row_id: row.id,
+          clip_count: clips.length,
+          clips_before: clips.map(c => ({
+            scene_index: (c as Record<string, unknown>).scene_index,
+            status: (c as Record<string, unknown>).status,
+            has_video_url: typeof (c as Record<string, unknown>).video_url === 'string'
+              && ((c as Record<string, unknown>).video_url as string).length > 0,
+            has_job_id: typeof (c as Record<string, unknown>).job_id === 'string',
+          })),
+          completed_at_marked: typeof meta.kling_clips_completed_at === 'string',
+        })
+
         let rowMutated = false
         const updatedClips: Array<Record<string, unknown>> = []
 
         for (const clip of clips) {
           const status = String(clip.status ?? 'unknown').toLowerCase()
-          // Terminal states — don't re-poll.
-          if (status === 'completed' || status === 'failed') {
+          const clipHasUrl = typeof clip.video_url === 'string' && (clip.video_url as string).length > 0
+          // Terminal states — don't re-poll. EXCEPTION: a 'completed' clip
+          // missing its video_url is a stale state (PiAPI's Completed status
+          // can flip before the rendered URL is populated; older code wrote
+          // status='completed' without an URL in that window and the clip
+          // got latched permanently). Re-polling lets us recover the URL.
+          if (status === 'failed' || (status === 'completed' && clipHasUrl)) {
             updatedClips.push(clip)
             continue
           }
@@ -245,6 +267,19 @@ export async function GET(request: NextRequest) {
           }
 
           const poll = await getKlingJobStatus(jobId)
+
+          // TEMP DIAG — see what PiAPI is actually returning per clip.
+          console.log('[check-kling-jobs] multi-clip poll', {
+            row_id: row.id,
+            scene_index: clip.scene_index,
+            job_id: jobId,
+            poll_success: poll.success,
+            poll_raw_status: poll.rawStatus,
+            poll_normalized: poll.status,
+            poll_has_video_url: typeof poll.videoUrl === 'string' && poll.videoUrl.length > 0,
+            poll_error: poll.error,
+          })
+
           if (!poll.success) {
             // Transient poll failure — keep clip as-is, retry next tick.
             errors.push({ row_id: row.id, error: `clip ${clip.scene_index ?? '?'} poll: ${poll.error ?? 'unknown'}` })
@@ -272,29 +307,78 @@ export async function GET(request: NextRequest) {
           } else {
             // Still submitted / processing / unknown — write back the
             // normalized status only if it changed.
-            const normalized = poll.status ?? 'unknown'
-            if (normalized !== status) rowMutated = true
-            updatedClips.push({ ...clip, status: normalized })
+            //
+            // Defensive demotion: if PiAPI reports status='completed' WITHOUT
+            // a video_url (transient inconsistency — Completed flips before
+            // the URL is populated), demote to 'processing' so we re-poll
+            // next tick instead of locking in a no-URL terminal state that
+            // the all-done check would fail on.
+            let effectiveStatus = poll.status ?? 'unknown'
+            if (effectiveStatus === 'completed' && !poll.videoUrl) {
+              effectiveStatus = 'processing'
+            }
+            if (effectiveStatus !== status) rowMutated = true
+            updatedClips.push({ ...clip, status: effectiveStatus })
           }
         }
 
-        if (!rowMutated) {
+        const allCompleted = updatedClips.every(
+          c => String((c as Record<string, unknown>).status).toLowerCase() === 'completed'
+            && typeof (c as Record<string, unknown>).video_url === 'string'
+            && ((c as Record<string, unknown>).video_url as string).length > 0,
+        )
+        const anyFailed = updatedClips.some(
+          c => String((c as Record<string, unknown>).status).toLowerCase() === 'failed',
+        )
+
+        const completedAlreadyMarked = typeof meta.kling_clips_completed_at === 'string'
+          && (meta.kling_clips_completed_at as string).length > 0
+        const failedAlreadyMarked = typeof meta.kling_clips_failed_at === 'string'
+          && (meta.kling_clips_failed_at as string).length > 0
+        const needsCompletedFlip = allCompleted && !completedAlreadyMarked
+        const needsFailedFlip = anyFailed && !failedAlreadyMarked
+
+        // TEMP DIAG.
+        console.log('[check-kling-jobs] multi-clip row evaluation', {
+          row_id: row.id,
+          row_mutated: rowMutated,
+          all_completed: allCompleted,
+          any_failed: anyFailed,
+          completed_already_marked: completedAlreadyMarked,
+          needs_completed_flip: needsCompletedFlip,
+          needs_failed_flip: needsFailedFlip,
+          clips_after: updatedClips.map(c => ({
+            scene_index: (c as Record<string, unknown>).scene_index,
+            status: (c as Record<string, unknown>).status,
+            has_video_url: typeof (c as Record<string, unknown>).video_url === 'string'
+              && ((c as Record<string, unknown>).video_url as string).length > 0,
+          })),
+        })
+
+        // Skip when nothing to do: no clip changed AND no back-fill of the
+        // completion/failure timestamp is needed. The needs* flags are the
+        // recovery path for rows that finished on a previous tick but
+        // didn't get the timestamp written (e.g., Bug 1 above stalled them
+        // at 'completed' without URL, then a later re-poll filled the URL
+        // and now all four are good but rowMutated=false).
+        if (!rowMutated && !needsCompletedFlip && !needsFailedFlip) {
           multiRowsStillPending++
           continue
         }
 
-        const allCompleted = updatedClips.every(
-          c => String(c.status).toLowerCase() === 'completed' && typeof c.video_url === 'string',
-        )
-        const anyFailed = updatedClips.some(c => String(c.status).toLowerCase() === 'failed')
-
         const newMeta: Record<string, unknown> = { ...meta, kling_clip_jobs: updatedClips }
-        if (allCompleted) newMeta.kling_clips_completed_at = new Date().toISOString()
-        if (anyFailed) newMeta.kling_clips_failed_at = new Date().toISOString()
+        if (allCompleted && !completedAlreadyMarked) {
+          newMeta.kling_clips_completed_at = new Date().toISOString()
+        }
+        if (anyFailed && !failedAlreadyMarked) {
+          newMeta.kling_clips_failed_at = new Date().toISOString()
+        }
 
         const updatePayload: Record<string, unknown> = { media_metadata: newMeta }
         if (anyFailed) {
-          const failedCount = updatedClips.filter(c => String(c.status).toLowerCase() === 'failed').length
+          const failedCount = updatedClips.filter(
+            c => String((c as Record<string, unknown>).status).toLowerCase() === 'failed',
+          ).length
           updatePayload.media_status = 'failed'
           updatePayload.media_error = `Kling render failed for ${failedCount}/${updatedClips.length} clip(s)`.slice(0, 1000)
           multiRowsFailed++
@@ -319,6 +403,8 @@ export async function GET(request: NextRequest) {
             row_id: row.id,
             all_completed: allCompleted,
             any_failed: anyFailed,
+            wrote_completed_at: allCompleted && !completedAlreadyMarked,
+            wrote_failed_at: anyFailed && !failedAlreadyMarked,
           })
         }
       }
