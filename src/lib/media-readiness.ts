@@ -221,10 +221,27 @@ export function validateMediaReadiness(row: MediaReadinessRow): MediaReadinessRe
   // video_prompt, the gate refuses to post until the resolved media URL is
   // populated. Prevents the "text-only stub posted before the generation
   // worker finished" failure mode.
-  if (nonEmpty(row.image_prompt) && !has_image) {
+  //
+  // Phase 21D fix — only fire when the platform ACTUALLY expects this type of
+  // media. The original implementation fired on any non-empty prompt without
+  // a matching URL, which over-fired on:
+  //   - YouTube orchestrator rows that use `image_prompt` as destination
+  //     metadata (e.g., "Santorini, Greece") even though YouTube's rule is
+  //     `image: 'none'`. Row 61e4fa5d was caught by exactly this.
+  //   - Instagram/Facebook rows with a video_url present and an image_prompt
+  //     set — `either_satisfies=true` means the video satisfies the platform,
+  //     so the orphan image_prompt is a non-issue.
+  //   - Any text-OK platform (LinkedIn, Threads, FB) where prompts can exist
+  //     as labels without media being required.
+  const imageActuallyExpected =
+    rule.image === 'required' || (rule.either_satisfies && !has_video)
+  const videoActuallyExpected =
+    rule.video === 'required' || (rule.either_satisfies && !has_image)
+
+  if (nonEmpty(row.image_prompt) && !has_image && imageActuallyExpected) {
     reasons.push('campaign media prompt exists but generated media is missing')
   }
-  if (nonEmpty(row.video_prompt) && !has_video) {
+  if (nonEmpty(row.video_prompt) && !has_video && videoActuallyExpected) {
     // Use the same canonical string so dashboard counts collapse cleanly.
     if (!reasons.includes('campaign media prompt exists but generated media is missing')) {
       reasons.push('campaign media prompt exists but generated media is missing')
