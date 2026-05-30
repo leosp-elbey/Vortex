@@ -293,6 +293,7 @@ export async function GET(request: NextRequest) {
       reason: 'no_eligible_rows',
       eligible_count: 0,
       skipped_count: plan.skipped.length,
+      skipped_reasons: plan.skipped.slice(0, 5).map(s => ({ id: s.id, reason: s.reason })),
       started_at: startedAt,
     })
   }
