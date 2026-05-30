@@ -27,6 +27,14 @@
 //   parameter — each 5s clip plays slowed to (90/4) = 22.5s, producing
 //   90s of cinematic slow-motion that pairs with the VO. If this reads
 //   too languid in practice, 21E can switch to clip-looping.
+//
+//   Speed floor: 0.25 (Shotstack's documented minimum — lower values are
+//   rejected with a validation error per clip). With 5s sources clamped
+//   to 0.25, max display per clip = 20s → 4 clips = 80s. A 90s VO ends
+//   with ~10s of trailing silence + black. Acceptable for v1; a Phase 21E
+//   fix would either switch the orchestrator to 10s Kling clips
+//   (5/22.5=0.222 vs 10/22.5=0.444 — the latter is in range) or loop the
+//   sequence to fill the gap.
 
 const SHOTSTACK_BASE = 'https://api.shotstack.io/edit'
 const PROD_STAGE = 'v1'
@@ -108,7 +116,13 @@ function normalizeStatus(raw: string | undefined): ShotstackRenderStatus {
 }
 
 interface ShotstackTimelineClip {
-  asset: { type: 'video' | 'audio'; src: string }
+  asset: {
+    type: 'video' | 'audio'
+    src: string
+    /** Mute the asset's native audio track (set to 0 on video clips so the
+     *  VO track isn't competing with any incidental Kling audio). */
+    volume?: number
+  }
   start: number
   length: number
   speed?: number
@@ -125,31 +139,53 @@ interface ShotstackRenderBody {
   }
 }
 
+// Shotstack's documented speed range. Going below SHOTSTACK_MIN_SPEED
+// triggers per-clip validation errors ("Validation failed for timeline").
+const SHOTSTACK_MIN_SPEED = 0.25
+const SHOTSTACK_MAX_SPEED = 1.0 // we never speed UP, only slow down
+
 /**
  * Build the Shotstack render body. Video clips go on track 0 (top); audio
  * goes on track 1 (Shotstack mixes downward). Each video clip is slowed
- * via `speed` so the 4-clip sequence covers the full VO duration.
+ * via `speed` so the 4-clip sequence covers as much of the VO as the
+ * speed floor allows.
+ *
+ * When the ideal speed would fall below SHOTSTACK_MIN_SPEED (= 0.25), the
+ * clip is clamped and its display length recomputed from the clamped
+ * value. This keeps the per-clip start/length math internally consistent
+ * with what Shotstack will actually render, even if the resulting video
+ * track is shorter than the audio track (trailing silence + black —
+ * acceptable for v1 per the file header).
  */
 function buildRenderBody(opts: SubmitRenderOptions): ShotstackRenderBody {
   const audioDuration = Math.max(1, opts.audioDurationSeconds ?? 90)
   const clipCount = opts.videoClips.length
-  const perClipDisplayDuration = audioDuration / clipCount
+  const idealPerClipDisplayDuration = audioDuration / clipCount
 
-  const videoTrackClips: ShotstackTimelineClip[] = opts.videoClips.map((c, i) => {
-    // Shotstack speed semantics: a clip with `speed=0.5` plays at half-speed.
-    // We need the source's `duration_seconds` to STRETCH to perClipDisplayDuration.
-    // speed = source_duration / displayed_duration  (clamped to [0.05, 1.0]
-    // — Shotstack rejects speeds < 0.05; we never speed UP).
-    const rawSpeed = c.duration_seconds / perClipDisplayDuration
-    const speed = Math.max(0.05, Math.min(1.0, rawSpeed))
-    return {
-      asset: { type: 'video', src: c.src },
-      start: Number((i * perClipDisplayDuration).toFixed(2)),
-      length: Number(perClipDisplayDuration.toFixed(2)),
-      speed,
+  const videoTrackClips: ShotstackTimelineClip[] = []
+  let currentStart = 0
+  for (const c of opts.videoClips) {
+    const idealSpeed = c.duration_seconds / idealPerClipDisplayDuration
+    const speed = Math.max(SHOTSTACK_MIN_SPEED, Math.min(SHOTSTACK_MAX_SPEED, idealSpeed))
+    // length follows from the clamped speed, NOT from the ideal duration.
+    // Example: 5s source at speed=0.25 plays for 20s; if the ideal was
+    // 22.5s, the clip is 2.5s shorter than the ideal but the math is
+    // honest about what Shotstack will produce.
+    const displayLength = c.duration_seconds / speed
+    videoTrackClips.push({
+      asset: {
+        type: 'video',
+        src: c.src,
+        // Mute Kling's video audio so it doesn't fight the VO track.
+        volume: 0,
+      },
+      start: Number(currentStart.toFixed(2)),
+      length: Number(displayLength.toFixed(2)),
+      speed: Number(speed.toFixed(3)),
       fit: 'cover',
-    }
-  })
+    })
+    currentStart += displayLength
+  }
 
   const audioTrackClips: ShotstackTimelineClip[] = [
     {
@@ -216,11 +252,23 @@ export async function submitShotstackRender(opts: SubmitRenderOptions): Promise<
     })
     const data = (await res.json().catch(() => ({}))) as ShotstackEnvelope<ShotstackSubmitResponse>
     if (!res.ok || data.success !== true) {
+      // Capture the FULL Shotstack response — their validation errors land
+      // in nested arrays (response.errors, response.message.errors, etc.)
+      // that the previous shallow extraction missed entirely. Without this,
+      // a generic "Validation failed for timeline: Found 4 validation errors"
+      // gives us nothing to act on. Also log the body we sent so we can
+      // diff against what the docs say is valid.
+      console.error('[shotstack] submit failed — full response', {
+        http_status: res.status,
+        response_body: data,
+        sent_body: body,
+      })
       const message = data.response?.message ?? data.message ?? `HTTP ${res.status}`
       return { success: false, error: `Shotstack render submit failed: ${message.slice(0, 300)}` }
     }
     const renderId = data.response?.id
     if (typeof renderId !== 'string' || renderId.length === 0) {
+      console.error('[shotstack] submit succeeded but no render id', { response_body: data })
       return { success: false, error: 'Shotstack returned no render id' }
     }
     return { success: true, shotstackRenderId: renderId }

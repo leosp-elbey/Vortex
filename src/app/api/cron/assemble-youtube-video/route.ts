@@ -137,6 +137,14 @@ async function submitNewRender(
     return { row_id: row.id, action: 'skipped', error: 'missing elevenlabs_audio_url' }
   }
 
+  console.log('[assemble-youtube-video] submitting shotstack render', {
+    row_id: row.id,
+    clip_count: videoClips.length,
+    clip_durations: videoClips.map(c => c.duration_seconds),
+    audio_url_host: (() => { try { return new URL(row.elevenlabs_audio_url).host } catch { return 'unparseable' } })(),
+    clip_url_hosts: videoClips.map(c => { try { return new URL(c.src).host } catch { return 'unparseable' } }),
+  })
+
   const submit = await submitShotstackRender({
     videoClips,
     audioUrl: row.elevenlabs_audio_url,
