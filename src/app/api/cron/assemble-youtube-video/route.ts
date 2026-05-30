@@ -58,10 +58,6 @@ export const maxDuration = 120
 
 const KILL_SWITCH_KEY = 'youtube_video_assembly_cron_enabled'
 const MAX_ROWS_PER_TICK = 1
-// Default VO length used when sizing the timeline. The 21C script targets
-// ~225 words ≈ ~90s at typical narration cadence. Short VO → trailing
-// silence in the output; long VO → tail clipped. Acceptable for v1.
-const FALLBACK_AUDIO_DURATION_SECONDS = 90
 const STORAGE_BUCKET = 'media'
 const STORAGE_PATH_PREFIX = 'content/youtube/'
 
@@ -148,7 +144,6 @@ async function submitNewRender(
   const submit = await submitShotstackRender({
     videoClips,
     audioUrl: row.elevenlabs_audio_url,
-    audioDurationSeconds: FALLBACK_AUDIO_DURATION_SECONDS,
     resolution: 'hd',
   })
   if (!submit.success || !submit.shotstackRenderId) {

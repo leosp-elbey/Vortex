@@ -21,20 +21,22 @@
 //   Auth:   x-api-key header
 //   Response envelope: { success, message, response: {...} }
 //
-// Slow-motion design note:
-//   21C scripts target ~90s of VO. Kling clips are 5s each × 4 = 20s of
-//   source video. We resolve the mismatch via Shotstack's `speed`
-//   parameter — each 5s clip plays slowed to (90/4) = 22.5s, producing
-//   90s of cinematic slow-motion that pairs with the VO. If this reads
-//   too languid in practice, 21E can switch to clip-looping.
+// Highlight-reel design note:
+//   21C scripts target ~90s of VO, but Kling produces 5s clips × 4 = 20s
+//   of source video. The original Phase 21D attempt was to slow the
+//   clips via Shotstack's `speed` property to fill the full 90s VO.
+//   Shotstack rejects `speed` as an unknown property on clip objects
+//   (one validation error per clip), so the slow-motion approach is
+//   dead at the API level — not a matter of finding the right floor.
 //
-//   Speed floor: 0.25 (Shotstack's documented minimum — lower values are
-//   rejected with a validation error per clip). With 5s sources clamped
-//   to 0.25, max display per clip = 20s → 4 clips = 80s. A 90s VO ends
-//   with ~10s of trailing silence + black. Acceptable for v1; a Phase 21E
-//   fix would either switch the orchestrator to 10s Kling clips
-//   (5/22.5=0.222 vs 10/22.5=0.444 — the latter is in range) or loop the
-//   sequence to fill the gap.
+//   New design: play the 4 clips back-to-back at native speed for a
+//   20-second highlight reel. The VO audio is trimmed to match the
+//   video length (first 20s of the 90s narration plays under the
+//   reel). Loses ~70s of narration; gains a tight social/Shorts-style
+//   output that Shotstack actually accepts. Phase 21E follow-ups
+//   (NOT in scope here) — either generate more Kling clips up front
+//   so the reel covers the full VO, or shorten the 21C script target
+//   from 90s to ~20s so VO + reel match exactly.
 
 const SHOTSTACK_BASE = 'https://api.shotstack.io/edit'
 const PROD_STAGE = 'v1'
@@ -56,12 +58,11 @@ export interface ShotstackClip {
 }
 
 export interface SubmitRenderOptions {
-  /** Video clips in order. Each will be slowed to fit audioDurationSeconds / clips.length. */
+  /** Video clips in order. Played back-to-back at native speed. */
   videoClips: ShotstackClip[]
-  /** Public URL of the VO audio (typically the elevenlabs_audio_url from Supabase). */
+  /** Public URL of the VO audio (typically the elevenlabs_audio_url from Supabase).
+   *  Played under the video reel, trimmed to the reel's total length. */
   audioUrl: string
-  /** Total VO length in seconds — defines the timeline length. Defaults to 90 (21C's target). */
-  audioDurationSeconds?: number
   /** Output resolution. 'hd' = 1280x720 (default), 'sd' = 854x480, '1080' = 1920x1080. */
   resolution?: 'sd' | 'hd' | '1080'
 }
@@ -125,7 +126,6 @@ interface ShotstackTimelineClip {
   }
   start: number
   length: number
-  speed?: number
   fit?: 'cover' | 'contain' | 'crop' | 'none'
 }
 
@@ -139,39 +139,18 @@ interface ShotstackRenderBody {
   }
 }
 
-// Shotstack's documented speed range. Going below SHOTSTACK_MIN_SPEED
-// triggers per-clip validation errors ("Validation failed for timeline").
-const SHOTSTACK_MIN_SPEED = 0.25
-const SHOTSTACK_MAX_SPEED = 1.0 // we never speed UP, only slow down
-
 /**
  * Build the Shotstack render body. Video clips go on track 0 (top); audio
- * goes on track 1 (Shotstack mixes downward). Each video clip is slowed
- * via `speed` so the 4-clip sequence covers as much of the VO as the
- * speed floor allows.
- *
- * When the ideal speed would fall below SHOTSTACK_MIN_SPEED (= 0.25), the
- * clip is clamped and its display length recomputed from the clamped
- * value. This keeps the per-clip start/length math internally consistent
- * with what Shotstack will actually render, even if the resulting video
- * track is shorter than the audio track (trailing silence + black —
- * acceptable for v1 per the file header).
+ * goes on track 1 (Shotstack mixes downward). Clips play back-to-back at
+ * native speed (no `speed` property — Shotstack rejects it as unknown on
+ * clip objects). The VO is trimmed to the total video length so the
+ * output is a clean reel without trailing audio over black.
  */
 function buildRenderBody(opts: SubmitRenderOptions): ShotstackRenderBody {
-  const audioDuration = Math.max(1, opts.audioDurationSeconds ?? 90)
-  const clipCount = opts.videoClips.length
-  const idealPerClipDisplayDuration = audioDuration / clipCount
-
   const videoTrackClips: ShotstackTimelineClip[] = []
   let currentStart = 0
   for (const c of opts.videoClips) {
-    const idealSpeed = c.duration_seconds / idealPerClipDisplayDuration
-    const speed = Math.max(SHOTSTACK_MIN_SPEED, Math.min(SHOTSTACK_MAX_SPEED, idealSpeed))
-    // length follows from the clamped speed, NOT from the ideal duration.
-    // Example: 5s source at speed=0.25 plays for 20s; if the ideal was
-    // 22.5s, the clip is 2.5s shorter than the ideal but the math is
-    // honest about what Shotstack will produce.
-    const displayLength = c.duration_seconds / speed
+    const length = Number(c.duration_seconds.toFixed(2))
     videoTrackClips.push({
       asset: {
         type: 'video',
@@ -180,18 +159,22 @@ function buildRenderBody(opts: SubmitRenderOptions): ShotstackRenderBody {
         volume: 0,
       },
       start: Number(currentStart.toFixed(2)),
-      length: Number(displayLength.toFixed(2)),
-      speed: Number(speed.toFixed(3)),
+      length,
       fit: 'cover',
     })
-    currentStart += displayLength
+    currentStart += c.duration_seconds
   }
+  const totalVideoDuration = Number(currentStart.toFixed(2))
 
   const audioTrackClips: ShotstackTimelineClip[] = [
     {
       asset: { type: 'audio', src: opts.audioUrl },
       start: 0,
-      length: audioDuration,
+      // Trim VO to the reel length. The full VO file is referenced by
+      // src; Shotstack plays only the first totalVideoDuration seconds.
+      // Trailing narration (typically ~70s with 5s × 4 clips vs a 90s VO)
+      // is intentionally dropped — see the file-header design note.
+      length: totalVideoDuration,
     },
   ]
 
