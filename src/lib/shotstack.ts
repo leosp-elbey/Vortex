@@ -258,17 +258,28 @@ export async function submitShotstackRender(opts: SubmitRenderOptions): Promise<
       // a generic "Validation failed for timeline: Found 4 validation errors"
       // gives us nothing to act on. Also log the body we sent so we can
       // diff against what the docs say is valid.
-      console.error('[shotstack] submit failed — full response', {
-        http_status: res.status,
-        response_body: data,
-        sent_body: body,
-      })
+      //
+      // JSON.stringify with indent — Vercel's log formatter calls
+      // util.inspect with default depth=2 which collapses nested arrays
+      // (response.errors[], etc.) to [Array]. Stringifying first walks
+      // the whole tree and Vercel preserves the multi-line output verbatim.
+      console.error(
+        '[shotstack] submit failed — full response',
+        JSON.stringify(
+          { http_status: res.status, response_body: data, sent_body: body },
+          null,
+          2,
+        ),
+      )
       const message = data.response?.message ?? data.message ?? `HTTP ${res.status}`
       return { success: false, error: `Shotstack render submit failed: ${message.slice(0, 300)}` }
     }
     const renderId = data.response?.id
     if (typeof renderId !== 'string' || renderId.length === 0) {
-      console.error('[shotstack] submit succeeded but no render id', { response_body: data })
+      console.error(
+        '[shotstack] submit succeeded but no render id',
+        JSON.stringify({ response_body: data }, null, 2),
+      )
       return { success: false, error: 'Shotstack returned no render id' }
     }
     return { success: true, shotstackRenderId: renderId }
