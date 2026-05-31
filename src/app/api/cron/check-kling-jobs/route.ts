@@ -227,23 +227,6 @@ export async function GET(request: NextRequest) {
         if (!Array.isArray(rawClips) || rawClips.length === 0) continue
         const clips = rawClips as Array<Record<string, unknown>>
 
-        // TEMP DIAG (Phase 21B-21D pipeline shakedown) — remove after the
-        // first successful end-to-end YouTube video lands. Shows the raw
-        // clip-status snapshot so we can compare against the post-poll
-        // evaluation below.
-        console.log('[check-kling-jobs] multi-clip row enter', {
-          row_id: row.id,
-          clip_count: clips.length,
-          clips_before: clips.map(c => ({
-            scene_index: (c as Record<string, unknown>).scene_index,
-            status: (c as Record<string, unknown>).status,
-            has_video_url: typeof (c as Record<string, unknown>).video_url === 'string'
-              && ((c as Record<string, unknown>).video_url as string).length > 0,
-            has_job_id: typeof (c as Record<string, unknown>).job_id === 'string',
-          })),
-          completed_at_marked: typeof meta.kling_clips_completed_at === 'string',
-        })
-
         let rowMutated = false
         const updatedClips: Array<Record<string, unknown>> = []
 
@@ -267,18 +250,6 @@ export async function GET(request: NextRequest) {
           }
 
           const poll = await getKlingJobStatus(jobId)
-
-          // TEMP DIAG — see what PiAPI is actually returning per clip.
-          console.log('[check-kling-jobs] multi-clip poll', {
-            row_id: row.id,
-            scene_index: clip.scene_index,
-            job_id: jobId,
-            poll_success: poll.success,
-            poll_raw_status: poll.rawStatus,
-            poll_normalized: poll.status,
-            poll_has_video_url: typeof poll.videoUrl === 'string' && poll.videoUrl.length > 0,
-            poll_error: poll.error,
-          })
 
           if (!poll.success) {
             // Transient poll failure — keep clip as-is, retry next tick.
@@ -337,23 +308,6 @@ export async function GET(request: NextRequest) {
           && (meta.kling_clips_failed_at as string).length > 0
         const needsCompletedFlip = allCompleted && !completedAlreadyMarked
         const needsFailedFlip = anyFailed && !failedAlreadyMarked
-
-        // TEMP DIAG.
-        console.log('[check-kling-jobs] multi-clip row evaluation', {
-          row_id: row.id,
-          row_mutated: rowMutated,
-          all_completed: allCompleted,
-          any_failed: anyFailed,
-          completed_already_marked: completedAlreadyMarked,
-          needs_completed_flip: needsCompletedFlip,
-          needs_failed_flip: needsFailedFlip,
-          clips_after: updatedClips.map(c => ({
-            scene_index: (c as Record<string, unknown>).scene_index,
-            status: (c as Record<string, unknown>).status,
-            has_video_url: typeof (c as Record<string, unknown>).video_url === 'string'
-              && ((c as Record<string, unknown>).video_url as string).length > 0,
-          })),
-        })
 
         // Skip when nothing to do: no clip changed AND no back-fill of the
         // completion/failure timestamp is needed. The needs* flags are the
