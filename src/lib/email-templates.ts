@@ -215,7 +215,7 @@ export const EMAIL_TEMPLATES = {
 
       <p>The fastest path to your first commission: post one piece of content today. Show a deal, share a testimonial, or just tell your story. Authenticity converts.</p>
       ${ctaButton('Go to Your Booking Portal →', `${BASE_URL}/book`)}
-      <p style="color:#888;font-size:14px">Questions? Your upline will reach out shortly. Or email <a href="mailto:support@vortextrips.com" style="color:#FF6B35">support@vortextrips.com</a> anytime.<br><br><strong>— Leo, VortexTrips</strong></p>
+      <p style="color:#888;font-size:14px">Questions? Your affiliate support team will reach out shortly. Or email <a href="mailto:support@vortextrips.com" style="color:#FF6B35">support@vortextrips.com</a> anytime.<br><br><strong>— Leo, VortexTrips</strong></p>
     `),
   }),
 
@@ -283,7 +283,7 @@ export const EMAIL_TEMPLATES = {
       <p>Travel is different. Everyone already wants to travel. The only question is: <strong>how much are they paying?</strong></p>
       <p>VortexTrips gives members access to hotel rates 40–60% below Expedia, Booking.com, and every other public platform. When you show someone a side-by-side price comparison — the same room, same dates — it closes itself.</p>
       ${savingsBadge('No convincing required. The savings do the selling.')}
-      <p>Over the next two weeks I want to show you exactly how this works, what our affiliates earn, and why travel converts better than almost any other product in network marketing.</p>
+      <p>Over the next two weeks I want to show you exactly how this works, what our affiliates earn, and why travel converts better than almost any other affiliate offer.</p>
       <p>The fastest way to understand it — watch the official 5-minute opportunity video:</p>
       ${ctaButton('▶ Watch the Opportunity Video', SURGE365.opportunityVideo)}
       <p>Or jump straight to a real member-rate comparison:</p>
@@ -324,7 +324,7 @@ export const EMAIL_TEMPLATES = {
     subject: `What VortexTrips affiliates actually earn, ${firstName}`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let's talk about the money, ${firstName}.</h2>
-      <p>You're in network marketing. You know how to evaluate an opportunity. So let me give you the straight numbers.</p>
+      <p>You know how to evaluate an affiliate opportunity. So let me give you the straight numbers.</p>
       <div style="background:#1A1A2E;border-radius:12px;padding:24px;margin:20px 0;color:white">
         <p style="margin:0 0 16px;font-weight:700;color:#FF6B35;font-size:16px">Smart Business Affiliate (SBA) Program</p>
         <div style="display:grid;gap:12px">
@@ -356,7 +356,7 @@ export const EMAIL_TEMPLATES = {
     subject: `"I'm already in something" — I hear this a lot, ${firstName}`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">"I already have a company." — Let me address this directly.</h2>
-      <p>Most people I talk to are already in network marketing. Some are killing it. Some are grinding. Here's what I tell them:</p>
+      <p>Most people I talk to are already in the affiliate space. Some are killing it. Some are grinding. Here's what I tell them:</p>
       <div style="margin:20px 0">
         <p style="font-weight:700;color:#FF6B35;margin-bottom:4px">VortexTrips doesn't compete with what you're doing.</p>
         <p style="color:#444;margin-bottom:16px">Travel savings is a completely different conversation than health products, skincare, or financial services. Your same network, completely different market positioning.</p>
@@ -373,7 +373,7 @@ export const EMAIL_TEMPLATES = {
 
   // Day 9 — Social proof from SBAs
   sbaDay9: (firstName: string) => ({
-    subject: `${firstName} — what network marketers are saying after 90 days`,
+    subject: `${firstName} — what our members are saying after 90 days`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Real results from people who were exactly where you are, ${firstName}.</h2>
       <div style="background:#f9f9f9;border-left:4px solid #FF6B35;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
@@ -396,10 +396,10 @@ export const EMAIL_TEMPLATES = {
 
   // Day 12 — The comparison close. Travel vs other affiliate programs.
   sbaDay12: (firstName: string) => ({
-    subject: `${firstName}, why travel beats supplements in network marketing`,
+    subject: `${firstName}, why travel beats every other affiliate program`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Let me make a case for travel, ${firstName}.</h2>
-      <p>I've watched people struggle in network marketing for years trying to sell things people don't urgently want. Here's the honest comparison:</p>
+      <p>I've watched people struggle in affiliate programs for years trying to sell things people don't urgently want. Here's the honest comparison:</p>
       <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:14px">
         <thead>
           <tr style="background:#1A1A2E;color:white">
