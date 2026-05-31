@@ -63,7 +63,7 @@ export const maxDuration = 300
 
 const KILL_SWITCH_KEY = 'youtube_video_cron_enabled'
 const TARGET_PLATFORM = 'youtube'
-const CLIP_COUNT = 4
+const CLIP_COUNT = 18
 const CLIP_DURATION_SECONDS: 5 | 10 = 5
 const CLIP_ASPECT_RATIO: '16:9' | '9:16' | '1:1' = '16:9'
 
@@ -122,7 +122,7 @@ function buildScriptUserPrompt(destination: string): string {
 
 Constraints:
 - "script": ~225 words. Spoken-voice cadence. No markdown. Open with a hook, build a vivid travel scene, land on the VortexTrips free portal CTA in the final sentence.
-- "scenes": exactly 4 cinematic scene descriptions, each suitable as a Kling AI text-to-video prompt. ~30 words each. Visual-only — describe what the camera sees, not narration. Format: shot type + subject + lighting + mood. Example: "Aerial drone shot of turquoise Caribbean waters at golden hour, cinematic, golden light, soft motion blur."
+- "scenes": exactly 18 cinematic scene descriptions, each suitable as a Kling AI text-to-video prompt. ~30 words each. Visual-only — describe what the camera sees, not narration. Format: shot type + subject + lighting + mood. Example: "Aerial drone shot of turquoise Caribbean waters at golden hour, cinematic, golden light, soft motion blur."
 - "title": <=100 chars. YouTube-optimized. No clickbait emojis.
 - "description": <=2500 chars. First line is a one-sentence hook. Then 3-5 sentences. End with: "Get free access: https://www.vortextrips.com/free".
 
@@ -130,7 +130,9 @@ Output STRICT JSON only:
 {
   "destination": "${destination}",
   "script": "...",
-  "scenes": ["scene 1", "scene 2", "scene 3", "scene 4"],
+  "scenes": [
+    // (provide exactly 18 scene objects in this array)
+  ],
   "title": "...",
   "description": "..."
 }`
