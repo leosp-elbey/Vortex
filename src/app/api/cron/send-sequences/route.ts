@@ -59,13 +59,15 @@ export async function GET(request: NextRequest) {
   // Process in parallel chunks of 10 — keeps total wall time under 10s on Hobby
   // while drastically increasing throughput vs sequential execution.
   const CHUNK_SIZE = 10
+  const INTER_CHUNK_DELAY_MS = 2500; // 2.5s between chunks → ~4 req/s, under Resend's 5 req/s free tier limit
   const chunks: Array<typeof items> = []
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
     chunks.push(items.slice(i, i + CHUNK_SIZE))
   }
 
-  for (const chunk of chunks) {
-    await Promise.allSettled(chunk.map(async item => {
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, INTER_CHUNK_DELAY_MS));
+    await Promise.allSettled(chunks[i].map(async item => {
       const contact = item.contacts as {
         first_name: string
         email: string
