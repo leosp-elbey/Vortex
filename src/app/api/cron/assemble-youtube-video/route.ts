@@ -9,10 +9,10 @@
 //   Eligible row: platform='youtube' AND video_url IS NULL AND
 //                 media_metadata.kling_clips_completed_at IS NOT NULL
 //                 (the signal Phase 21C's check-kling-jobs writes when all
-//                 4 Kling clips finish — see commit d0d53a7).
+//                 Kling clips finish — see commit d0d53a7).
 //
 //   State A — media_metadata.shotstack_render_id IS NULL:
-//     Submit a Shotstack render with the 4 Kling clip URLs + the
+//     Submit a Shotstack render with all Kling clip URLs + the
 //     elevenlabs_audio_url. Persist render_id into media_metadata.
 //
 //   State B — media_metadata.shotstack_render_id IS SET:
