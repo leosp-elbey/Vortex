@@ -1,3 +1,14 @@
+## Phase 22 Addendum — TikTok Direct Post Audit Resubmitted
+**Date:** 2026-06-02
+**Status:** COMPLETE ✅
+- TikTok Direct Post audit resubmitted at 3:45 PM EST
+- Application reference: Content Posting API - Direct Post
+- App ID: 7636249661170616327
+- Expected response: 2-4 weeks
+- On approval: Direct Post restrictions lifted, TikTok posts go fully public
+
+---
+
 ## Phase 22 — Facebook Token Rotation + Autoposter Re-enabled
 **Date:** 2026-06-02
 **Last commit:** c9bf090 (no code changes — env var update + DB change only)
@@ -7076,83 +7087,4 @@ The canonical tracking URL `?utm_source={platform}&utm_medium=event_campaign&utm
 
 The push-to-calendar route was **not** patched in this phase because:
 1. There is no field on `content_calendar` to store the resolved URL — that requires a schema change, which the user's allowlist forbids unless absolutely necessary.
-2. Substituting placeholder text inside the caption would change content the operator already approved.
-3. `event_slug` is not persisted on `event_campaigns` — recomputing it from `event_name` is fragile and risks drift.
-
-**Recommended fix** (separate small phase): add `content_calendar.tracking_url TEXT NULL`, persist `campaign_assets.tracking_url` at generation time, and have the push-to-calendar route copy it through. Once that lands, `event_campaign_attribution_summary` starts returning real lead counts without any further view change.
-
-### Metrics supported now
-
-| Metric | Source | Notes |
-|---|---|---|
-| `asset_count` | `campaign_assets` (non-archived/non-rejected) | distinct |
-| `approved_asset_count` | `campaign_assets.status = 'approved'` | distinct |
-| `calendar_row_count` | `content_calendar` linked via `campaign_asset_id` | distinct |
-| `posted_count` | `content_calendar.status = 'posted'` | distinct; today still 0 because nothing has been auto-posted from a campaign asset |
-| `latest_posted_at` | `MAX(content_calendar.posted_at)` | null if nothing posted yet |
-| `lead_count` | UTM substring match against `contacts.custom_fields` | best-effort; 0 today until tracking URLs land |
-| `member_count` | leads filtered by `contacts.status = 'member'` | best-effort; 0 today |
-| `lead_to_conversion_rate` | `member_count / lead_count` | null when leads = 0 |
-| `latest_activity_at` | latest of `latest_posted_at` and `latest_lead_at` | drives the "Latest activity" line on the panel |
-| `performance_score` | weighted composite 0-100 | always available; useful for ranking even with zero leads |
-
-### Metrics deferred
-
-- **Clicks** — `contact_events` has no UTM context today. Adding it would require either patching `track-event` to extract UTM from a `metadata.utm_*` payload (requires updates to every client-side tracker call) or adding a separate `utm_event` column and wiring it through. Not in scope for 14H.
-- **Impressions** — no impression tracking exists at all. Would require platform analytics integrations (Meta Insights API, X Premium analytics, etc.) — entire phase of its own.
-- **Per-(platform × wave) lead breakdown** — the UTM template includes wave, so technically extractable, but requires more SQL pattern work and a real dataset to validate against. Deferred until tracking URLs are resolved.
-
-### Tests run this session
-
-- `npx tsc --noEmit` — ✅ PASS (clean)
-- `npm run build` — ✅ PASS; `Compiled successfully in 31.0s`. New route registered as `ƒ /api/admin/campaigns/attribution`.
-- `npm run lint` — not run; pre-existing Phase 13 ESLint v8/v9 mismatch is unrelated.
-
-### Risks
-
-- **Migration 023 must be applied to Supabase prod before the new endpoint or dashboard panel will return data.** Until applied, `getEventCampaignAttributionSummary` throws "relation does not exist" and the dashboard renders the empty-state placeholder. The throw is caught in the dashboard fetch, so no UI breakage — just a quiet empty panel.
-- **UTM regex match is brittle to event-name evolution.** If a campaign's `event_name` is later edited (e.g. "Art Basel Miami" → "Art Basel Miami Beach"), historical contacts whose UTMs used the old slug will stop attributing. Mitigation: persist `event_slug` on `event_campaigns` and match against it directly. Future small phase.
-- **Lead counts will be zero in production until tracking URLs are actually published.** This is the expected state for now, not a bug. The dashboard's empty-state copy makes this clear; the API response includes a `notes.lead_attribution` field documenting the same.
-- **The view performs three correlated subquery / pre-aggregations on every read.** With < 100 campaigns and < 5,000 contacts (current scale), this is fine. If contacts grow into the millions, materialize the view as a table refreshed by a daily job and switch the helper to read from the materialized table instead.
-- **Performance score weights are heuristic.** They sort campaigns reasonably with the data we have today (mostly intrinsic score + asset/post counts) but will need retuning once real lead/conversion data accumulates. Retuning is a one-line edit in `calculateCampaignPerformanceScore`.
-
-### Leo to do
-
-- [x] Commit + push the patch — **DONE** (`2e3869d` for the patch + `4323250` for the last-known-good hash refresh; both pushed to `origin/main`; verification push returned `Everything up-to-date`).
-- [x] **Apply migration 023 to Supabase prod** — **DONE.** Verified via `SELECT viewname FROM pg_views WHERE viewname = 'event_campaign_attribution_summary';` returning the view row.
-- [ ] Re-deploy to Vercel prod (`npx vercel --prod --yes`). **Still pending.**
-- [ ] Smoke test: open Art Basel on `/dashboard/campaigns` → confirm the new Performance panel renders with the empty-state copy + composite performance score driven by intrinsic event-fit + production/distribution ratios. **Still pending.**
-
-### Phase 14H save state (2026-05-03)
-
-| Step | Hash | Status |
-|---|---|---|
-| Phase 14H code commit | `2e3869d` | ✅ pushed |
-| Last-known-good hash bump | `4323250` | ✅ pushed |
-| `git push origin main` verification | — | ✅ `Everything up-to-date` |
-| Migration 023 applied to Supabase prod | — | ✅ verified (`pg_views` row exists) |
-| Vercel prod deploy | — | ⏳ pending |
-| Performance-panel smoke test | — | ⏳ pending (depends on deploy) |
-
-### Recommended next phase
-
-**Phase 14H.1 — Tracking URL Materialization** is the natural next session, but **only after** the two pending items above are complete. The 14H Performance panel returns mostly empty / zero-lead data until URLs are resolved into post bodies (or a `content_calendar.tracking_url` column lands), so 14H.1 is what makes 14H operationally useful. See `BUILD_PROGRESS.md` for the scoped task list.
-
----
-
-## Mandatory End-of-Phase Save Protocol — added 2026-05-03 to `CLAUDE_SESSION_SKILL.md`
-
-A 10-rule protocol now governs the end of every phase, patch, smoke test, audit, migration, and deployment. Highlights:
-
-1. Both tracking files (`PROJECT_STATE_CURRENT.md` + `BUILD_PROGRESS.md`) must be updated.
-2. Phase-specific docs (audit reports, roadmaps, skill files, continuation files) must be on the save list.
-3. A six-item phase-completion checklist (tracking docs · tests · migration · deploy · smoke test · git commands) must be ticked off before any phase is called complete.
-4. The end-of-phase report must enumerate ten fields in fixed order, including the exact `git add`, commit message, and two-push verification.
-5. Cache / build / secret files (`tsconfig.tsbuildinfo`, `.next/`, `node_modules/`, `.env.local`, `.claude/settings.local.json`) are excluded from staging by default.
-6. Named-file staging only — never `git add .` without explicit authorization.
-7. Two-push verification (`git push origin main` twice; the second must return `Everything up-to-date`).
-8. Final state must be `nothing to commit, working tree clean` (with `tsconfig.tsbuildinfo` as the one acceptable straggler).
-9. Migration ordering must be stated explicitly + a Supabase SQL verification query supplied.
-10. Production-behavior changes require an explicit smoke-test checklist; purely-additive phases must declare "no smoke test required" in writing.
-
-See `CLAUDE_SESSION_SKILL.md` for the canonical text.
+2. Substituting placeholder text inside the caption would change content the o
