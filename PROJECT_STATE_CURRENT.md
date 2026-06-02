@@ -9,6 +9,8 @@
 - Updated FACEBOOK_PAGE_ACCESS_TOKEN and INSTAGRAM_ACCESS_TOKEN in Vercel with new permanent token
 - Redeployed — manual FB post confirmed ✅ manual IG post confirmed ✅
 - Flipped autoposter_cron_enabled = true in site_settings via Supabase Table Editor
+- Confirmed Twilio A2P Campaign CMe09cecd00292c91d56 status: Verified ✅ Brand: Registered ✅
+- Flipped sms_send_enabled = true in site_settings — SMS queue now active
 ### Token rotation SOP (future reference — ~10 minutes)
 1. Go to business.facebook.com → switch to "Vortex Trips" portfolio
 2. Go to developers.facebook.com/tools/explorer/2138194153633175/
