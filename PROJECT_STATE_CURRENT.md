@@ -1,3 +1,25 @@
+## Phase 22 — Facebook Token Rotation + Autoposter Re-enabled
+**Date:** 2026-06-02
+**Last commit:** c9bf090 (no code changes — env var update + DB change only)
+**Status:** COMPLETE ✅
+### What was done
+- Root cause: FACEBOOK_PAGE_ACCESS_TOKEN in Vercel had expired (short-lived token)
+- Logged into Meta Business Suite → switched to Vortex Trips portfolio → Business Settings → Apps → VortexTrips API (App ID: 2138194153633175) → assigned Leo Palmer as Full Control admin
+- Generated new permanent never-expiring Page Access Token via Graph API Explorer
+- Updated FACEBOOK_PAGE_ACCESS_TOKEN and INSTAGRAM_ACCESS_TOKEN in Vercel with new permanent token
+- Redeployed — manual FB post confirmed ✅ manual IG post confirmed ✅
+- Flipped autoposter_cron_enabled = true in site_settings via Supabase Table Editor
+### Token rotation SOP (future reference — ~10 minutes)
+1. Go to business.facebook.com → switch to "Vortex Trips" portfolio
+2. Go to developers.facebook.com/tools/explorer/2138194153633175/
+3. Meta App dropdown → select "VortexTrips API"
+4. User or Page dropdown → select "Vortex Trips"
+5. Click info icon → "Open in Access Token Tool" → "Extend Access Token" → enter FB password
+6. Copy the never-expiring token
+7. Update FACEBOOK_PAGE_ACCESS_TOKEN + INSTAGRAM_ACCESS_TOKEN in Vercel → redeploy
+### Next action
+Monitor Vercel cron logs after 14:00 UTC 2026-06-02 for first automatic tick.
+---
 # VortexTrips — Current Project State
 
 **🚀 PROJECT STATUS: MAINTENANCE MODE** (with thirteen operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings; Phase 14AM — TikTok App Review Hardening; Phase 14AM.1 — TikTok Sandbox Credential Toggle; Phase 14AN — Wire Dashboard "Post to TikTok" Button; Phase 14AO — TikTok PULL_FROM_URL Verified-Domain Proxy). All planned phases (0 → 14AC) shipped; 14AD–14AO are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
