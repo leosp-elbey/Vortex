@@ -12,9 +12,13 @@
 // Storing the boolean as the literal string 'true' / 'false' keeps the
 // site_settings table's text-only `value` column happy.
 //
-// Auto-disable history is preserved in the row's `description` column —
-// both this route (manual toggles) and the cron route (auto-disables on
-// failure) write a short reason string there for observability.
+// Phase 21L: the live `site_settings` table has NO `description` column
+// (schema drift from migration 007 — PostgREST rejects reads/writes of it
+// with 42703). So this route does NOT touch `description`. The manual-toggle
+// reason is echoed in the POST response for the immediate UI toast but is not
+// persisted. Mirrors the Phase 20.0 fix in flipKillSwitchToDisabled()
+// (/api/cron/autoposter-once). Referencing `description` here was why the
+// dashboard "Enable Cron" button silently 500'd.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminUser } from '@/lib/admin-auth'
@@ -25,7 +29,6 @@ export const dynamic = 'force-dynamic'
 
 interface SiteSettingRow {
   value: string | null
-  description: string | null
   updated_at: string | null
 }
 
@@ -35,7 +38,7 @@ export async function GET() {
 
   const { data, error } = await auth.admin
     .from('site_settings')
-    .select('value, description, updated_at')
+    .select('value, updated_at')
     .eq('key', KILL_SWITCH_KEY)
     .maybeSingle<SiteSettingRow>()
 
@@ -49,7 +52,7 @@ export async function GET() {
   return NextResponse.json({
     enabled,
     last_change: data?.updated_at ?? null,
-    last_reason: data?.description ?? null,
+    last_reason: null,
     key: KILL_SWITCH_KEY,
   })
 }
@@ -76,7 +79,7 @@ export async function POST(request: NextRequest) {
   const { error } = await auth.admin
     .from('site_settings')
     .upsert(
-      { key: KILL_SWITCH_KEY, value: newValue, description, updated_at: updatedAt },
+      { key: KILL_SWITCH_KEY, value: newValue, updated_at: updatedAt },
       { onConflict: 'key' },
     )
 
