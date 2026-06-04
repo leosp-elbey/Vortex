@@ -39,11 +39,13 @@ function savingsBadge(text: string): string {
 export const EMAIL_TEMPLATES = {
 
   // Day 1 — Welcome + what's coming
+  // Phase 22G — added wholesale-rates + Cash Rewards proof paragraph; CTA → /free.
   leadDay1: (firstName: string) => ({
     subject: `Welcome to VortexTrips, ${firstName} — here's what happens next`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName}, you're in. Here's your next step.</h2>
       <p>You just joined over <strong>2,000 members</strong> who stop paying retail prices for travel — forever.</p>
+      <p>Your free Vortex travel account gives you access to wholesale hotel rates at <strong>500,000+ properties</strong> — the same rates travel agents pay. Hotels also offer <strong>Cash Rewards</strong> on bookings, meaning 100% of the hotel savings are passed directly to you.</p>
       <p>Here's exactly what you get as a VortexTrips member:</p>
       <ul style="padding-left:20px;color:#444">
         <li style="margin-bottom:8px"><strong>Access to 500,000+ hotels</strong> at wholesale rates — up to 60% below Expedia and Booking.com</li>
@@ -53,7 +55,7 @@ export const EMAIL_TEMPLATES = {
       </ul>
       ${savingsBadge('Average member saves $1,200+ per trip')}
       <p>Ready to see your first deal? Start with our booking portal — it takes 60 seconds to find savings on your next trip.</p>
-      ${ctaButton('See My Member Rates →', `${BASE_URL}/book`)}
+      ${ctaButton('See My Member Rates →', `${BASE_URL}/free`)}
       <p style="color:#888;font-size:14px">Have questions? Just reply to this email — I read every one.<br><strong>— Leo, VortexTrips</strong></p>
     `),
   }),
@@ -129,6 +131,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 7 — Urgency + limited spots
+  // Phase 22G — added savings-proof paragraph + share-vortex secondary CTA.
   leadDay7: (firstName: string) => ({
     subject: `${firstName} — a quick note before rates change`,
     html: wrapper(`
@@ -143,6 +146,8 @@ export const EMAIL_TEMPLATES = {
       </ul>
       <p>If any of these match your plans, now is the time to lock it in.</p>
       ${ctaButton('Lock In My Member Rate →', `${BASE_URL}/book`)}
+      <p>Our members saved up to <strong>75% off retail travel prices</strong> last month. One member saved <strong>$3,200</strong> on their honeymoon. Another saved <strong>$1,847</strong> on a single trip to Cancún.</p>
+      <p style="background:#f9f9f9;border-left:4px solid #16C79A;padding:14px 18px;border-radius:0 8px 8px 0;margin:16px 0;color:#444">Know someone who travels? Share <a href="${BASE_URL}/free" style="color:#FF6B35;font-weight:700">vortextrips.com/free</a> — they get free access to wholesale travel rates instantly.</p>
       <p style="color:#888;font-size:14px">If timing isn't right, just reply and let me know — I'll keep an eye on your destination and reach out when something perfect comes up.<br><br><strong>— Leo, VortexTrips</strong></p>
     `),
   }),
@@ -275,11 +280,13 @@ export const EMAIL_TEMPLATES = {
   // ─── SBA / TRAVEL AFFILIATE OUTREACH SEQUENCE ────────────────────────────
 
   // Day 0 — Pattern interrupt. Speak their language.
+  // Phase 22G — added Powerline (406 enrolled below) + 3-and-Free proof paragraph.
   sbaDay0: (firstName: string) => ({
     subject: `${firstName} — the travel product that sells itself`,
     html: wrapper(`
       <h2 style="margin:0 0 16px;font-size:24px;font-weight:900">Hey ${firstName} — quick question.</h2>
       <p>How many times have you pitched a product and had to explain why someone needs it?</p>
+      <p>Right now, <strong>406 people</strong> are already in our Powerline — meaning they enrolled after me and are building below me automatically. Our <strong>3-and-Free</strong> program means sponsor just 3 members and your $99.95/month membership is completely waived. Your travel pays for itself.</p>
       <p>Travel is different. Everyone already wants to travel. The only question is: <strong>how much are they paying?</strong></p>
       <p>VortexTrips gives members access to hotel rates 40–60% below Expedia, Booking.com, and every other public platform. When you show someone a side-by-side price comparison — the same room, same dates — it closes itself.</p>
       ${savingsBadge('No convincing required. The savings do the selling.')}
@@ -320,6 +327,8 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 4 — SBA earnings. Show the money.
+  // Phase 22G — added 4 specific earnings cards (Weekly payouts, Team Builder
+  // Bonus, 3-and-Free, Powerline pools) and an Income Disclosure footer.
   sbaDay4: (firstName: string) => ({
     subject: `What VortexTrips affiliates actually earn, ${firstName}`,
     html: wrapper(`
@@ -340,6 +349,22 @@ export const EMAIL_TEMPLATES = {
             <p style="margin:0 0 4px;font-weight:700;color:#16C79A">The product sells itself</p>
             <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Show the price comparison. Members save more than the annual cost on their first trip.</p>
           </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">Weekly commission payouts</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Our team earned $500 last week alone. Paid weekly via eWallet.</p>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">Team Builder Bonus</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Every sale deposits $142.84 into your bonus bank, paid in $1,000 increments weekly.</p>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">3-and-Free</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Sponsor 3 TTP members and your $99.95/month is waived entirely.</p>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px">
+            <p style="margin:0 0 4px;font-weight:700;color:#16C79A">Powerline pools</p>
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.8)">Earn from every active TTP globally across 10 tiers.</p>
+          </div>
         </div>
       </div>
       <p>The best part? <strong>You're already talking to people who spend money on travel.</strong> Your existing network is your market.</p>
@@ -347,6 +372,7 @@ export const EMAIL_TEMPLATES = {
       ${ctaButton('▶ Watch the Powerline Video', SURGE365.powerlineVideo)}
       <p>Or see the full SBA breakdown on our site:</p>
       ${ctaButton('See the SBA Opportunity →', `${BASE_URL}/sba`)}
+      <p style="color:#888;font-size:12px;margin-top:24px">Results vary. See our Income Disclosure Statement at <a href="${BASE_URL}/join" style="color:#888">vortextrips.com/join</a>.</p>
       <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
     `),
   }),
@@ -372,6 +398,7 @@ export const EMAIL_TEMPLATES = {
   }),
 
   // Day 9 — Social proof from SBAs
+  // Phase 22G — added "By the numbers" approved-proof-point card after testimonials.
   sbaDay9: (firstName: string) => ({
     subject: `${firstName} — what our members are saying after 90 days`,
     html: wrapper(`
@@ -387,6 +414,15 @@ export const EMAIL_TEMPLATES = {
       <div style="background:#f9f9f9;border-left:4px solid #FF6B35;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0">
         <p style="margin:0 0 8px;font-style:italic;color:#444">"The training and support is better than any company I've been with. And the product? I used it myself first — saved over $2,000 on a family trip. That's my testimonial."</p>
         <p style="margin:0;font-size:13px;font-weight:700;color:#FF6B35">— Jerome W., Atlanta GA · SBA for 3 months</p>
+      </div>
+      <div style="background:#1A1A2E;border-radius:12px;padding:20px 24px;margin:24px 0;color:white">
+        <p style="margin:0 0 12px;font-weight:700;color:#FF6B35;font-size:15px">By the numbers</p>
+        <ul style="margin:0;padding-left:20px;line-height:1.8;font-size:14px;color:rgba(255,255,255,0.9)">
+          <li>406+ people joined our travel savings network this month alone</li>
+          <li>Members report saving up to 75% off retail travel prices</li>
+          <li>500,000+ hotels available at wholesale rates — the same rates travel agents use</li>
+          <li>150% price difference guarantee — if you find it cheaper anywhere else, we cover the difference</li>
+        </ul>
       </div>
       <p>${firstName}, the pattern here is the same: <strong>use it, save money, share the screenshot.</strong> That's the entire playbook.</p>
       ${ctaButton('Start Your SBA Application →', `${BASE_URL}/sba`)}
@@ -441,6 +477,7 @@ export const EMAIL_TEMPLATES = {
   // ─── SBA LONG-TERM MONTHLY NURTURE ────────────────────────────────────────
 
   // Month 1 (Day 30) — Soft re-engagement. New angle.
+  // Phase 22G — added Vortex free-invite secondary CTA after main content.
   sbaMonth1: (firstName: string) => ({
     subject: `${firstName} — one travel deal worth seeing this month`,
     html: wrapper(`
@@ -454,6 +491,8 @@ export const EMAIL_TEMPLATES = {
       </div>
       <p>If you travel at all — even once a year — the membership pays for itself in one night. And if you share it with two people who travel, your membership is free.</p>
       ${ctaButton('See Member Rates →', `${BASE_URL}/destinations/cancun`)}
+      <p style="margin-top:32px;padding-top:24px;border-top:1px solid #eee;color:#444">Want to give someone you know FREE access to wholesale travel rates? I have invites available — they get a free Vortex account with access to 500,000+ hotels at member prices. Send them to <a href="${BASE_URL}/free" style="color:#FF6B35;font-weight:700">vortextrips.com/free</a>.</p>
+      ${ctaButton('Send a Free Invite →', `${BASE_URL}/free`)}
       <p style="color:#888;font-size:14px"><strong>— Leo, VortexTrips</strong></p>
     `),
   }),
