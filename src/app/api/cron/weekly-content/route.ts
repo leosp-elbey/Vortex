@@ -26,7 +26,8 @@ export const maxDuration = 60
 const EVENT_RESEARCH_LIMIT_PER_RUN = 6
 
 // Twitter/X removed in Phase 14Q.
-const PLATFORMS = ['instagram', 'facebook', 'tiktok'] as const
+// Phase 22E — YouTube added to weekly content generation.
+const PLATFORMS = ['instagram', 'facebook', 'tiktok', 'youtube'] as const
 type Platform = (typeof PLATFORMS)[number]
 
 interface ParsedPost {
@@ -169,7 +170,7 @@ export async function GET(request: NextRequest) {
 
     const userPrompt = `Plan a 7-day social media content calendar for VortexTrips.
 
-Theme: weekly travel inspiration mixing destination spotlights, savings examples, and member success angles.
+Theme: Weekly VortexTrips content calendar. Rotate through ALL 6 content series types (RULE 5 in your system prompt): 1 SAVINGS PROOF post, 1 INSIDER TRUTH post, 1 DESTINATION SPOTLIGHT post, 1 SOCIAL PROOF post using approved metrics (406+ Powerline members, up to 75% savings, 500,000+ hotels, 3-and-Free waiver), 1 BUSINESS OPPORTUNITY post (soft-sell, lead with travel savings first, CTA to vortextrips.com/join), and 1 VORTEX INVITE post (free portal, CTA to vortextrips.com/free), plus 1 BOOKING ENGINE post (CTA to vortextrips.com/book). Use RULE 6 approved numbers throughout. Vary destinations across continents — mix beach, city, adventure, luxury, and budget travel weekly.
 Platforms: ${PLATFORMS.join(', ')}
 Start date: ${startDate}
 
@@ -203,6 +204,11 @@ Caption: <text>
 Hashtags: tag1, tag2, tag3
 Image: <cinematic travel b-roll description — beach drone shot, resort pool, etc.>
 On-Screen Hook: <max 10 words>
+
+### youtube
+Caption: <text>
+Hashtags: tag1, tag2, tag3
+Image: <description>
 
 ## Day 2 — <next date>
 ... and so on through Day 7.
