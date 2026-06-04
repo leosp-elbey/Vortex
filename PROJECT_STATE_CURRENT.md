@@ -1,3 +1,23 @@
+## Phase 22 Addendum 2 — Resend Webhook URL Fixed
+**Date:** 2026-06-03
+**Status:** COMPLETE ✅
+### Root cause
+Resend webhook was configured as https://vortextrips.com/api/webhooks/resend (no-www).
+Vercel redirects bare domain to www via 307. Resend does not follow 307 redirects.
+Result: zero bounce events delivered since webhook was created 3 days ago.
+### Fix
+Updated Resend webhook URL to https://www.vortextrips.com/api/webhooks/resend
+Replayed 4 failed bounce events — all returned 200 OK
+~15 "Attempting" events will auto-resolve within 5 hours
+### Contacts manually suppressed this session
+- denisemchale3@icloud.com — status=bounced, 7 queue rows cancelled
+- margaret@allaboutblu.com — status=bounced, 7 queue rows cancelled
+### Going forward
+Bounce suppression is now fully automatic — no manual cleanup needed.
+Expected email health to return GREEN on next daily report.
+
+---
+
 ## Phase 22 Addendum — TikTok Direct Post Audit Resubmitted
 **Date:** 2026-06-02
 **Status:** COMPLETE ✅
