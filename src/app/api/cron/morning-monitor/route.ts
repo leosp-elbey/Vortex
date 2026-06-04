@@ -5,7 +5,7 @@
 // Resend whenever any check returns WARNING or RED.
 //
 // CHECK 1: autoposter_cron_enabled in site_settings
-// CHECK 2: tiktok_token_expires_at in site_settings (warns if <2h to expiry)
+// CHECK 2: tiktok_token_expires_at in site_settings (warns if <8h to expiry — Phase 22D)
 // CHECK 3: content_calendar approved+ready queue depth (warns if <10)
 // CHECK 4: Resend last-24h bounce rate (RED if >5%)
 // CHECK 5: content_calendar posted_at in last 25h (warns if 0)
@@ -81,12 +81,16 @@ async function checkTikTokExpiry(
   if (Number.isNaN(expiresAt.getTime())) {
     return { check: 'tiktok-expiry', status: 'WARNING', message: `tiktok_token_expires_at not parseable: ${raw}` }
   }
-  const cutoff = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  // Phase 22D — threshold widened from 2h to 8h so this check catches any
+  // overnight failure of the 06:00 UTC tiktok-token-refresh cron. With auto-
+  // refresh in place, a valid token should always have >>8h remaining when
+  // this 08:00 UTC monitor runs.
+  const cutoff = new Date(Date.now() + 8 * 60 * 60 * 1000)
   if (expiresAt < cutoff) {
     return {
       check: 'tiktok-expiry',
       status: 'WARNING',
-      message: `TikTok token expires soon (${expiresAt.toISOString()}) — visit vortextrips.com/api/auth/tiktok/login`,
+      message: `TikTok token expires within 8h (${expiresAt.toISOString()}) — auto-refresh may have failed; visit vortextrips.com/api/auth/tiktok/login`,
     }
   }
   return { check: 'tiktok-expiry', status: 'OK', message: `TikTok token valid until ${expiresAt.toISOString()}` }
