@@ -1,3 +1,61 @@
+## Phase 23 — Full Growth System Build
+**Date:** 2026-06-04
+**Status:** COMPLETE ✅
+
+### What was built this session
+
+**Monitoring & Automation:**
+- Morning monitor cron at 08:00 UTC — checks all 5 systems, emails if broken
+- TikTok token auto-refresh cron at 06:00 UTC — never expires manually again
+- Autoposter increased from 3 to 6 posts/day (10:00, 12:00, 14:00, 16:00, 18:00, 20:00 UTC)
+
+**Content System Upgrade:**
+- Categorized hook library (savings proof, insider truth, powerline, SBA hooks)
+- RULE 5: mandatory content series rotation (6 types per week)
+- RULE 6: approved Surge365 proof points injected (406 Powerline, 75% savings, 500k hotels, 3-and-Free)
+- YouTube added as 4th platform to weekly content generation (now 28 posts/week)
+
+**Vortex Invite System:**
+- Migration 044: vortex_invited_at column + vortex_invite_queue table
+- Daily cron at 09:30 UTC stages 50 uninvited leads per day
+- Admin dashboard at /dashboard/vortex-invites
+- 722 leads ready to receive invites
+
+**Email Sequence Upgrade (Phase 22G):**
+- sbaDay0: Added Powerline (406 members) + 3-and-Free proof points
+- sbaDay4: Added Team Builder Bonus ($142.84/sale), weekly payouts ($500/week), Income Disclosure
+- sbaDay9: Added "By the numbers" card (406+, 75% savings, 500k hotels, 150% guarantee)
+- sbaMonth1: Added Vortex free invite CTA
+- leadDay1: Added Cash Rewards + wholesale rates explanation, CTA → /free
+- leadDay7: Added $3,200 honeymoon + $1,847 Cancún savings proof
+
+**Comment-to-DM System (Phase 22H):**
+- src/app/api/webhooks/instagram-comments/route.ts — keyword trigger → auto-DM
+- src/app/api/webhooks/facebook-comments/route.ts — keyword trigger → auto-DM
+- Keywords: free, info, join, yes, interested, how, details
+- Instagram webhook: verified and live
+- Facebook feed subscription: active (feed, mention, messages, messaging_postbacks)
+- Messenger page connected and subscribed
+- pages_messaging App Review: PENDING SUBMISSION (needs screencast recording)
+
+### Full Cron Schedule (12 jobs)
+- 06:00 UTC — TikTok token auto-refresh
+- 08:00 UTC — Morning monitor
+- 09:00 UTC — Score and branch
+- 09:30 UTC — Vortex invite staging (50/day)
+- 10:00 UTC — Send sequences (email + SMS)
+- 10:00, 12:00, 14:00, 16:00, 18:00, 20:00 UTC — Autoposter (6 posts/day)
+- 11:00 UTC — Check HeyGen jobs
+- 12:00 UTC — YouTube post
+- 13:00 UTC Mon — Weekly content generation (28 posts/week)
+
+### Outstanding — requires action
+1. pages_messaging App Review: record 60-90s screencast showing comment → DM flow, upload to Meta App Review form, submit
+2. TikTok Direct Post audit: waiting 2-4 weeks for TikTok response
+3. Vortex invites: first batch stages at 09:30 UTC tomorrow — visit /dashboard/vortex-invites to send
+
+---
+
 ## Phase 22 Addendum 2 — Resend Webhook URL Fixed
 **Date:** 2026-06-03
 **Status:** COMPLETE ✅
