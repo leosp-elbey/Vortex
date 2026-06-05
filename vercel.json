@@ -42,6 +42,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/meta-token-refresh",
+      "schedule": "30 5 * * *"
+    },
+    {
       "path": "/api/cron/tiktok-token-refresh",
       "schedule": "0 6 * * *"
     },

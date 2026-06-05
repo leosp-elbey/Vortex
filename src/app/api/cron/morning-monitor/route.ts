@@ -1,7 +1,6 @@
 // Phase 22C — daily morning ops monitor.
 //
-// Runs the same 5 checks as scripts/morning-monitor.js but inside a Vercel
-// cron at 08:00 UTC. Sends a summary email to info@vortextrips.com via
+// Runs at 08:00 UTC, sends a summary email to info@vortextrips.com via
 // Resend whenever any check returns WARNING or RED.
 //
 // CHECK 1: autoposter_cron_enabled in site_settings
@@ -9,6 +8,10 @@
 // CHECK 3: content_calendar approved+ready queue depth (warns if <10)
 // CHECK 4: Resend last-24h bounce rate (RED if >5%)
 // CHECK 5: content_calendar posted_at in last 25h (warns if 0)
+// CHECK 6: FB/IG token via Graph debug_token (Phase 23A) — warns if
+//          data_access_expires_at <7d or token has non-permanent expires_at.
+//          Backstop for the meta-token-refresh cron at 05:30 UTC; this
+//          monitor runs 2.5h later so any miss bubbles up here.
 //
 // Returns JSON with the per-check results so the cron log carries the full
 // status for any post-hoc debugging.
@@ -159,6 +162,83 @@ async function checkBounceRate(): Promise<CheckResult> {
   return { check: 'bounce-rate', status: 'OK', message: `bounce rate ${bounceRate.toFixed(1)}% (${bounced}/${finalized})` }
 }
 
+// Phase 23A — Meta token health backstop. Mirrors the criteria used by the
+// meta-token-refresh cron at 05:30 UTC: warns if the FB Page token either
+// has a non-permanent expires_at or a data_access_expires_at inside 7 days.
+// Identical Graph debug_token call as the dedicated cron, kept here as a
+// second line of defense so the morning summary email surfaces any miss.
+interface DebugTokenData {
+  expires_at?: number
+  data_access_expires_at?: number
+  is_valid?: boolean
+}
+interface DebugTokenResponse {
+  data?: DebugTokenData
+  error?: { message?: string }
+}
+
+async function checkFacebookToken(): Promise<CheckResult> {
+  const token = (process.env.FACEBOOK_PAGE_ACCESS_TOKEN ?? '').trim()
+  if (!token) {
+    return { check: 'fb-token-health', status: 'WARNING', message: 'FACEBOOK_PAGE_ACCESS_TOKEN not configured' }
+  }
+  const url = `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch (err) {
+    return {
+      check: 'fb-token-health',
+      status: 'WARNING',
+      message: `debug_token fetch threw: ${err instanceof Error ? err.message : 'unknown'}`,
+    }
+  }
+  let body: DebugTokenResponse
+  try {
+    body = (await res.json()) as DebugTokenResponse
+  } catch {
+    return { check: 'fb-token-health', status: 'WARNING', message: `debug_token non-JSON (status ${res.status})` }
+  }
+  if (body.error || !body.data) {
+    return {
+      check: 'fb-token-health',
+      status: 'WARNING',
+      message: `debug_token error: ${body.error?.message ?? 'no data payload'}`,
+    }
+  }
+  const expiresAt = typeof body.data.expires_at === 'number' ? body.data.expires_at : null
+  const dataAccessExpiresAt =
+    typeof body.data.data_access_expires_at === 'number' ? body.data.data_access_expires_at : null
+  const nowSec = Math.floor(Date.now() / 1000)
+  const sevenDaysSec = 7 * 24 * 60 * 60
+
+  if (expiresAt === null) {
+    return { check: 'fb-token-health', status: 'WARNING', message: 'expires_at missing from debug_token response' }
+  }
+  if (expiresAt !== 0) {
+    return {
+      check: 'fb-token-health',
+      status: 'WARNING',
+      message: `token will expire at ${new Date(expiresAt * 1000).toISOString()} — not a permanent page token`,
+    }
+  }
+  if (dataAccessExpiresAt === null) {
+    return { check: 'fb-token-health', status: 'WARNING', message: 'data_access_expires_at missing from debug_token response' }
+  }
+  if (dataAccessExpiresAt < nowSec + sevenDaysSec) {
+    return {
+      check: 'fb-token-health',
+      status: 'WARNING',
+      message: `data_access expires ${new Date(dataAccessExpiresAt * 1000).toISOString()} — within 7 days; rotate via developers.facebook.com/tools/explorer/2138194153633175/`,
+    }
+  }
+  return {
+    check: 'fb-token-health',
+    status: 'OK',
+    message: `permanent token; data_access expires ${new Date(dataAccessExpiresAt * 1000).toISOString()}`,
+  }
+}
+
 async function checkRecentPosts(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<CheckResult> {
@@ -219,6 +299,7 @@ export async function GET(request: NextRequest) {
     checkQueueDepth(supabase),
     checkBounceRate(),
     checkRecentPosts(supabase),
+    checkFacebookToken(),
   ])
 
   const hasFailure = checks.some((c) => c.status !== 'OK')
