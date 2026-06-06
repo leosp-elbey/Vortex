@@ -58,6 +58,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
+    // Email format validation — reject obviously invalid addresses before DB insert
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+    if (!emailRegex.test(email.trim())) {
+      console.warn('[lead-created] rejected invalid email format', { email: email.substring(0, 20) })
+      return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
+    }
+    // Normalize email to lowercase
+    const normalizedEmail = email.trim().toLowerCase()
+
     const supabase = createAdminClient()
 
     // CRITICAL — we need contact.id to proceed. If Supabase hangs here,
@@ -69,7 +78,7 @@ export async function POST(request: NextRequest) {
         .insert({
           first_name,
           last_name: last_name || null,
-          email,
+          email: normalizedEmail,
           phone: phone || null,
           source,
           status,
@@ -158,7 +167,7 @@ export async function POST(request: NextRequest) {
     // Day 0 — send welcome email immediately (not via queue — cron runs once daily)
     try {
       const { subject, html } = EMAIL_TEMPLATES.leadDay1(first_name)
-      await sendEmail({ to: email, subject, html })
+      await sendEmail({ to: normalizedEmail, subject, html })
       await bounded(
         supabase.from('sequence_queue').insert({
           contact_id: contact.id, sequence_name: 'lead-nurture', step: 2,
@@ -227,7 +236,7 @@ export async function POST(request: NextRequest) {
     if (enroll_sba) {
       try {
         const { subject, html } = EMAIL_TEMPLATES.sbaDay1Email(first_name)
-        await sendEmail({ to: email, subject, html })
+        await sendEmail({ to: normalizedEmail, subject, html })
         await bounded(
           supabase.from('ai_actions_log').insert({
             contact_id: contact.id, action_type: 'onboarding-email', service: 'resend',
@@ -266,7 +275,7 @@ export async function POST(request: NextRequest) {
     // Bland.ai voice call (only if phone provided)
     try {
       if (!phone) throw new Error('No phone — skipping call')
-      await triggerCall(phone, first_name, email, undefined, contact.id)
+      await triggerCall(phone, first_name, normalizedEmail, undefined, contact.id)
       await bounded(
         supabase.from('contacts')
           .update({ tags: ['bland-call-sent'], last_ai_action: 'Intro call triggered' })
