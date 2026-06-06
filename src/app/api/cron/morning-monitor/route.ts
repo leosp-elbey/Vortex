@@ -136,14 +136,13 @@ async function checkBounceRate(): Promise<CheckResult> {
   const body = (await res.json()) as ResendListResponse | ResendEmail[]
   const emails = Array.isArray(body) ? body : (body.data ?? [])
   const since = Date.now() - 24 * 60 * 60 * 1000
-  let delivered = 0
   let bounced = 0
   let finalized = 0
   for (const e of emails) {
     const created = e.created_at ? new Date(e.created_at).getTime() : 0
     if (!created || created < since) continue
     const ev = (e.last_event ?? '').toLowerCase()
-    if (ev === 'delivered' || ev === 'opened' || ev === 'clicked') { delivered++; finalized++ }
+    if (ev === 'delivered' || ev === 'opened' || ev === 'clicked') { finalized++ }
     else if (ev === 'bounced') { bounced++; finalized++ }
     else if (ev === 'complained') { finalized++ }
     else if (ev === 'send_failed' || ev === 'undelivered' || ev === 'dropped') { finalized++ }

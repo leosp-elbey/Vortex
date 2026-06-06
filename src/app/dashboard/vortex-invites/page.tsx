@@ -74,8 +74,9 @@ export default function VortexInvitesPage() {
   }, [])
 
   useEffect(() => {
-    load()
-  }, [load])
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function prepareBatch() {
     setBusy('prepare')
