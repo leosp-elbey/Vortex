@@ -39,4 +39,4 @@ Copy this list exactly into Graph API Explorer permissions panel:
 ## Notes
 - Both FACEBOOK_PAGE_ACCESS_TOKEN and INSTAGRAM_ACCESS_TOKEN use the SAME Page Access Token
 - Token is permanent (never expires) but data_access_expires_at refreshes every ~90 days on admin login
-- The meta-token-refresh cron at 05:30 UTC will alert 7 days before data_
+- The meta-token-refresh cron at 05:30 UTC will alert 7 days before data_access_expires_at
