@@ -176,6 +176,11 @@ export async function getAutoposterEligibleRows(
     // happen in JS so each skipped row carries a specific reason instead of
     // an opaque "didn't match the WHERE clause".
     .eq('status', 'approved')
+    // Phase 23B — exclude rows that have already failed 3+ posting attempts.
+    // The autoposter-once route flips status='rejected' when the count hits 3,
+    // so this filter is belt-and-suspenders for cases where the rejection
+    // write itself failed (DB transient, race, etc.).
+    .or('post_failure_count.is.null,post_failure_count.lt.3')
     // Phase 14K patch — three-key stable ordering using only columns that
     // actually exist on `content_calendar`:
     //   1) queued_for_posting_at ASC NULLS LAST  → next-due eligible row first

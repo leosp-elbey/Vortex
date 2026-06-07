@@ -495,7 +495,7 @@ export async function GET(request: NextRequest) {
   // so the TikTok branch can merge tiktok_publish_id into the existing JSONB.
   const { data: rawPost, error: fetchErr } = await supabase
     .from('content_calendar')
-    .select(`hashtags, media_metadata, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
+    .select(`hashtags, media_metadata, post_failure_count, ${POSTING_GATE_ROW_SELECT_WITH_MEDIA}`)
     .eq('id', chosen.id)
     .single()
   if (fetchErr || !rawPost) {
@@ -547,20 +547,105 @@ export async function GET(request: NextRequest) {
   }
 
   if (!result.ok) {
-    // Definitive platform-side failure — flip the kill switch to 'false' so
-    // the next scheduled tick stays quiet until the operator diagnoses + re-enables.
+    // Phase 23B — per-row failure tracking with auto-rejection at 3.
+    //
+    // Failure model:
+    //   - 1st + 2nd failure on the same row:
+    //       - Increment post_failure_count, persist failure metadata
+    //       - Flip kill switch (existing behavior)
+    //       - Send alert email (existing behavior)
+    //       - Return 500
+    //   - 3rd failure on the same row:
+    //       - Increment to 3, persist failure metadata
+    //       - Flip status to 'rejected' (clears posting_status + queued_for_posting_at)
+    //       - Do NOT flip the kill switch — the bad row is now out of the queue,
+    //         the cron can keep posting other eligible rows
+    //       - Return 200 with skipped:true
+    //
+    // The autoposter-gate eligibility query also filters post_failure_count < 3,
+    // so even if the rejection write below fails, the row drops out of FIFO.
+    const existingFailureCount =
+      (rawPost as unknown as { post_failure_count?: number | null }).post_failure_count ?? 0
+    const newFailureCount = existingFailureCount + 1
+    const errorReason = (result.error ?? 'unknown').slice(0, 500)
     const failureReason = `${platform} post failed at row ${chosen.id}: ${result.error ?? 'unknown'}`
+    const failureWriteBase = {
+      post_failure_count: newFailureCount,
+      last_post_failure_at: new Date().toISOString(),
+      last_post_failure_reason: errorReason,
+    }
+
+    if (newFailureCount >= 3) {
+      // Auto-reject — pull the row out of the eligibility queue and let the
+      // cron keep running for the rest of the queue.
+      const { error: rejectErr } = await supabase
+        .from('content_calendar')
+        .update({
+          ...failureWriteBase,
+          status: 'rejected',
+          posting_status: null,
+          queued_for_posting_at: null,
+        })
+        .eq('id', chosen.id)
+      if (rejectErr) {
+        console.error('[autoposter-once] auto-rejection write failed', {
+          row_id: chosen.id,
+          platform,
+          failure_count: newFailureCount,
+          error: rejectErr.message,
+        })
+      }
+      console.log('[autoposter-once] row auto-rejected after 3 failures', {
+        row_id: chosen.id,
+        platform,
+        reason: errorReason,
+      })
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: 'auto_rejected_after_3_failures',
+        row_id: chosen.id,
+        platform,
+        failure_count: newFailureCount,
+        started_at: startedAt,
+      })
+    }
+
+    // Failures #1 and #2 — persist the count, flip the kill switch, alert.
+    const { error: countErr } = await supabase
+      .from('content_calendar')
+      .update(failureWriteBase)
+      .eq('id', chosen.id)
+    if (countErr) {
+      console.error('[autoposter-once] failure-count write failed', {
+        row_id: chosen.id,
+        platform,
+        failure_count: newFailureCount,
+        error: countErr.message,
+      })
+    }
+    console.log('[autoposter-once] failure count', {
+      row_id: chosen.id,
+      failure_count: newFailureCount,
+      reason: errorReason,
+    })
+
     await flipKillSwitchToDisabled(supabase, failureReason)
     console.error('[autoposter-once] platform post failed — auto-disabled cron', {
       row_id: chosen.id,
       platform,
       error: result.error,
+      failure_count: newFailureCount,
     })
     await sendKillSwitchAlert({
       reason: failureReason,
       platform,
       rowId: chosen.id,
-      detail: { platform_error: result.error ?? 'unknown' },
+      detail: {
+        platform_error: result.error ?? 'unknown',
+        failure_count: newFailureCount,
+        failures_until_auto_reject: 3 - newFailureCount,
+      },
     })
     return NextResponse.json(
       {
@@ -568,6 +653,7 @@ export async function GET(request: NextRequest) {
         error: result.error ?? 'Platform call failed',
         platform,
         row_id: chosen.id,
+        failure_count: newFailureCount,
         kill_switch: 'disabled',
         message: `Cron auto-disabled. Diagnose, then re-enable via UPDATE site_settings SET value='true' WHERE key='${KILL_SWITCH_KEY}'.`,
       },
