@@ -1,3 +1,60 @@
+## Phase 23B — Autoposter Resilience + Token Rotation SOP
+**Date:** 2026-06-06
+**Status:** COMPLETE ✅
+**Last commit:** 35c5e4a
+
+### What was built
+- Skip-after-3-failures logic on autoposter — bad rows auto-reject, no global halt
+- post_failure_count + last_post_failure_at + last_post_failure_reason columns added to content_calendar (migration 045)
+- Eligibility query updated to exclude rows with failure_count >= 3
+- Meta token rotation SOP created at docs/META_TOKEN_ROTATION_SOP.md (10 required scopes documented)
+- Email format validation + lowercase normalization on lead intake (fix bad emails at source)
+- Meta token health check cron at 05:30 UTC (alerts 7 days before data_access_expires_at)
+- ESLint CI fixed (void load() pattern + remove unused delivered var)
+
+### Current system state
+- Autoposter: ENABLED — 6 ticks/day (10,12,14,16,18,20 UTC)
+- FB token: permanent, data_access_expires 2026-09-03
+- IG token: same permanent token
+- TikTok token: valid, auto-refreshes at 06:00 UTC
+- Email health: bounce cleanup run (39 suppressed), validation fix live
+- Queue depth: ~100 posts ready
+- Vortex invites: staging 50/day at 09:30 UTC (722 leads total)
+- Comment-to-DM: built, pending pages_messaging App Review (submitted)
+- TikTok Direct Post audit: pending TikTok review (submitted 2026-06-02)
+
+### Outstanding
+1. pages_messaging App Review (Meta) — record screencast + submit
+2. TikTok Direct Post audit — waiting on TikTok (2-4 weeks from Jun 2)
+3. Run bounce cleanup daily until bounce rate stays GREEN 3 days in a row
+4. Monitor autoposter CI — should pass on 35c5e4a
+
+### All active crons (13 total)
+- 05:30 UTC — meta-token-refresh (health check + 7-day alert)
+- 06:00 UTC — tiktok-token-refresh (auto-rotate)
+- 08:00 UTC — morning-monitor (5 system checks, email if RED)
+- 09:00 UTC — score-and-branch (re-score leads)
+- 09:30 UTC — vortex-invites (stage 50/day)
+- 10:00 UTC — send-sequences (email + SMS nurture, 50/tick)
+- 10:00 UTC — autoposter tick 1
+- 11:00 UTC — check-heygen-jobs
+- 12:00 UTC — autoposter tick 2 + youtube-once
+- 13:00 UTC Mon — weekly-content (28 posts/week, 4 platforms)
+- 14:00 UTC — autoposter tick 3
+- 16:00 UTC — autoposter tick 4
+- 18:00 UTC — autoposter tick 5
+- 20:00 UTC — autoposter tick 6
+
+### Key file locations
+- Token rotation SOP: docs/META_TOKEN_ROTATION_SOP.md
+- Autoposter retry logic: src/app/api/cron/autoposter-once/route.ts
+- Email validation: src/app/api/webhooks/lead-created/route.ts
+- Comment-to-DM: src/app/api/webhooks/instagram-comments/route.ts + facebook-comments/route.ts
+- Vortex invite dashboard: /dashboard/vortex-invites
+- Morning monitor: src/app/api/cron/morning-monitor/route.ts
+
+---
+
 ## Phase 23 — Full Growth System Build
 **Date:** 2026-06-04
 **Status:** COMPLETE ✅
