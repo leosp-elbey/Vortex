@@ -449,7 +449,7 @@ function buildUserPrompt(campaign: EventCampaignRow, typesToGenerate: AssetType[
   lines.push('CTA targets — pick the right one per asset:')
   lines.push(`- Branded campaign tracking link (default for social posts): ${brandedTrackingUrl}`)
   lines.push('- SBA enrollment (affiliate program): https://signup.surge365.com/leosp')
-  lines.push('- Booking site (use code LEOSP): https://vortextrips.com/booking')
+  lines.push('- Booking site (use code LEOSP): https://vortextrips.com/book')
   if (campaign.cta_text && campaign.cta_url) {
     lines.push(`- Campaign-specific CTA: "${campaign.cta_text}" → ${campaign.cta_url}`)
   }

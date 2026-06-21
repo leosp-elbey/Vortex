@@ -75,7 +75,7 @@ export default function JoinPage() {
                     <div className="flex-1 h-px bg-gray-200" />
                   </div>
                   <a
-                    href="https://myvortex365.com/leosp"
+                    href="https://vortextrips.com/free"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block w-full border-2 border-[#16C79A] text-[#16C79A] hover:bg-[#16C79A] hover:text-white font-bold py-3 rounded-lg text-base transition-all text-center"

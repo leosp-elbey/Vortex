@@ -41,7 +41,7 @@ export default function LandingPage() {
           <Link href="/reviews" className="hover:text-white transition-colors">Reviews</Link>
           <Link href="/sba" className="hover:text-white transition-colors">Earn With Us</Link>
         </div>
-        <a href="https://myvortex365.com/leosp" target="_blank" rel="noopener noreferrer" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
+        <a href="https://vortextrips.com/free" target="_blank" rel="noopener noreferrer" className="bg-[#FF6B35] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#e55a25] transition-colors">
           Get Free Account
         </a>
       </nav>
@@ -147,7 +147,7 @@ export default function LandingPage() {
           <p className="text-gray-600 text-lg mb-16">Three simple steps to your first massive savings</p>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { step: '01', icon: 'user-plus' as const, title: 'Create Free Account', desc: 'Sign up at myvortex365.com/leosp — takes 30 seconds, zero cost, no credit card ever required.' },
+              { step: '01', icon: 'user-plus' as const, title: 'Create Free Account', desc: 'Sign up at vortextrips.com/free — takes 30 seconds, zero cost, no credit card ever required.' },
               { step: '02', icon: 'search' as const, title: 'Browse & Save', desc: 'Instantly access 500,000+ hotels, flights, and packages at wholesale member rates — 40-60% below retail.' },
               { step: '03', icon: 'briefcase' as const, title: 'Want to Earn Too?', desc: 'Share your link and earn commissions every time someone you refer books a trip. No quotas. No monthly fees.' },
             ].map(({ step, icon, title, desc }) => (
@@ -295,7 +295,7 @@ export default function LandingPage() {
             No credit card. No catch. Create your free account and start saving on your next trip in minutes.
           </p>
           <a
-            href="https://myvortex365.com/leosp"
+            href="https://vortextrips.com/free"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 bg-[#16C79A] hover:bg-emerald-500 text-white font-black text-xl px-12 py-5 rounded-2xl transition-all shadow-xl mb-6"

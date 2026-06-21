@@ -82,7 +82,7 @@ export default async function ThankYouPage({ searchParams }: Props) {
 
           <div className="flex flex-col gap-3 justify-center max-w-sm mx-auto">
             <a
-              href="https://myvortex365.com/leosp"
+              href="https://vortextrips.com/free"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 bg-[#16C79A] text-white font-black px-6 py-4 rounded-xl hover:bg-emerald-500 transition-colors text-center text-lg"
