@@ -1,5 +1,32 @@
 # CLAUDE.md — Vortex_Trips Project Memory
 
+# ACTIVE SOURCE OF TRUTH
+
+The active VortexTrips project rules are:
+
+1. VORTEXTRIPS_PROJECT_INSTRUCTIONS_V1.md
+2. VORTEXTRIPS_MODE_RULEBOOK.md
+3. VORTEXTRIPS_CURRENT_SYSTEM_STATE.md
+4. VORTEXTRIPS_REVENUE_SCOREBOARD.md
+5. VORTEXTRIPS_LEAD_ENGINE.md
+
+Older project rules, MEMORY.md content, and handoff notes are background context only.
+If older instructions conflict with the active VortexTrips rules or current live repo state, follow the active rules and current repo state.
+
+Primary business objective:
+Generate 20 qualified organic leads per day and scale toward $100,000/month.
+
+Strict language rules:
+Never use MLM, downline, or network marketing.
+Use travel membership, affiliate program, and travel savings club.
+
+Core links:
+Free: https://vortextrips.com/free
+Booking: https://vortextrips.com/book
+Join: https://vortextrips.com/join
+
+---
+
 ## MASTER_PROJECT.md
 \# VORTEXTRIPS — CLAUDE PROJECT KNOWLEDGE BASE (PKB)
 

@@ -170,6 +170,23 @@ Monitor Vercel cron logs after 14:00 UTC 2026-06-02 for first automatic tick.
 ---
 # VortexTrips — Current Project State
 
+# VortexTrips Active Operating State
+
+Active goal:
+20 qualified organic leads per day and $100,000/month.
+
+Active source-of-truth files:
+- VORTEXTRIPS_PROJECT_INSTRUCTIONS_V1.md
+- VORTEXTRIPS_MODE_RULEBOOK.md
+- VORTEXTRIPS_CURRENT_SYSTEM_STATE.md
+- VORTEXTRIPS_REVENUE_SCOREBOARD.md
+- VORTEXTRIPS_LEAD_ENGINE.md
+
+Known reconciliation issue:
+Older documentation may prioritize Make.com/GHL first, while current repo work may involve Next.js/Supabase/Vercel/Resend/social autoposter. Current repo state must be verified before major execution.
+
+---
+
 **🚀 PROJECT STATUS: MAINTENANCE MODE** (with thirteen operator-driven patches in flight: Phase 14AD — Supabase Security Advisor compliance; Phase 14AE — Twilio A2P 10DLC compliance; Phase 14AF — Media Pipeline Audit & UI Polish; Phase 14AG — Video Pipeline Swap (HeyGen → Pexels Video); Phase 14AH — Pexels Duplicate Prevention; Phase 14AI — Manual Generation Route Fix; Phase 14AJ — Vercel Pro Scale Up: 3 autoposter ticks per day; Phase 14AK — TikTok OAuth Login Route; Phase 14AL — TikTok Connect Button on Settings; Phase 14AM — TikTok App Review Hardening; Phase 14AM.1 — TikTok Sandbox Credential Toggle; Phase 14AN — Wire Dashboard "Post to TikTok" Button; Phase 14AO — TikTok PULL_FROM_URL Verified-Domain Proxy). All planned phases (0 → 14AC) shipped; 14AD–14AO are external-trigger / operator-experience patches following the same `SAVE_PROTOCOL.md`.
 
 ---

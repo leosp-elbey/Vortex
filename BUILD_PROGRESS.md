@@ -21,6 +21,27 @@
 
 ---
 
+# Rule System Update
+
+Status:
+Installed active VortexTrips project rules and growth-mode files.
+
+Goal added:
+20 qualified organic leads per day and $100,000/month.
+
+Files added or updated:
+- VORTEXTRIPS_PROJECT_INSTRUCTIONS_V1.md
+- VORTEXTRIPS_MODE_RULEBOOK.md
+- VORTEXTRIPS_HANDOFF_ARCHIVE.md
+- VORTEXTRIPS_CURRENT_SYSTEM_STATE.md
+- VORTEXTRIPS_REVENUE_SCOREBOARD.md
+- VORTEXTRIPS_LEAD_ENGINE.md
+- CLAUDE.md
+- PROJECT_STATE_CURRENT.md
+- BUILD_PROGRESS.md
+
+---
+
 ## Current focus
 
 **Phase 14AO — TikTok PULL_FROM_URL Verified-Domain Proxy (in working tree, 2026-05-10 — Next.js Edge rewrite + URL helper + 3 call-site updates; no DB schema change; no platform calls).**
