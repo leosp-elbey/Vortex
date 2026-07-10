@@ -15,6 +15,7 @@ import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
 import { checkFormToken } from '@/lib/webhook-auth'
 import { bounded, WEBHOOK_BOUND_MS } from '@/lib/bounded-wait'
 import { isSuppressedContactStatus } from '@/lib/sequence-suppression'
+import { normalizeLeadChannel } from '@/lib/lead-qualification'
 
 const LOG_PREFIX = '[lead-created]'
 
@@ -82,6 +83,7 @@ export async function POST(request: NextRequest) {
           phone: phone || null,
           source,
           status,
+          lead_channel: normalizeLeadChannel({ source, utm_source }),
           lead_score: 20,
           custom_fields: {
             utm_source, utm_medium, utm_campaign,

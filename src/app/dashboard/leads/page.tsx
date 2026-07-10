@@ -6,6 +6,7 @@ import type { Contact, AIActionLog, ContactStatus } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { SlidePanel } from '@/components/ui/slide-panel'
 import { useToast, Toaster } from '@/components/ui/toast'
+import LeadMetricsCards from '@/components/dashboard/LeadMetricsCards'
 
 const STATUS_OPTIONS: ContactStatus[] = ['lead', 'qualified', 'quoted', 'member', 'churned']
 
@@ -162,6 +163,8 @@ export default function LeadsPage() {
           + Add Lead
         </button>
       </div>
+
+      <LeadMetricsCards />
 
       {/* Search + Filter */}
       <div className="flex gap-3 mb-4">

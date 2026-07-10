@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { hasSmsConsent } from '@/lib/sms-consent'
+import { maybeSetQualifiedAt, normalizeLeadChannel } from '@/lib/lead-qualification'
 
 // POST — manually add a lead from the dashboard
 export async function POST(request: NextRequest) {
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     phone: phone || null,
     source,
     status,
+    lead_channel: normalizeLeadChannel({ source }),
     lead_score: 20,
     custom_fields: {
       ...(destination ? { destination } : {}),
@@ -40,6 +42,11 @@ export async function POST(request: NextRequest) {
   if (error) {
     if (error.code === '23505') return NextResponse.json({ error: 'Email already exists' }, { status: 409 })
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  // Lead-engine: manual add with status='qualified' stamps qualified_at (Trigger A).
+  if (status === 'qualified') {
+    await maybeSetQualifiedAt(admin, contact.id, { trigger: 'status' })
   }
 
   // Always create an opportunity
@@ -116,5 +123,9 @@ export async function PATCH(request: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Lead-engine: status→qualified stamps qualified_at write-once (Trigger A).
+  if (updates.status === 'qualified' && data?.id) {
+    await maybeSetQualifiedAt(createAdminClient(), data.id, { trigger: 'status' })
+  }
   return NextResponse.json(data)
 }

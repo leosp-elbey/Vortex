@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, clientIpFrom } from '@/lib/rate-limit'
+import { maybeSetQualifiedAt } from '@/lib/lead-qualification'
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -286,6 +287,17 @@ export async function POST(request: NextRequest) {
       campaign_asset_id: resolution.campaign_asset_id,
       content_calendar_id: resolution.content_calendar_id,
     })
+
+    // Lead-engine: evaluate qualification (Triggers B + C) and stamp booked_at.
+    if (resolvedId) {
+      await maybeSetQualifiedAt(supabase, resolvedId, { trigger: 'score' })
+      await maybeSetQualifiedAt(supabase, resolvedId, { trigger: 'action', event })
+      if (event === 'book_link_click') {
+        await supabase.from('contacts')
+          .update({ booked_at: new Date().toISOString() })
+          .eq('id', resolvedId).is('booked_at', null)
+      }
+    }
 
     return NextResponse.json({
       ok: true,
