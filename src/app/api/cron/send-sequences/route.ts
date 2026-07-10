@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { sendSMS, SMS_TEMPLATES } from '@/lib/twilio'
 import { hasSmsConsent } from '@/lib/sms-consent'
 import { sendEmail } from '@/lib/resend'
-import { EMAIL_TEMPLATES, type EmailTemplateKey } from '@/lib/email-templates'
+import { EMAIL_TEMPLATES, type EmailTemplateKey, vortexInviteEmail } from '@/lib/email-templates'
 import { computeEmailHealth, renderHealthEmailHTML, type EmailHealthReport } from '@/lib/email-health'
 import { isSuppressedContactStatus } from '@/lib/sequence-suppression'
 
@@ -158,6 +158,81 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Phase 23E — Vortex invite dispatch.
+  //
+  // Reads up to 50 pending rows from vortex_invite_queue, sends the branded
+  // VortexTrips travel-savings invite email via Resend, and flips each row's
+  // status to 'sent' / 'failed' / 'skipped'. Runs sequentially with the same
+  // INTER_ITEM_DELAY_MS as the sequence_queue loop above so the combined
+  // burst stays under Resend's 5 req/s cap.
+  //
+  // Suppression: LEFT JOIN contacts via contact_id. If the joined contact is
+  // in SUPPRESSED_CONTACT_STATUSES (churned/unsubscribed/bounced/rejected),
+  // mark the queue row 'skipped' and continue. If contact_id is null or the
+  // joined row is missing, fall through and send using the queue's snapshot
+  // email/first_name (fail-open — mirrors isSuppressedContactStatus semantics).
+  //
+  // Never halts the outer response. Individual send failures are logged and
+  // marked 'failed' on the queue row; the loop continues.
+  let vortexInvitesSent = 0
+  let vortexInvitesFailed = 0
+  let vortexInvitesSkipped = 0
+
+  const { data: inviteRows, error: inviteFetchErr } = await supabase
+    .from('vortex_invite_queue')
+    .select('id, contact_id, first_name, email, contacts(status)')
+    .eq('status', 'pending')
+    .order('queued_at', { ascending: true })
+    .limit(50)
+
+  if (inviteFetchErr) {
+    console.error('[send-sequences] vortex invite queue fetch failed:', inviteFetchErr.message)
+  } else if (inviteRows && inviteRows.length > 0) {
+    for (const invite of inviteRows) {
+      await new Promise(resolve => setTimeout(resolve, INTER_ITEM_DELAY_MS))
+
+      // Type shape from the embedded select. supabase-js types the joined row
+      // as an array of one; runtime returns a single object OR null.
+      const joinedContact = (invite as unknown as { contacts?: { status?: string | null } | { status?: string | null }[] | null }).contacts
+      const contactStatus = Array.isArray(joinedContact)
+        ? (joinedContact[0]?.status ?? null)
+        : (joinedContact?.status ?? null)
+
+      if (contactStatus && isSuppressedContactStatus(contactStatus)) {
+        await supabase.from('vortex_invite_queue').update({ status: 'skipped', sent_at: now }).eq('id', invite.id)
+        vortexInvitesSkipped++
+        continue
+      }
+
+      if (!invite.email || !invite.first_name) {
+        // Queue row missing required fields — can't render / send.
+        await supabase.from('vortex_invite_queue').update({ status: 'skipped', sent_at: now }).eq('id', invite.id)
+        vortexInvitesSkipped++
+        continue
+      }
+
+      try {
+        const { subject, html } = vortexInviteEmail(invite.first_name)
+        await sendEmail({ to: invite.email, subject, html })
+        await supabase.from('vortex_invite_queue').update({ status: 'sent', sent_at: now }).eq('id', invite.id)
+        if (invite.contact_id) {
+          await supabase.from('ai_actions_log').insert({
+            contact_id: invite.contact_id,
+            action_type: 'onboarding-email',
+            service: 'resend',
+            status: 'success',
+            request_payload: { template_key: 'vortexInvite', sequence: 'vortex-invites' } as Record<string, unknown>,
+          })
+        }
+        vortexInvitesSent++
+      } catch (err) {
+        console.error(`[send-sequences] vortex invite send failed (queue ${invite.id}):`, err)
+        await supabase.from('vortex_invite_queue').update({ status: 'failed' }).eq('id', invite.id)
+        vortexInvitesFailed++
+      }
+    }
+  }
+
   const health = await runHealthCheck()
 
   return NextResponse.json({
@@ -166,6 +241,9 @@ export async function GET(request: NextRequest) {
     sent,
     failed,
     skipped,
+    vortex_invites_sent: vortexInvitesSent,
+    vortex_invites_failed: vortexInvitesFailed,
+    vortex_invites_skipped: vortexInvitesSkipped,
     health: health
       ? {
           verdict: health.verdict,

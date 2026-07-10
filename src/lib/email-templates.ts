@@ -602,3 +602,36 @@ export const EMAIL_TEMPLATES = {
 }
 
 export type EmailTemplateKey = keyof typeof EMAIL_TEMPLATES
+
+// ─── VORTEX INVITE (Phase 23E) ────────────────────────────────────────────────
+//
+// Standalone template — NOT part of EMAIL_TEMPLATES because it isn't routed
+// through sequence_queue.template_key. Consumed directly by the invite
+// dispatch block in src/app/api/cron/send-sequences/route.ts, which reads
+// pending rows from vortex_invite_queue and sends this email to each.
+//
+// Copy-safe per CLAUDE.md brand rules: no MLM / downline / network-marketing
+// references. Positioned exclusively as travel savings ("Travel More. Pay
+// Less."), CTA lands on the branded /free redirect.
+export function vortexInviteEmail(firstName: string): { subject: string; html: string } {
+  return {
+    subject: `Your free VortexTrips travel savings account is ready, ${firstName} 🌍`,
+    html: wrapper(`
+      <div style="background:#1A1A2E;color:#ffffff;padding:32px 24px;border-radius:12px;text-align:center;margin:0 0 24px">
+        <p style="margin:0 0 8px;font-size:14px;letter-spacing:2px;text-transform:uppercase;color:#FF6B35;font-weight:700">Travel More. Pay Less.</p>
+        <h1 style="margin:0;font-size:26px;font-weight:900;color:#ffffff;line-height:1.3">Your free travel savings account is ready</h1>
+      </div>
+      <p style="font-size:16px">Hey ${firstName},</p>
+      <p>Your free VortexTrips travel savings account is ready to activate.</p>
+      <p>Members book flights, hotels, cruises, and vacation packages at wholesale rates — the same rates the travel industry sees, but usually keeps to themselves. It's <strong>free forever</strong>, takes 30 seconds to activate, and there's no credit card required.</p>
+      ${ctaButton('Activate My Free Account →', 'https://vortextrips.com/free')}
+      <p style="font-size:14px;color:#666;margin-top:24px">Once activated, you'll get instant access to:</p>
+      <ul style="font-size:14px;color:#333;padding-left:20px;line-height:1.8">
+        <li>500,000+ hotels at wholesale rates</li>
+        <li>Flight, cruise, and vacation package deals members don't share publicly</li>
+        <li>Your own dashboard to plan and save on every trip</li>
+      </ul>
+      <p style="font-size:14px;color:#888;margin-top:28px">Talk soon,<br><strong style="color:#1A1A2E">— Leo, VortexTrips</strong></p>
+    `),
+  }
+}
